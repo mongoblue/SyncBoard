@@ -1,0 +1,61 @@
+services:
+  # 1. 数据库
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_DATABASE: flowspace
+      MYSQL_USER: Liujia
+      MYSQL_PASSWORD: 13579Mnb!
+      MYSQL_ROOT_PASSWORD: 13579Mnb!
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  # 2. Redis
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
+    command: redis-server --appendonly yes
+
+  # 3. 后端 (Django)
+  backend:
+    build: ./backend
+    restart: always
+    command: sh -c "python manage.py collectstatic --noinput && python manage.py migrate && daphne -b 0.0.0.0 -p 8000 backend.asgi:application"
+    volumes:
+      - ./backend:/app
+      - static_volume:/app/staticfiles
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    environment:
+      DB_HOST: db
+      REDIS_HOST: redis
+      DB_NAME: flowspace
+      DB_USER: Liujia
+      DB_PASSWORD: 13579Mnb!
+      DJANGO_SECRET_KEY: "prod-secret-key-change-me"
+      DEBUG: "False"
+
+  # 4. 前端 (Nginx + Vue)
+  frontend:
+    build: ./frontend
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - static_volume:/app/staticfiles
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  static_volume:
