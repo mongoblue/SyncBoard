@@ -18,3 +18,4 @@ yarn-error.log*
 
 # Docker (如果不希望版本控制日志)
 *.log
+redis_data/
