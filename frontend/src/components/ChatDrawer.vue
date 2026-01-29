@@ -1,22 +1,44 @@
 <template>
   <div class="chat-fab" @click="drawer = true">
-    <el-badge :value="unreadCount" :hidden="unreadCount === 0 || drawer" class="chat-badge">
+    <el-badge :value="totalUnread" :hidden="totalUnread === 0 || drawer" class="chat-badge">
       <el-icon :size="20" color="white"><ChatDotRound /></el-icon>
     </el-badge>
   </div>
 
   <el-drawer 
     v-model="drawer" 
-    title="项目讨论组" 
+    :title="currentChatProject ? currentChatProject.name : '消息列表'" 
     :size="350"
     direction="rtl"
   >
-    <div class="chat-container">
-      <div class="messages" ref="msgListRef">
-        <div v-if="!isConnected" class="status-tip">
-          🔴 正在连接聊天室...
+    <div v-if="!currentChatProject" class="chat-list-container">
+      <div v-if="projectList.length === 0" class="empty-tip">暂无参与的项目</div>
+      
+      <div 
+        v-for="proj in projectList" 
+        :key="proj.id" 
+        class="chat-list-item"
+        @click="enterChat(proj)"
+      >
+        <div class="proj-avatar">{{ proj.name.substring(0,2).toUpperCase() }}</div>
+        <div class="proj-info">
+          <div class="proj-name">{{ proj.name }}</div>
+          <div class="proj-preview">点击进入聊天...</div>
         </div>
+        <el-icon><ArrowRight /></el-icon>
+      </div>
+    </div>
 
+    <div v-else class="chat-container">
+      <div class="chat-header-bar">
+        <el-button link @click="leaveChat">
+           &lt; 返回列表
+        </el-button>
+        <span class="status-dot" :class="{ online: isConnected }"></span>
+      </div>
+
+      <div class="messages" ref="msgListRef">
+        <div v-if="!isConnected" class="status-tip">🔴 连接中...</div>
         <div 
           v-for="(msg, index) in messages" 
           :key="index" 
@@ -34,12 +56,12 @@
       <div class="input-area">
         <el-input 
           v-model="inputMsg" 
-          placeholder="说点什么..." 
+          placeholder="发送消息..." 
           @keyup.enter="sendMessage"
-          :disabled="!isConnected" 
+          :disabled="!isConnected"
         >
           <template #append>
-            <el-button @click="sendMessage" :disabled="!isConnected">发送</el-button>
+            <el-button @click="sendMessage">发送</el-button>
           </template>
         </el-input>
       </div>
@@ -48,11 +70,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue';
+import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/Auth';
 import { useBoardStore } from '@/stores/Board';
-import { ChatDotRound } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { ChatDotRound, ArrowRight } from '@element-plus/icons-vue';
+import service from '@/utils/request';
 
 const authStore = useAuthStore();
 const boardStore = useBoardStore();
@@ -60,103 +82,105 @@ const boardStore = useBoardStore();
 const drawer = ref(false);
 const inputMsg = ref('');
 const messages = ref<any[]>([]);
-const unreadCount = ref(0);
-const msgListRef = ref<HTMLElement | null>(null);
 const isConnected = ref(false);
+const msgListRef = ref<HTMLElement | null>(null);
+
+// 项目列表 (用于项目外显示)
+const projectList = ref<any[]>([]);
+// 当前正在聊天的项目 (如果为 null，显示列表)
+const currentChatProject = ref<any>(null);
 
 let socket: WebSocket | null = null;
-
 const currentUser = computed(() => authStore.user?.username || 'Unknown');
+const totalUnread = ref(0); // 简化处理，暂时只做总数
 
-const connectChat = () => {
-  const projectId = boardStore.currentProjectId;
-  if (!projectId) return;
+// 1. 获取用户参与的项目列表
+const fetchMyProjects = async () => {
+  try {
+    const res = await service.get('/api/projects/');
+    projectList.value = res.data || res;
+  } catch (e) {
+    console.error(e);
+  }
+};
 
-  if (socket && socket.readyState === WebSocket.OPEN) return;
-  if (socket) socket.close();
+// 2. 进入某个项目的聊天
+const enterChat = (project: any) => {
+  currentChatProject.value = project;
+  messages.value = []; // 先清空，等待 Socket 传回历史记录
+  connectChat(project.id);
+};
 
-  console.log(`🚀 连接聊天室: 项目 [${projectId}]`);
+// 3. 返回列表
+const leaveChat = () => {
+  if (socket) {
+    socket.close();
+    socket = null;
+  }
+  currentChatProject.value = null;
+  isConnected.value = false;
+};
 
-  // ✨ 核心修复：自动获取当前浏览器的域名 (localhost 或 IP)
-  // 这样 Cookie 才能发过去，后端才能认出你是谁
+// 4. 连接 Socket
+const connectChat = (projectId: string) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.hostname; 
-  // 假设后端固定在 8000 端口。如果你在生产环境用了 Nginx 转发，这里可能不需要 :8000
-  const port = '8000'; 
+  const hostname = window.location.hostname;
+  const port = '8000';
   
-  socket = new WebSocket(`${protocol}//${host}:${port}/ws/chat/${projectId}/`);
+  socket = new WebSocket(`${protocol}//${hostname}:${port}/ws/chat/${projectId}/`);
 
-  socket.onopen = () => {
-    console.log('✅ 聊天室连接成功');
-    isConnected.value = true;
-  };
-
-  // ✅ 修正 4: 正确解析后端返回的数据结构
+  socket.onopen = () => { isConnected.value = true; };
+  
   socket.onmessage = (event) => {
     try {
       const res = JSON.parse(event.data);
-      
-      // 后端发来的是历史记录列表 { type: 'history', data: [...] }
       if (res.type === 'history') {
-        messages.value = res.data; 
-      } 
-      // 后端发来的是单条新消息 { type: 'message', data: {...} }
-      else if (res.type === 'message') {
+        messages.value = res.data;
+      } else if (res.type === 'message') {
         messages.value.push(res.data);
-        if (!drawer.value) {
-          unreadCount.value++;
-        }
       }
-      
       scrollToBottom();
-    } catch (e) {
-      console.error("消息解析错误", e);
-    }
+    } catch(e) {}
   };
-  
-  socket.onclose = () => {
-    console.log('🔴 聊天室断开');
-    isConnected.value = false;
-  };
+
+  socket.onclose = () => { isConnected.value = false; };
 };
 
 const sendMessage = () => {
-  if (!inputMsg.value.trim()) return;
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    ElMessage.error('聊天室未连接');
-    return;
-  }
-
-  // ✅ 修正 5: 发送时保持字段名为 'message' (后端 receive 里取的是 message)
-  // 但发送时间由后端生成，前端不用传
-  socket.send(JSON.stringify({
-    message: inputMsg.value,
-    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: "2-digit", minute: "2-digit" }) 
+  if (!inputMsg.value.trim() || !socket) return;
+  socket.send(JSON.stringify({ 
+      message: inputMsg.value, 
+      // 这里的 time 只是发给后端参考，后端会重写时间
+      time: new Date().toLocaleTimeString() 
   }));
-  
-  inputMsg.value = ''; 
+  inputMsg.value = '';
 };
 
 const scrollToBottom = () => {
   nextTick(() => {
-    if (msgListRef.value) {
-      msgListRef.value.scrollTop = msgListRef.value.scrollHeight;
-    }
+    if (msgListRef.value) msgListRef.value.scrollTop = msgListRef.value.scrollHeight;
   });
 };
 
-watch(() => boardStore.currentProjectId, (newId) => {
+// ✨ 监听 BoardStore 的变化：如果用户进入了看板页面，自动进入对应聊天
+watch(() => boardStore.currentProjectId, async (newId) => {
   if (newId) {
-    messages.value = [];
-    connectChat();
+    // 确保有项目列表数据
+    if (projectList.value.length === 0) await fetchMyProjects();
+    
+    const target = projectList.value.find(p => p.id == newId || p.id == Number(newId));
+    if (target) {
+      enterChat(target);
+    }
+  } else {
+    // 退出看板时，不强制退出聊天，而是允许用户手动点“返回”
+    // 或者你可以选择这里自动 leaveChat()，看你喜好
+    // leaveChat(); 
   }
 });
 
-watch(drawer, (newVal) => {
-  if (newVal) {
-    unreadCount.value = 0;
-    scrollToBottom();
-  }
+onMounted(() => {
+  fetchMyProjects();
 });
 
 onUnmounted(() => {
@@ -165,33 +189,24 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.chat-fab {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  width: 50px;
-  height: 50px;
-  background: #409eff;
-  color: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-  z-index: 999;
-  transition: transform 0.2s;
-}
-.chat-fab:hover { transform: scale(1.1); }
+/* 样式部分 */
+.chat-fab { position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; background: #409eff; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.chat-list-container { padding: 10px; }
+.chat-list-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }
+.chat-list-item:hover { background: #f5f7fa; }
+.proj-avatar { width: 40px; height: 40px; background: #409eff; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+.proj-info { flex: 1; }
+.proj-name { font-size: 14px; font-weight: bold; color: #333; }
+.proj-preview { font-size: 12px; color: #999; }
 .chat-container { display: flex; flex-direction: column; height: 100%; }
-.messages { flex: 1; overflow-y: auto; padding: 10px; background: #f5f7fa; margin-bottom: 10px; border-radius: 4px;}
-.status-tip { text-align: center; font-size: 12px; color: #909399; margin-bottom: 10px;}
+.chat-header-bar { padding: 5px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
+.messages { flex: 1; overflow-y: auto; padding: 10px; background: #f5f7fa; }
 .message-item { margin-bottom: 15px; display: flex; flex-direction: column; align-items: flex-start; }
-.msg-user { font-size: 12px; color: #999; margin-left: 4px; margin-bottom: 2px;}
-.msg-bubble { background: white; padding: 8px 12px; border-radius: 8px; border-top-left-radius: 2px; box-shadow: 0 1px 2px rgba(0,0,0,0.1); max-width: 85%; word-break: break-all;}
-.msg-time { font-size: 10px; color: #ccc; margin-left: 5px; }
-
 .my-msg { align-items: flex-end; }
-.my-msg .msg-bubble { background: #95d475; border-radius: 8px; border-top-right-radius: 2px; }
-.my-msg .msg-user { display: none; }
+.msg-bubble { background: white; padding: 8px 12px; border-radius: 8px; max-width: 85%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }
+.my-msg .msg-bubble { background: #95d475; }
+.msg-user { font-size: 12px; color: #999; margin-bottom: 2px; }
+.msg-time { font-size: 10px; color: #ccc; margin-left: 5px; }
+.status-dot { width: 8px; height: 8px; background: red; border-radius: 50%; }
+.status-dot.online { background: #67c23a; }
 </style>

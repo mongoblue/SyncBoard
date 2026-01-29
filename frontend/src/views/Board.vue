@@ -86,9 +86,21 @@
                     </el-icon>
                 </div>
               </template>
-              <div class="card-content">
-                {{ element.content }}
-              </div>
+              <div class="tags-container" v-if="element.tags_details && element.tags_details.length">
+                  <el-tag
+                    v-for="tag in element.tags_details"
+                    :key="tag.id"
+                    size="small"
+                    :color="tag.color"
+                    effect="dark"
+                    style="margin-right: 4px; border: none;"
+                  >
+                    {{ tag.name }}
+                  </el-tag>
+                </div>
+                <div class="card-content">
+                  {{ element.content }}
+                </div>
               <div class="card-footer" v-if="element.assignee">
                 <div class="avatar-circle" :title="'User ID: ' + element.assignee">
                   {{ getUserName(element.assignee) }}
@@ -120,6 +132,23 @@
             />
           </el-select>
         </el-form-item>
+          <el-form-item label="标签">
+            <el-select 
+              v-model="editingTask.tags" 
+              multiple 
+              placeholder="选择标签" 
+              collapse-tags
+            >
+              <el-option
+                v-for="tag in boardStore.currentProject?.available_tags || []"
+                :key="tag.id"
+                :label="tag.name"
+                :value="tag.id"
+              >
+                <span :style="{ color: tag.color, fontWeight: 'bold' }">● {{ tag.name }}</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
         <el-form-item label="详细信息">
           <el-input
           v-model="editingTask.content"
@@ -173,6 +202,7 @@ const editingTask = ref({
   content: '',
   column: '',
   assignee: null as number | null,
+  tags: [] as number[],
 });
 
 onMounted(() => {
@@ -209,7 +239,8 @@ const handleInvite = async () => {
 };
 
 const openTaskDetail = (task: any) => {
-  editingTask.value = { ...task };
+  const tagIds = task.tags_details ? task.tags_details.map((t: any) => t.id) : [];
+  editingTask.value = { ...task, tags: tagIds };
   dialogVisible.value = true;
 };
 
@@ -227,6 +258,7 @@ const saveTaskDetail = async () => {
       title: editingTask.value.title,
       content: editingTask.value.content,
       assignee: editingTask.value.assignee,
+      tags: editingTask.value.tags
     });
     ElMessage.success("任务更新成功");
     dialogVisible.value = false;

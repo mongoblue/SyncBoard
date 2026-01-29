@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status, permissions
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
-from .models import Project, Column, Task
+from .models import Project, Column, Task,Tag
 from .serializers import ProjectSerializer, ColumnSerializer, TaskSerializer, UsersSerializer
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -243,6 +243,15 @@ class ProjectListView(APIView):
             Column.objects.create(project=project, title="To Do", position=1)
             Column.objects.create(project=project, title="In Progress", position=2)
             Column.objects.create(project=project, title="Done", position=3)
+
+            default_tags = [
+                {"name": "Bug", "color": "#f56c6c"},  # 红色
+                {"name": "Feature", "color": "#409eff"},  # 蓝色
+                {"name": "Urgent", "color": "#e6a23c"},  # 橙色
+                {"name": "Enhancement", "color": "#67c23a"}  # 绿色
+            ]
+            for tag in default_tags:
+                Tag.objects.create(project=project, name=tag['name'], color=tag['color'])
 
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

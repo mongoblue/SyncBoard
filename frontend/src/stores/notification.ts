@@ -13,9 +13,9 @@ export const useNotificationStore = defineStore('notification',()=>{
         if(socket.value?.readyState === WebSocket.OPEN)return;
         if(!authStore.user) return;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
+        const hostname = window.location.hostname;
         const port = 8000;
-        socket.value = new WebSocket(`${protocol}//${host}:${port}/ws://127.0.0.1:8000/ws/global/`)
+        socket.value = new WebSocket(`${protocol}//${hostname}:${port}/ws/global/`)
 
         socket.value.onopen = ()=>{
             console.log('服务已连接');

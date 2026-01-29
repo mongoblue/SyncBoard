@@ -5,12 +5,12 @@ class GlobalConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.user = self.scope['user']
 
-        if self.user.is_authenticated:
+        if not self.user.is_authenticated:
             await self.close()
             return
 
         await self.channel_layer.group_add(
-            'syetem_boardcast',
+            "system_broadcast",
             self.channel_name
         )
         await self.accept()

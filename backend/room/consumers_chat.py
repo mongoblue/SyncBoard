@@ -24,25 +24,29 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         # 2. 【关键】连接成功后，立刻读取历史记录发给用户
         # XRANGE: 读取流中的数据，min='-' (最早), max='+' (最新)
-        history = r.xrange(self.stream_key, min='-', max='+')
+        try:
+            history = r.xrange(self.stream_key, min='-', max='+')
+            history_data = []
+            for item in history:
+                msg_id, fields = item
+                history_data.append({
+                    'id': msg_id,
+                    'user': fields.get('user'),
+                    'content': fields.get('content'),
+                    'time': fields.get('time')
+                })
 
-        # 格式化历史记录
-        history_data = []
-        for item in history:
-            # item 结构: (timestamp_id, {field: value})
-            msg_id, fields = item
-            history_data.append({
-                'id': msg_id,
-                'user': fields.get('user'),
-                'content': fields.get('content'),
-                'time': fields.get('time')
-            })
-
-        # 发送历史记录给当前用户 (不用广播)
-        await self.send(text_data=json.dumps({
-            'type': 'history',
-            'data': history_data
-        }))
+            await self.send(text_data=json.dumps({
+                'type': 'history',
+                'data': history_data
+            }))
+        except Exception as e:
+            print(f"⚠️ Redis 连接失败或读取历史记录错误: {e}")
+            # 发送一个空的历史记录，保证前端不报错
+            await self.send(text_data=json.dumps({
+                'type': 'history',
+                'data': []
+            }))
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(

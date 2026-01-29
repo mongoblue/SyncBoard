@@ -16,6 +16,13 @@ class Project(models.Model):
         db_table = 'project'
         verbose_name_plural = 'Projects'
 
+class Tag(models.Model):
+    project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='tags')
+    name = models.CharField(max_length=20)
+    color = models.CharField(max_length=7) # 存颜色代码，如 #ff0000
+
+    def __str__(self):
+        return self.name
 
 class Column(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -37,7 +44,7 @@ class Task(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField(blank=True)
     position = models.FloatField(default=65535)
-    # assignee 可以为空，因为任务可能还没分给谁
+    tags = models.ManyToManyField(Tag, blank=True, related_name='tasks')
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='tasks')
 
     class Meta:

@@ -15,6 +15,7 @@ export interface TaskCard {
     content: string; // 对应后端的 content
     position: number;
     assignee? : number | null; // User ID 通常是自增 Int，如果是 UUID 则改为 string
+    tags: number[]; // 标签 ID 列表
 }
 
 export interface User{
