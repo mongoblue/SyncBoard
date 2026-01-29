@@ -48,15 +48,46 @@ jobs:
         # -T 意味着不分配 TTY (GitHub Actions 不需要交互界面)
         docker compose exec -T backend pytest tests/
 
-    # 4. (可选) 运行 E2E 测试
-    # 注意：在 CI 里跑 Playwright 需要比较多的资源，
-    # 且因为是用 Docker Compose 启动的，前端需要单独处理。
-    # 为了这次演示成功率，我们先只跑后端测试。
-    # 如果你想跑，后面我们再加。
+    - name: Create E2E User (创建测试账号)
+      run: |
+        docker compose exec -T backend python manage.py shell -c "
+        from django.contrib.auth.models import User
+        if not User.objects.filter(username='mongoblue').exists():
+            User.objects.create_user('mongoblue', 'test@example.com', 'password')
+            print('✅ E2E用户创建成功')
+        "
+
+    # 2. 在 GitHub 虚拟机上安装 Python (为了跑 Playwright 脚本)
+    - name: Set up Python for E2E
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    # 3. 安装 Playwright 及其依赖
+    - name: Install Playwright & Dependencies
+      run: |
+        pip install pytest-playwright
+        playwright install chromium
+        playwright install-deps
+
+    # 4. 等待前端启动 (防止前端还没 build 完，测试就开始跑了)
+    - name: Wait for Frontend
+      run: |
+        echo "Waiting for Frontend to be ready..."
+        # 循环检查 localhost:80 (假设你的前端跑在 80 端口)
+        # 如果你的 docker-compose 映射的是其他端口(比如 5173)，请修改这里的 80
+        timeout 60s bash -c 'until curl -s http://localhost:80 > /dev/null; do sleep 5; done'
+        echo "Frontend is up!"
 
     # -------------------------------------------
-    # 第三阶段：收尾
+    # 第 3 阶段：运行 E2E 测试
     # -------------------------------------------
+    - name: Run E2E Tests (端到端测试)
+      run: |
+        # 这里的 localhost 指向的是 GitHub 虚拟机的本地
+        # 因为 docker compose 做了端口映射，所以能访问到容器里的前端
+        pytest e2e/
+
     - name: Teardown (清理环境)
       if: always() # 无论测试成功失败，都执行
       run: docker compose down
