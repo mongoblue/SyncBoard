@@ -6,7 +6,7 @@ def test_login_success(page: Page):
     page.goto("http://localhost/login")
 
     # 检查标题 (保持现状)
-    expect(page).to_have_title(re.compile("Vite App"))
+    expect(page).to_have_title(re.compile("FlowSpace"))
 
     print("2. 输入账号密码...")
     # ✅ 修正：使用 grep 查出来的真实文案

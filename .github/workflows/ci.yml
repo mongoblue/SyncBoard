@@ -53,7 +53,7 @@ jobs:
         docker compose exec -T backend python manage.py shell -c "
         from django.contrib.auth.models import User
         if not User.objects.filter(username='mongoblue').exists():
-            User.objects.create_user('mongoblue', 'test@example.com', 'password')
+            User.objects.create_user('mongoblue', 'test@example.com', '13579mnb')
             print('✅ E2E用户创建成功')
         "
 
