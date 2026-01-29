@@ -1,6 +1,5 @@
 name: SyncBoard CI (自动化测试)
 
-# 1. 触发机制：只有推送到 main 分支时才触发
 on:
   push:
     branches: [ "main", "dev" ]
@@ -9,51 +8,39 @@ on:
 
 jobs:
   test:
-    # 使用 GitHub 提供的最新 Ubuntu 虚拟机
     runs-on: ubuntu-latest
 
     steps:
     # -------------------------------------------
     # 第一阶段：环境准备
     # -------------------------------------------
-    # 1. 把代码拉取下来
     - name: Checkout Code (拉取代码)
       uses: actions/checkout@v4
 
-    # 2. 启动 Docker 环境
-    # 我们直接利用你现有的 docker-compose.yml
-    - name: Start Docker Services (启动服务)
+    - name: Start Docker Services (启动所有服务)
       run: |
-        # 构建并启动后端和数据库
         docker compose up -d --build
-
-        # 等待数据库完全启动 (稍微睡 15 秒，防止 MySQL 还没好就跑测试)
         echo "Waiting for MySQL to be ready..."
         sleep 15
-        # 检查一下容器是不是都活着
         docker compose ps
+
     - name: Fix DB Permissions (修复数据库权限)
       run: |
-        # 注意：这里的 -proot 假设你的 root 密码是 root
-        # 如果你的 docker-compose.yml 里写的密码不是 root，请把下面的 root 改成你的密码
         docker compose exec -T db mysql -u root -p'13579Mnb!' -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
+
     # -------------------------------------------
     # 第二阶段：运行测试
     # -------------------------------------------
-    # 3. 运行 Pytest (API 测试)
     - name: Run API Tests (后端单元测试)
       run: |
-        # 这一步和你本地手动输的命令一模一样
-        # -T 意味着不分配 TTY (GitHub Actions 不需要交互界面)
         docker compose exec -T backend pytest tests/
 
     - name: Prepare E2E Data (准备测试数据)
       run: |
         docker compose exec -T backend python manage.py shell -c "
         from django.contrib.auth.models import User
-        # ✅ 修正1：App 名字改成 'room'
         from room.models import Project, Column
-
+        
         # 1. 创建/获取用户
         if not User.objects.filter(username='mongoblue').exists():
             user = User.objects.create_user('mongoblue', 'test@example.com', '13579mnb')
@@ -62,45 +49,44 @@ jobs:
             user = User.objects.get(username='mongoblue')
 
         # 2. 创建一个测试项目
-        project = Project.objects.create(name='CI Automantion Project', owner=user)
-        print(f'✅ 项目 {project.name} 创建成功')
+        if not Project.objects.filter(name='CI Automantion Project').exists():
+            project = Project.objects.create(name='CI Automantion Project', owner=user)
+            print(f'✅ 项目 {project.name} 创建成功')
+        else:
+            project = Project.objects.filter(name='CI Automantion Project').first()
 
         # 3. 确保有 'To Do' 列
-        # ✅ 修正2：把 'order' 改成 'position'
         Column.objects.get_or_create(project=project, title='To Do', defaults={'position': 1})
         print('✅ To Do 列准备就绪')
-     "
-    # 2. 在 GitHub 虚拟机上安装 Python (为了跑 Playwright 脚本)
+        "
+
+    # -------------------------------------------
+    # 第三阶段：前端环境 & E2E
+    # -------------------------------------------
     - name: Set up Python for E2E
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
 
-    # 3. 安装 Playwright 及其依赖
     - name: Install Playwright & Dependencies
       run: |
         pip install pytest-playwright
         playwright install chromium
         playwright install-deps
 
-    # 4. 等待前端启动 (防止前端还没 build 完，测试就开始跑了)
     - name: Wait for Frontend
       run: |
         echo "Waiting for Frontend to be ready..."
-        # 循环检查 localhost:80 (假设你的前端跑在 80 端口)
-        # 如果你的 docker-compose 映射的是其他端口(比如 5173)，请修改这里的 80
         timeout 60s bash -c 'until curl -s http://localhost:80 > /dev/null; do sleep 5; done'
         echo "Frontend is up!"
 
-    # -------------------------------------------
-    # 第 3 阶段：运行 E2E 测试
-    # -------------------------------------------
     - name: Run E2E Tests (端到端测试)
       run: |
-        # 这里的 localhost 指向的是 GitHub 虚拟机的本地
-        # 因为 docker compose 做了端口映射，所以能访问到容器里的前端
         pytest e2e/
 
+    # -------------------------------------------
+    # 第四阶段：收尾
+    # -------------------------------------------
     - name: Teardown (清理环境)
-      if: always() # 无论测试成功失败，都执行
+      if: always()
       run: docker compose down
