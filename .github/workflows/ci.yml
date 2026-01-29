@@ -25,12 +25,11 @@ jobs:
     - name: Start Docker Services (启动服务)
       run: |
         # 构建并启动后端和数据库
-        docker compose up -d --build 
-        
+        docker compose up -d --build
+
         # 等待数据库完全启动 (稍微睡 15 秒，防止 MySQL 还没好就跑测试)
         echo "Waiting for MySQL to be ready..."
         sleep 15
-        
         # 检查一下容器是不是都活着
         docker compose ps
     - name: Fix DB Permissions (修复数据库权限)
@@ -44,7 +43,7 @@ jobs:
     # 3. 运行 Pytest (API 测试)
     - name: Run API Tests (后端单元测试)
       run: |
- 这一步和你本地手动输的命令一模一样
+        # 这一步和你本地手动输的命令一模一样
         # -T 意味着不分配 TTY (GitHub Actions 不需要交互界面)
         docker compose exec -T backend pytest tests/
 
@@ -53,7 +52,7 @@ jobs:
         docker compose exec -T backend python manage.py shell -c "
         from django.contrib.auth.models import User
         # ✅ 修正1：App 名字改成 'room'
-        from room.models import Project, Column 
+        from room.models import Project, Column
 
         # 1. 创建/获取用户
         if not User.objects.filter(username='mongoblue').exists():
