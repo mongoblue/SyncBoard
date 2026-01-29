@@ -37,28 +37,7 @@ jobs:
 
     - name: Prepare E2E Data (准备测试数据)
       run: |
-        docker compose exec -T backend python manage.py shell -c "
-        from django.contrib.auth.models import User
-        from room.models import Project, Column
-        
-        # 1. 创建/获取用户
-        if not User.objects.filter(username='mongoblue').exists():
-            user = User.objects.create_user('mongoblue', 'test@example.com', '13579mnb')
-            print('✅ 用户创建成功')
-        else:
-            user = User.objects.get(username='mongoblue')
-
-        # 2. 创建一个测试项目
-        if not Project.objects.filter(name='CI Automantion Project').exists():
-            project = Project.objects.create(name='CI Automantion Project', owner=user)
-            print(f'✅ 项目 {project.name} 创建成功')
-        else:
-            project = Project.objects.filter(name='CI Automantion Project').first()
-
-        # 3. 确保有 'To Do' 列
-        Column.objects.get_or_create(project=project, title='To Do', defaults={'position': 1})
-        print('✅ To Do 列准备就绪')
-        "
+        docker compose exec -T backend python manage.py seed_ci_data
 
     # -------------------------------------------
     # 第三阶段：前端环境 & E2E
