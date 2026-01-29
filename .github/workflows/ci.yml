@@ -69,7 +69,7 @@ jobs:
         # ✅ 修正2：把 'order' 改成 'position'
         Column.objects.get_or_create(project=project, title='To Do', defaults={'position': 1})
         print('✅ To Do 列准备就绪')
-
+     "
     # 2. 在 GitHub 虚拟机上安装 Python (为了跑 Playwright 脚本)
     - name: Set up Python for E2E
       uses: actions/setup-python@v4
