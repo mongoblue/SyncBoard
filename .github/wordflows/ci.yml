@@ -1,0 +1,58 @@
+name: SyncBoard CI (自动化测试)
+
+# 1. 触发机制：只有推送到 main 分支时才触发
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test:
+    # 使用 GitHub 提供的最新 Ubuntu 虚拟机
+    runs-on: ubuntu-latest
+
+    steps:
+    # -------------------------------------------
+    # 第一阶段：环境准备
+    # -------------------------------------------
+    # 1. 把代码拉取下来
+    - name: Checkout Code (拉取代码)
+      uses: actions/checkout@v4
+
+    # 2. 启动 Docker 环境
+    # 我们直接利用你现有的 docker-compose.yml
+    - name: Start Docker Services (启动服务)
+      run: |
+        # 构建并启动后端和数据库
+        docker compose up -d --build backend db redis
+        
+        # 等待数据库完全启动 (稍微睡 15 秒，防止 MySQL 还没好就跑测试)
+        echo "Waiting for MySQL to be ready..."
+        sleep 15
+        
+        # 检查一下容器是不是都活着
+        docker compose ps
+
+    # -------------------------------------------
+    # 第二阶段：运行测试
+    # -------------------------------------------
+    # 3. 运行 Pytest (API 测试)
+    - name: Run API Tests (后端单元测试)
+      run: |
+        # 这一步和你本地手动输的命令一模一样
+        # -T 意味着不分配 TTY (GitHub Actions 不需要交互界面)
+        docker compose exec -T backend pytest tests/
+
+    # 4. (可选) 运行 E2E 测试
+    # 注意：在 CI 里跑 Playwright 需要比较多的资源，
+    # 且因为是用 Docker Compose 启动的，前端需要单独处理。
+    # 为了这次演示成功率，我们先只跑后端测试。
+    # 如果你想跑，后面我们再加。
+
+    # -------------------------------------------
+    # 第三阶段：收尾
+    # -------------------------------------------
+    - name: Teardown (清理环境)
+      if: always() # 无论测试成功失败，都执行
+      run: docker compose down
