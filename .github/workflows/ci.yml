@@ -48,13 +48,29 @@ jobs:
         # -T 意味着不分配 TTY (GitHub Actions 不需要交互界面)
         docker compose exec -T backend pytest tests/
 
-    - name: Create E2E User (创建测试账号)
+    - name: Prepare E2E Data (准备测试数据)
       run: |
         docker compose exec -T backend python manage.py shell -c "
         from django.contrib.auth.models import User
+        from projects.models import Project, Column # 假设你的 App 叫 projects
+
+        # 1. 创建/获取用户
         if not User.objects.filter(username='mongoblue').exists():
-            User.objects.create_user('mongoblue', 'test@example.com', '13579mnb')
-            print('✅ E2E用户创建成功')
+            user = User.objects.create_user('mongoblue', 'test@example.com', '13579mnb')
+            print('✅ 用户创建成功')
+        else:
+            user = User.objects.get(username='mongoblue')
+
+        # 2. 创建一个测试项目
+        # 只有有了项目，机器人登录后才能看到卡片
+        project = Project.objects.create(name='CI Automantion Project', owner=user)
+        print(f'✅ 项目 {project.name} 创建成功')
+
+        # 3. 确保有 'To Do' 列
+        # 测试脚本稍后会寻找 'To Do' 列来点击加号
+        # 使用 get_or_create 防止你的后端 Signal 已经自动创建了而导致重复
+        Column.objects.get_or_create(project=project, title='To Do', defaults={'order': 1})
+        print('✅ To Do 列准备就绪')
         "
 
     # 2. 在 GitHub 虚拟机上安装 Python (为了跑 Playwright 脚本)
