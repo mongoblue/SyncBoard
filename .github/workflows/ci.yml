@@ -25,7 +25,7 @@ jobs:
     - name: Start Docker Services (启动服务)
       run: |
         # 构建并启动后端和数据库
-        docker compose up -d --build backend db redis
+        docker compose up -d --build 
         
         # 等待数据库完全启动 (稍微睡 15 秒，防止 MySQL 还没好就跑测试)
         echo "Waiting for MySQL to be ready..."
