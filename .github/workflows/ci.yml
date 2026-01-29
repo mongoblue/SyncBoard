@@ -37,7 +37,7 @@ jobs:
       run: |
         # 注意：这里的 -proot 假设你的 root 密码是 root
         # 如果你的 docker-compose.yml 里写的密码不是 root，请把下面的 root 改成你的密码
-        docker compose exec -T db mysql -u 13579Mnb! -proot -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
+        docker compose exec -T db mysql -u root -p'13579Mnb!' -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
     # -------------------------------------------
     # 第二阶段：运行测试
     # -------------------------------------------
