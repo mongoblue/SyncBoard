@@ -52,7 +52,7 @@ jobs:
       run: |
         docker compose exec -T backend python manage.py shell -c "
         from django.contrib.auth.models import User
-        from projects.models import Project, Column # 假设你的 App 叫 projects
+        from room.models import Project, Column # 假设你的 App 叫 projects
 
         # 1. 创建/获取用户
         if not User.objects.filter(username='mongoblue').exists():
