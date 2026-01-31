@@ -229,6 +229,7 @@ jobs:
           # 2.2 建库 & 迁移
           docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS flowspace;"
           pip install -r requirements.txt
+          pip install zope.event gevent
           python manage.py migrate
           python manage.py seed_ci_data
           
