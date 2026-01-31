@@ -92,6 +92,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Create .env file for Docker
+        run: |
+          echo "DB_ENGINE=django.db.backends.mysql" >> .env
+          echo "DB_NAME=flowspace" >> .env
+          echo "DB_USER=root" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_HOST=db" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DEBUG=True" >> .env
+          # 确保 Django 允许 CI 的 host 访问
+          echo "ALLOWED_HOSTS=*" >> .env
+
       # 1. 启动全栈环境 (Docker Compose)
       # 这会启动：Backend(8000), Frontend/Nginx(80), MySQL(3306)
       - name: Start Full Stack Environment
