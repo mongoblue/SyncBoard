@@ -150,6 +150,10 @@ jobs:
           
           # 3. 插入测试数据
           python manage.py seed_ci_data
+          python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save(); print('✅ 密码已强制重置为 13579mnb')"
+          
+          # 5. 【调试手段】打印一下用户，确保存进去了
+          python manage.py shell -c "from django.contrib.auth import get_user_model; print('当前数据库用户:', get_user_model().objects.values_list('username', flat=True))"
 
       # 5. 安装 Playwright 浏览器
       - name: Install Playwright Browsers
