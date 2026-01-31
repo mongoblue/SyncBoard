@@ -108,6 +108,14 @@ jobs:
           timeout 60s bash -c 'until curl -s http://localhost > /dev/null; do sleep 5; done'
           echo "✅ Frontend is up and running!"
 
+      - name: Fix Docker Permissions
+        run: |
+          echo "Fixing permissions for Docker mounted volumes..."
+          sudo chown -R $USER:$USER .
+          # 确保 redis_data 和 mysql_data 对当前用户可读可写
+          sudo chmod -R 777 redis_data || true
+          sudo chmod -R 777 mysql_data || true
+
       # 3. 准备 Python 环境 (用于运行测试脚本)
       - name: Set up Python
         uses: actions/setup-python@v5
