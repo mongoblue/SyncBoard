@@ -199,6 +199,60 @@ jobs:
           docker compose logs backend
           docker compose logs frontend
 
+  load-test:
+    needs: e2e-test  # 等 E2E 跑完再跑这个
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 启动全栈环境 (复用之前的配置)
+      - name: Start Full Stack Environment
+        run: |
+          docker compose up -d --build
+          echo "Waiting for services..."
+          sleep 15
+
+      # 2. 准备测试数据 (Locust 需要登录，所以必须造号)
+      - name: Prepare Load Test Data
+        working-directory: ./backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: flowspace # ✅ 必须和 E2E 保持一致
+        run: |
+          # 2.1 修复权限 (防止 Python 安装报错)
+          sudo chown -R $USER:$USER .
+          sudo chmod -R 777 ../mysql_data || true
+          
+          # 2.2 建库 & 迁移
+          docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS flowspace;"
+          pip install -r requirements.txt
+          python manage.py migrate
+          python manage.py seed_ci_data
+          
+          # 2.3 强制重置密码 (确保 Locust 能登进去)
+          python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save()"
+
+      # 3. 安装 Locust
+      - name: Install Locust
+        run: pip install locust
+
+      # 4. 运行无头模式 (Headless) 压测
+      - name: Run Locust Smoke Test
+        run: |
+          # 参数策略：
+          # -u 50 : 50个并发用户 (对 CI 环境比较友好)
+          # -r 5  : 每秒启动5个
+          # -t 30s: 只跑30秒，速战速决
+          # --headless: 无界面模式
+          locust -f backend/locustfile.py \
+            --headless \
+            -u 50 -r 5 \
+            --run-time 30s \
+            --host http://localhost:8000
+
       # 11. 清理
       - name: Teardown & Clean Up
         if: always()
