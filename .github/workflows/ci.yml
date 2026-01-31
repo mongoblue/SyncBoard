@@ -229,13 +229,10 @@ jobs:
           # 2.2 建库 & 迁移
           docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS flowspace;"
           pip install -r requirements.txt
-          pip install zope.event gevent
           python manage.py migrate
           python manage.py seed_ci_data
           
-          # 2.3 强制重置密码 (确保 Locust 能登进去)
           python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save()"
-
 
       # 4. 运行无头模式 (Headless) 压测
       - name: Run Locust Smoke Test
