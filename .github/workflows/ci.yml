@@ -153,12 +153,17 @@ jobs:
         run: |
           pytest e2e/
 
-      - name: Teardown & Fix Permissions
+      - name: Teardown & Clean Up
         if: always()
         run: |
-          # 1. 停止容器
-          docker compose down
+          # 1. 停止容器，并删除 Docker 卷
+          docker compose down -v
           
-          # 2. 【关键】使用 sudo 夺回文件控制权
-          # 将当前目录下所有文件的所有者改回给当前用户 ($USER)
-          sudo chown -R $USER:$USER .
+          # 2. 【核武器】直接删除 Docker 生成的 root 权限文件夹
+          # 不要试图修改权限了，直接删掉最稳妥
+          echo "Removing docker data directories..."
+          sudo rm -rf redis_data
+          sudo rm -rf mysql_data
+          
+          # 3. 为防万一，把当前目录下的其他残留文件归还给 Runner 用户
+          sudo chown -R $(id -u):$(id -g)
