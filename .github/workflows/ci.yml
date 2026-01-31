@@ -92,7 +92,7 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard_test
         run: |
-          pytest tests/
+          pytest backend/tests/
 
       # 【重点 5】 准备数据
       # 同样的，直接用 python 跑，而不是 docker exec
