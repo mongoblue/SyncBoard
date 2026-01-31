@@ -90,6 +90,7 @@ jobs:
           pip install -r backend/requirements.txt
           # 如果你有 mysqlclient 依赖，Ubuntu 可能需要这行，通常默认都有
           # sudo apt-get install -y libmysqlclient-dev
+          pip install pytest-playwright
       - name: Apply Migrations
         working-directory: ./backend
         env:
