@@ -159,6 +159,23 @@ jobs:
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
 
+      - name: 🕵️ Debug Login (CSI Investigation)
+        run: |
+          echo "1. 检查数据库里的用户状态..."
+          # 打印用户名、是否激活、密码哈希的前几位
+          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u=U.objects.get(username='mongoblue'); print(f'User: {u.username}, Active: {u.is_active}, Hash: {u.password[:20]}...')"
+          
+          echo "----------------------------------------"
+          
+          echo "2. 尝试用 CURL 直接登录 (模拟 Postman)..."
+          # 直接向后端发请求，看看能不能拿到 200 OK
+          # 注意：这里假设你的后端返回 JSON。如果是 Session 登录，重点看状态码。
+          curl -v -X POST http://localhost:8000/api/auth/login/ \
+            -H "Content-Type: application/json" \
+            -d '{"username": "mongoblue", "password": "13579mnb"}'
+          
+          echo "----------------------------------------"
+
       # 6. 执行 E2E 测试
       - name: Run E2E Tests
         working-directory: ./
