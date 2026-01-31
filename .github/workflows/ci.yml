@@ -86,12 +86,12 @@ jobs:
   # 理由：Playwright 需要访问 http://localhost 前端页面，必须启动 Nginx/前端容器
   # ===================================================
   e2e-test:
-    needs: lint  # 可以和 api-test 并行跑，互不干扰
+    needs: lint
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
+      # 1. 创建 .env 文件 (配置信息)
       - name: Create .env file for Docker
         run: |
           echo "DB_ENGINE=django.db.backends.mysql" >> .env
@@ -101,11 +101,21 @@ jobs:
           echo "DB_HOST=db" >> .env
           echo "DB_PORT=3306" >> .env
           echo "DEBUG=True" >> .env
-          # 确保 Django 允许 CI 的 host 访问
           echo "ALLOWED_HOSTS=*" >> .env
 
-      # 1. 启动全栈环境 (Docker Compose)
-      # 这会启动：Backend(8000), Frontend/Nginx(80), MySQL(3306)
+      # 👇👇👇【新增】创建 Override 文件，强制容器读取 .env 👇👇👇
+      # 这能保证 backend 容器绝对使用我们上面生成的配置，彻底解决“脑裂”
+      - name: Create Docker Compose Override
+        run: |
+          cat <<EOF > docker-compose.override.yml
+          services:
+            backend:
+              env_file:
+                - .env
+          EOF
+
+      # 2. 启动全栈环境
+      # docker compose 会自动读取 docker-compose.override.yml 并应用配置
       - name: Start Full Stack Environment
         run: |
           docker compose up -d --build
@@ -113,22 +123,20 @@ jobs:
           sleep 15
           docker compose ps
 
-      # 2. 等待前端页面就绪 (关键步骤！)
-      # 确保 Nginx 已经把前端页面跑起来了，避免 Connection Refused
+      # 3. 等待前端就绪
       - name: Check Frontend Availability
         run: |
           timeout 60s bash -c 'until curl -s http://localhost > /dev/null; do sleep 5; done'
           echo "✅ Frontend is up and running!"
 
+      # 4. 修复权限
       - name: Fix Docker Permissions
         run: |
-          echo "Fixing permissions for Docker mounted volumes..."
           sudo chown -R $USER:$USER .
-          # 确保 redis_data 和 mysql_data 对当前用户可读可写
           sudo chmod -R 777 redis_data || true
           sudo chmod -R 777 mysql_data || true
 
-      # 3. 准备 Python 环境 (用于运行测试脚本)
+      # 5. 准备 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -141,8 +149,7 @@ jobs:
           pip install -r requirements.txt
           pip install pytest-playwright
 
-      # 4. 准备 E2E 数据
-      # 注意：这里连接的是 Docker Compose 里的 MySQL
+      # 6. 准备数据 (Runner 视角)
       - name: Prepare E2E Data
         working-directory: ./backend
         env:
@@ -152,69 +159,49 @@ jobs:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard
         run: |
-          # 1. 【新增】手动创建数据库
-          # 使用 docker compose exec 让 db 容器执行创建命令
-          # -T 是为了防止 CI 环境报错说“没有终端”
+          # 1. 手动建库
           docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS syncboard;"
-          
-          # 2. 迁移数据库 (现在库存在了，这步就能过了)
+          # 2. 迁移
           python manage.py migrate
-          
-          # 3. 插入测试数据
+          # 3. 造数据 & 强制改密码
           python manage.py seed_ci_data
           python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save(); print('✅ 密码已强制重置为 13579mnb')"
-          
-          # 5. 【调试手段】打印一下用户，确保存进去了
-          python manage.py shell -c "from django.contrib.auth import get_user_model; print('当前数据库用户:', get_user_model().objects.values_list('username', flat=True))"
 
-      # 5. 安装 Playwright 浏览器
+      # 7. 安装浏览器
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
 
+      # 8. 调试登录 (Container 视角)
+      # 这次有了 Override 文件，Container 肯定能连上 syncboard 了！
       - name: 🕵️ Debug Login (CSI Investigation)
         run: |
           echo "1. 检查数据库里的用户状态..."
-          # 打印用户名、是否激活、密码哈希的前几位
           docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u=U.objects.get(username='mongoblue'); print(f'User: {u.username}, Active: {u.is_active}, Hash: {u.password[:20]}...')"
           
           echo "----------------------------------------"
-          
-          echo "2. 尝试用 CURL 直接登录 (模拟 Postman)..."
-          # 直接向后端发请求，看看能不能拿到 200 OK
-          # 注意：这里假设你的后端返回 JSON。如果是 Session 登录，重点看状态码。
+          echo "2. 尝试用 CURL 直接登录..."
           curl -v -X POST http://localhost:8000/api/auth/login/ \
             -H "Content-Type: application/json" \
             -d '{"username": "mongoblue", "password": "13579mnb"}'
-          
-          echo "----------------------------------------"
 
-      # 6. 执行 E2E 测试
+      # 9. 运行测试
       - name: Run E2E Tests
         working-directory: ./
         env:
-          # Playwright 访问 Docker 启动的前端
           BASE_URL: http://localhost
           API_URL: http://localhost:8000
-        run: |
-          pytest e2e/
+        run: pytest e2e/
 
+      # 10. 失败时打印日志
       - name: Debug Failure (Print Logs)
-        if: failure()  # 只有上面的测试挂了才运行这一步
+        if: failure()
         run: |
-          echo "==== Backend Logs ===="
           docker compose logs backend
-          echo "======================"
-          echo "==== Frontend/Nginx Logs ===="
           docker compose logs frontend
 
+      # 11. 清理
       - name: Teardown & Clean Up
         if: always()
         run: |
-          # 1. 停止容器，并删除 Docker 卷
           docker compose down -v
-          
-          # 2. 【核武器】直接删除 Docker 生成的 root 权限文件夹
-          # 不要试图修改权限了，直接删掉最稳妥
-          echo "Removing docker data directories..."
-          sudo rm -rf redis_data
-          sudo rm -rf mysql_data
+          sudo rm -rf redis_data mysql_data
