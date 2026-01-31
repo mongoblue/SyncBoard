@@ -39,31 +39,67 @@ jobs:
   # 任务 2：业务测试 (Test)
   # 只有当 lint 任务成功后，这里才会开始
   # -------------------------------------------
+  # -------------------------------------------
+  # 任务 2：业务测试 (Test) - 企业级 Service 版
+  # -------------------------------------------
   test:
-    needs: lint  # <--- 关键！这建立了依赖关系
+    needs: lint
     runs-on: ubuntu-latest
+    # 【重点 1】 定义服务容器
+    # GitHub 会自动拉取镜像并在后台启动，相当于帮你 docker run
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          MYSQL_DATABASE: syncboard_test
+        ports:
+          - 3306:3306
+        # 【重点 2】 健康检查 (Health Check)
+        # 这就是替代 sleep 15 的黑科技
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Start Docker Services
-        run: |
-          docker compose up -d --build
-          echo "Waiting for MySQL to be ready..."
-          sleep 15
-          docker compose ps
+      # 【重点 3】 不再 build 镜像，直接在宿主机装 Python
+      # 配合 cache，以后每次运行只需要几秒钟
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip' # 开启缓存
 
-      - name: Fix DB Permissions
-        env:
-          THE_DB_PWD: ${{ secrets.DB_PASSWORD }}
+      - name: Install Dependencies
         run: |
-          docker compose exec -T db mysql -u root -p"$THE_DB_PWD" -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
+          pip install -r requirements.txt
+          # 如果你有 mysqlclient 依赖，Ubuntu 可能需要这行，通常默认都有
+          # sudo apt-get install -y libmysqlclient-dev
 
+      # 【重点 4】 跑测试
+      # 注意：这里我们通过环境变量告诉 Django 数据库在哪里
       - name: Run API Tests
+        env:
+          # 覆盖 settings.py 里的配置
+          # 必须确保你的 Django settings.py 能读取环境变量 (见下文解释)
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: syncboard_test
         run: |
-          docker compose exec -T backend pytest tests/
+          pytest tests/
 
+      # 【重点 5】 准备数据
+      # 同样的，直接用 python 跑，而不是 docker exec
       - name: Prepare E2E Data
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: syncboard_test
         run: |
-          docker compose exec -T backend python manage.py seed_ci_data
+          python manage.py seed_ci_data
