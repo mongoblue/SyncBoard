@@ -26,7 +26,7 @@ jobs:
 
     - name: Fix DB Permissions (修复数据库权限)
       env:
-         THE_DB_PWD:${{secrets.DB_PASSWORD}}
+        THE_DB_PWD: ${{secrets.DB_PASSWORD}}
       run: |
         docker compose exec -T db mysql -u root -p"$THE_DB_PWD" -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
 
