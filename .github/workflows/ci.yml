@@ -1,4 +1,4 @@
-name: SyncBoard Enterprise CI
+name: SyncBoard Enterprise CI (Hybrid Strategy)
 
 on:
   push:
@@ -7,46 +7,33 @@ on:
     branches: [ "main", "dev" ]
 
 jobs:
-  # -------------------------------------------
+  # ===================================================
   # 任务 1：代码体检 (Lint)
-  # 目标：最快速度发现低级错误
-  # -------------------------------------------
+  # 目标：秒级反馈，最快发现语法错误
+  # ===================================================
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip' # 自动利用缓存，下次跑更快
-
-      - name: Install Linter
-        run: pip install flake8
-
-      - name: Run Linting
-        # 运行 flake8 检查。
-        # --count: 统计错误数
-        # --max-line-length=127: 允许一行最长127个字符
-        # --statistics: 显示统计信息
-        run: |
+          cache: 'pip'
+      - run: pip install flake8
+      - run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-  # -------------------------------------------
-  # 任务 2：业务测试 (Test)
-  # 只有当 lint 任务成功后，这里才会开始
-  # -------------------------------------------
-  # -------------------------------------------
-  # 任务 2：业务测试 (Test) - 企业级 Service 版
-  # -------------------------------------------
-  test:
+  # ===================================================
+  # 任务 2：后端单元测试 (API Unit Test)
+  # 策略：【速度优先】使用 Service 容器 (企业级标准写法)
+  # 理由：API 测试不需要前端界面，用 Service 启动 DB 最快，无需构建镜像
+  # ===================================================
+  api-test:
     needs: lint
     runs-on: ubuntu-latest
-    # 【重点 1】 定义服务容器
-    # GitHub 会自动拉取镜像并在后台启动，相当于帮你 docker run
+    
+    # 定义轻量级服务 (只启动 DB 和 Redis)
     services:
       mysql:
         image: mysql:8.0
@@ -55,68 +42,87 @@ jobs:
           MYSQL_DATABASE: syncboard_test
         ports:
           - 3306:3306
-        # 【重点 2】 健康检查 (Health Check)
-        # 这就是替代 sleep 15 的黑科技
-        options: >-
-          --health-cmd="mysqladmin ping"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+      
       redis:
         image: redis:alpine
         ports:
           - 6379:6379
-        # Redis 的健康检查
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries=5
 
-      # 【重点 3】 不再 build 镜像，直接在宿主机装 Python
-      # 配合 cache，以后每次运行只需要几秒钟
+    steps:
+      - uses: actions/checkout@v4
+      
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: 'pip' # 开启缓存
+          cache: 'pip'
 
       - name: Install Dependencies
+        working-directory: ./backend
         run: |
-          pip install -r backend/requirements.txt
-          # 如果你有 mysqlclient 依赖，Ubuntu 可能需要这行，通常默认都有
-          # sudo apt-get install -y libmysqlclient-dev
+          pip install -r requirements.txt
           pip install pytest-playwright
-      - name: Apply Migrations
+
+      - name: Run API Tests
         working-directory: ./backend
         env:
+          # 连接到 Service 容器提供的数据库
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
           DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard_test
         run: |
+          # 1. 迁移数据库 (建表)
           python manage.py migrate
-      # 【重点 4】 跑测试
-      # 注意：这里我们通过环境变量告诉 Django 数据库在哪里
-      - name: Run API Tests
-        env:
-          # 覆盖 settings.py 里的配置
-          # 必须确保你的 Django settings.py 能读取环境变量 (见下文解释)
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: syncboard_test
-        run: |
-          pytest backend/tests/
+          # 2. 跑 API 测试
+          pytest tests/
 
-      # 【重点 5】 准备数据
-      # 同样的，直接用 python 跑，而不是 docker exec
+  # ===================================================
+  # 任务 3：端到端测试 (E2E Test)
+  # 策略：【完整性优先】使用 Docker Compose
+  # 理由：Playwright 需要访问 http://localhost 前端页面，必须启动 Nginx/前端容器
+  # ===================================================
+  e2e-test:
+    needs: lint  # 可以和 api-test 并行跑，互不干扰
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 启动全栈环境 (Docker Compose)
+      # 这会启动：Backend(8000), Frontend/Nginx(80), MySQL(3306)
+      - name: Start Full Stack Environment
+        run: |
+          docker compose up -d --build
+          echo "Waiting for services..."
+          sleep 15
+          docker compose ps
+
+      # 2. 等待前端页面就绪 (关键步骤！)
+      # 确保 Nginx 已经把前端页面跑起来了，避免 Connection Refused
+      - name: Check Frontend Availability
+        run: |
+          timeout 60s bash -c 'until curl -s http://localhost > /dev/null; do sleep 5; done'
+          echo "✅ Frontend is up and running!"
+
+      # 3. 准备 Python 环境 (用于运行测试脚本)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Test Dependencies
+        working-directory: ./backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest-playwright
+
+      # 4. 准备 E2E 数据
+      # 注意：这里连接的是 Docker Compose 里的 MySQL
       - name: Prepare E2E Data
         working-directory: ./backend
         env:
@@ -124,37 +130,25 @@ jobs:
           DB_PORT: 3306
           DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: syncboard_test
+          # 注意：Docker 里的数据库名通常是 docker-compose.yml 里配的默认名
+          # 如果你的 docker-compose 配置的是 syncboard，这里就写 syncboard
+          DB_NAME: syncboard 
         run: |
+          # 确保表结构存在
+          python manage.py migrate
+          # 插入测试数据 (你的自定义命令)
           python manage.py seed_ci_data
 
-      # 6. 安装 Playwright 浏览器内核
+      # 5. 安装 Playwright 浏览器
       - name: Install Playwright Browsers
-        run: |
-          playwright install chromium --with-deps
+        run: playwright install chromium --with-deps
 
-      # 7. 启动后端服务 (后台运行)
-      # 因为 E2E 测试需要真实访问 API 接口
-      - name: Start Backend Server
-        working-directory: ./backend
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: syncboard_test
-        run: |
-          # nohup 让它在后台跑，& 表示异步执行
-          nohup python manage.py runserver 0.0.0.0:8000 &
-          # 等待几秒确保启动
-          sleep 5
-
-      # 8. 运行 E2E 测试
+      # 6. 执行 E2E 测试
       - name: Run E2E Tests
         working-directory: ./
         env:
-          # 告诉 Playwright 后端地址
-          API_URL: http://127.0.0.1:8000
+          # Playwright 访问 Docker 启动的前端
+          BASE_URL: http://localhost
+          API_URL: http://localhost:8000
         run: |
-          # 确保指向你的 e2e 目录
           pytest e2e/
