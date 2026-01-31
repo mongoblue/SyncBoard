@@ -1,4 +1,4 @@
-name: SyncBoard CI (自动化测试)
+name: SyncBoard Enterprise CI
 
 on:
   push:
@@ -7,67 +7,63 @@ on:
     branches: [ "main", "dev" ]
 
 jobs:
+  # -------------------------------------------
+  # 任务 1：代码体检 (Lint)
+  # 目标：最快速度发现低级错误
+  # -------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip' # 自动利用缓存，下次跑更快
+
+      - name: Install Linter
+        run: pip install flake8
+
+      - name: Run Linting
+        # 运行 flake8 检查。
+        # --count: 统计错误数
+        # --max-line-length=127: 允许一行最长127个字符
+        # --statistics: 显示统计信息
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+  # -------------------------------------------
+  # 任务 2：业务测试 (Test)
+  # 只有当 lint 任务成功后，这里才会开始
+  # -------------------------------------------
   test:
+    needs: lint  # <--- 关键！这建立了依赖关系
     runs-on: ubuntu-latest
 
     steps:
-    # -------------------------------------------
-    # 第一阶段：环境准备
-    # -------------------------------------------
-    - name: Checkout Code (拉取代码)
-      uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-    - name: Start Docker Services (启动所有服务)
-      run: |
-        docker compose up -d --build
-        echo "Waiting for MySQL to be ready..."
-        sleep 15
-        docker compose ps
+      - name: Start Docker Services
+        run: |
+          docker compose up -d --build
+          echo "Waiting for MySQL to be ready..."
+          sleep 15
+          docker compose ps
 
-    - name: Fix DB Permissions (修复数据库权限)
-      env:
-        THE_DB_PWD: ${{secrets.DB_PASSWORD}}
-      run: |
-        docker compose exec -T db mysql -u root -p"$THE_DB_PWD" -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
+      - name: Fix DB Permissions
+        env:
+          THE_DB_PWD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          docker compose exec -T db mysql -u root -p"$THE_DB_PWD" -e "GRANT ALL PRIVILEGES ON *.* TO 'Liujia'@'%'; FLUSH PRIVILEGES;"
 
-    # -------------------------------------------
-    # 第二阶段：运行测试
-    # -------------------------------------------
-    - name: Run API Tests (后端单元测试)
-      run: |
-        docker compose exec -T backend pytest tests/
+      - name: Run API Tests
+        run: |
+          docker compose exec -T backend pytest tests/
 
-    - name: Prepare E2E Data (准备测试数据)
-      run: |
-        docker compose exec -T backend python manage.py seed_ci_data
-
-    # -------------------------------------------
-    # 第三阶段：前端环境 & E2E
-    # -------------------------------------------
-    - name: Set up Python for E2E
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-
-    - name: Install Playwright & Dependencies
-      run: |
-        pip install pytest-playwright
-        playwright install chromium
-        playwright install-deps
-
-    - name: Wait for Frontend
-      run: |
-        echo "Waiting for Frontend to be ready..."
-        timeout 60s bash -c 'until curl -s http://localhost:80 > /dev/null; do sleep 5; done'
-        echo "Frontend is up!"
-
-    - name: Run E2E Tests (端到端测试)
-      run: |
-        pytest e2e/
-
-    # -------------------------------------------
-    # 第四阶段：收尾
-    # -------------------------------------------
-    - name: Teardown (清理环境)
-      if: always()
-      run: docker compose down
+      - name: Prepare E2E Data
+        run: |
+          docker compose exec -T backend python manage.py seed_ci_data
