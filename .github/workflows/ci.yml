@@ -138,13 +138,17 @@ jobs:
           DB_PORT: 3306
           DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          # 注意：Docker 里的数据库名通常是 docker-compose.yml 里配的默认名
-          # 如果你的 docker-compose 配置的是 syncboard，这里就写 syncboard
-          DB_NAME: syncboard 
+          DB_NAME: syncboard
         run: |
-          # 确保表结构存在
+          # 1. 【新增】手动创建数据库
+          # 使用 docker compose exec 让 db 容器执行创建命令
+          # -T 是为了防止 CI 环境报错说“没有终端”
+          docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS syncboard;"
+          
+          # 2. 迁移数据库 (现在库存在了，这步就能过了)
           python manage.py migrate
-          # 插入测试数据 (你的自定义命令)
+          
+          # 3. 插入测试数据
           python manage.py seed_ci_data
 
       # 5. 安装 Playwright 浏览器
@@ -172,6 +176,3 @@ jobs:
           echo "Removing docker data directories..."
           sudo rm -rf redis_data
           sudo rm -rf mysql_data
-          
-          # 3. 为防万一，把当前目录下的其他残留文件归还给 Runner 用户
-          sudo chown -R $(id -u):$(id -g)
