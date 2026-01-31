@@ -165,6 +165,15 @@ jobs:
         run: |
           pytest e2e/
 
+      - name: Debug Failure (Print Logs)
+        if: failure()  # 只有上面的测试挂了才运行这一步
+        run: |
+          echo "==== Backend Logs ===="
+          docker compose logs backend
+          echo "======================"
+          echo "==== Frontend/Nginx Logs ===="
+          docker compose logs frontend
+
       - name: Teardown & Clean Up
         if: always()
         run: |
