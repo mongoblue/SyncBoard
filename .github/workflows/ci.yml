@@ -108,10 +108,43 @@ jobs:
       # 【重点 5】 准备数据
       # 同样的，直接用 python 跑，而不是 docker exec
       - name: Prepare E2E Data
+        working-directory: ./backend
         env:
           DB_HOST: 127.0.0.1
+          DB_PORT: 3306
           DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard_test
         run: |
           python manage.py seed_ci_data
+
+      # 6. 安装 Playwright 浏览器内核
+      - name: Install Playwright Browsers
+        run: |
+          playwright install chromium --with-deps
+
+      # 7. 启动后端服务 (后台运行)
+      # 因为 E2E 测试需要真实访问 API 接口
+      - name: Start Backend Server
+        working-directory: ./backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: syncboard_test
+        run: |
+          # nohup 让它在后台跑，& 表示异步执行
+          nohup python manage.py runserver 0.0.0.0:8000 &
+          # 等待几秒确保启动
+          sleep 5
+
+      # 8. 运行 E2E 测试
+      - name: Run E2E Tests
+        working-directory: ./
+        env:
+          # 告诉 Playwright 后端地址
+          API_URL: http://127.0.0.1:8000
+        run: |
+          # 确保指向你的 e2e 目录
+          pytest e2e/
