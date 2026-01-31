@@ -95,7 +95,7 @@ jobs:
       - name: Create .env file for Docker
         run: |
           echo "DB_ENGINE=django.db.backends.mysql" >> .env
-          echo "DB_NAME=syncboard" >> .env
+          echo "DB_NAME=flowspace" >> .env
           echo "DB_USER=root" >> .env
           echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
           echo "DB_HOST=db" >> .env
@@ -157,7 +157,7 @@ jobs:
           DB_PORT: 3306
           DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: syncboard
+          DB_NAME: flowspace
         run: |
           # 1. 手动建库
           docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS syncboard;"
