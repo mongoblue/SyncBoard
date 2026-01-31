@@ -235,9 +235,6 @@ jobs:
           # 2.3 强制重置密码 (确保 Locust 能登进去)
           python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save()"
 
-      # 3. 安装 Locust
-      - name: Install Locust
-        run: pip install locust
 
       # 4. 运行无头模式 (Headless) 压测
       - name: Run Locust Smoke Test
