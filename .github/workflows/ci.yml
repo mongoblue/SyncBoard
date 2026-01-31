@@ -89,6 +89,7 @@ jobs:
           # 必须确保你的 Django settings.py 能读取环境变量 (见下文解释)
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
+          DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard_test
         run: |
@@ -99,6 +100,7 @@ jobs:
       - name: Prepare E2E Data
         env:
           DB_HOST: 127.0.0.1
+          DB_USER: root
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: syncboard_test
         run: |
