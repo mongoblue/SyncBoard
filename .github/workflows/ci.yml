@@ -171,19 +171,6 @@ jobs:
       - name: Install Playwright Browsers
         run: playwright install chromium --with-deps
 
-      # 8. 调试登录 (Container 视角)
-      # 这次有了 Override 文件，Container 肯定能连上 syncboard 了！
-      - name: 🕵️ Debug Login (CSI Investigation)
-        run: |
-          echo "1. 检查数据库里的用户状态..."
-          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u=U.objects.get(username='mongoblue'); print(f'User: {u.username}, Active: {u.is_active}, Hash: {u.password[:20]}...')"
-          
-          echo "----------------------------------------"
-          echo "2. 尝试用 CURL 直接登录..."
-          curl -v -X POST http://localhost:8000/api/auth/login/ \
-            -H "Content-Type: application/json" \
-            -d '{"username": "mongoblue", "password": "13579mnb"}'
-
       # 9. 运行测试
       - name: Run E2E Tests
         working-directory: ./
@@ -242,7 +229,7 @@ jobs:
           # -r 5  : 每秒启动5个
           # -t 30s: 只跑30秒，速战速决
           # --headless: 无界面模式
-          locust -f backend/locustfile.py \
+          locust -f backend/performance/locustfile.py \
             --headless \
             -u 50 -r 5 \
             --run-time 30s \
