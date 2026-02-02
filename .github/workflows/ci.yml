@@ -1,4 +1,4 @@
-name: SyncBoard Enterprise CI (Hybrid Strategy)
+name: SyncBoard Enterprise CI (Corrected & Optimized)
 
 on:
   push:
@@ -9,7 +9,6 @@ on:
 jobs:
   # ===================================================
   # 任务 1：代码体检 (Lint)
-  # 目标：秒级反馈，最快发现语法错误
   # ===================================================
   lint:
     runs-on: ubuntu-latest
@@ -19,40 +18,114 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-      - run: pip install flake8
       - run: |
+          pip install flake8
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
   # ===================================================
-  # 任务 2：后端单元测试 (API Unit Test)
-  # 策略：【速度优先】使用 Service 容器 (企业级标准写法)
-  # 理由：API 测试不需要前端界面，用 Service 启动 DB 最快，无需构建镜像
+  # 任务 2：后端 API 测试
   # ===================================================
   api-test:
     needs: lint
     runs-on: ubuntu-latest
-    
-    # 定义轻量级服务 (只启动 DB 和 Redis)
     services:
       mysql:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
           MYSQL_DATABASE: syncboard_test
-        ports:
-          - 3306:3306
+        ports: ["3306:3306"]
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
-      
       redis:
         image: redis:alpine
-        ports:
-          - 6379:6379
+        ports: ["6379:6379"]
         options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries=5
-
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: pip install -r requirements.txt
+      - name: Run API Tests
+        working-directory: ./backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: syncboard_test
+        run: |
+          python manage.py migrate
+          pytest tests/
+
+  # ===================================================
+  # 任务 3：端到端测试 (E2E Test)
+  # 优化点：引入 Playwright 缓存 + Docker Buildx 缓存
+  # ===================================================
+  e2e-test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 配置 Docker Buildx 缓存 (加速构建)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
       
+      # 2. 缓存 Playwright 浏览器 (加速安装)
+      - name: Cache Playwright Browsers
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('**/requirements.txt') }}
+
+      # 3. 必须保留：生成 .env 文件
+      - name: Create .env file
+        run: |
+          echo "DB_ENGINE=django.db.backends.mysql" >> .env
+          echo "DB_NAME=flowspace" >> .env
+          echo "DB_USER=root" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_HOST=db" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DEBUG=True" >> .env
+          echo "ALLOWED_HOSTS=*" >> .env
+
+      # 4. 必须保留：生成 Override 文件 (防止脑裂)
+      - name: Create Docker Compose Override
+        run: |
+          cat <<EOF > docker-compose.override.yml
+          services:
+            backend:
+              env_file:
+                - .env
+          EOF
+
+      # 5. 启动环境 (利用 Cache)
+      - name: Start Full Stack Environment
+        run: |
+          # 尝试使用 inline cache
+          docker compose build --build-arg BUILDKIT_INLINE_CACHE=1
+          docker compose up -d
+          
+      # 6. 等待前端 (用 curl 替代 sleep 15)
+      - name: Check Frontend Availability
+        run: |
+          timeout 60s bash -c 'until curl -s http://localhost > /dev/null; do sleep 3; done'
+          echo "✅ Frontend is up!"
+
+      # 7. 必须保留：修复权限 (防止 Python 报错)
+      - name: Fix Docker Permissions
+        run: |
+          sudo chown -R $USER:$USER .
+          sudo chmod -R 777 redis_data || true
+          sudo chmod -R 777 mysql_data || true
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -64,114 +137,21 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install pytest-playwright
+          # 利用缓存判断是否需要下载浏览器
+          if [ "${{ steps.cache-playwright.outputs.cache-hit }}" != "true" ]; then
+            playwright install chromium --with-deps
+          fi
 
-      - name: Run API Tests
-        working-directory: ./backend
-        env:
-          # 连接到 Service 容器提供的数据库
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: syncboard_test
-        run: |
-          # 1. 迁移数据库 (建表)
-          python manage.py migrate
-          # 2. 跑 API 测试
-          pytest tests/
-
-  # ===================================================
-  # 任务 3：端到端测试 (E2E Test)
-  # 策略：【完整性优先】使用 Docker Compose
-  # 理由：Playwright 需要访问 http://localhost 前端页面，必须启动 Nginx/前端容器
-  # ===================================================
-  e2e-test:
-    needs: lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # 1. 创建 .env 文件 (配置信息)
-      - name: Create .env file for Docker
-        run: |
-          echo "DB_ENGINE=django.db.backends.mysql" >> .env
-          echo "DB_NAME=flowspace" >> .env
-          echo "DB_USER=root" >> .env
-          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-          echo "DB_HOST=db" >> .env
-          echo "DB_PORT=3306" >> .env
-          echo "DEBUG=True" >> .env
-          echo "ALLOWED_HOSTS=*" >> .env
-
-      # 👇👇👇【新增】创建 Override 文件，强制容器读取 .env 👇👇👇
-      # 这能保证 backend 容器绝对使用我们上面生成的配置，彻底解决“脑裂”
-      - name: Create Docker Compose Override
-        run: |
-          cat <<EOF > docker-compose.override.yml
-          services:
-            backend:
-              env_file:
-                - .env
-          EOF
-
-      # 2. 启动全栈环境
-      # docker compose 会自动读取 docker-compose.override.yml 并应用配置
-      - name: Start Full Stack Environment
-        run: |
-          docker compose up -d --build
-          echo "Waiting for services..."
-          sleep 15
-          docker compose ps
-
-      # 3. 等待前端就绪
-      - name: Check Frontend Availability
-        run: |
-          timeout 60s bash -c 'until curl -s http://localhost > /dev/null; do sleep 5; done'
-          echo "✅ Frontend is up and running!"
-
-      # 4. 修复权限
-      - name: Fix Docker Permissions
-        run: |
-          sudo chown -R $USER:$USER .
-          sudo chmod -R 777 redis_data || true
-          sudo chmod -R 777 mysql_data || true
-
-      # 5. 准备 Python 环境
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install Test Dependencies
-        working-directory: ./backend
-        run: |
-          pip install -r requirements.txt
-          pip install pytest-playwright
-
-      # 6. 准备数据 (Runner 视角)
+      # 8. 必须保留：在容器内准备数据 & 强制改密
       - name: Prepare E2E Data
         working-directory: ./backend
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: flowspace
         run: |
-          # 1. 手动建库
-          docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS syncboard;"
-          # 2. 迁移
-          python manage.py migrate
-          # 3. 造数据 & 强制改密码
-          python manage.py seed_ci_data
-          python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save(); print('✅ 密码已强制重置为 13579mnb')"
+          # 保持使用 backend 容器执行，确保环境一致
+          docker compose exec -T backend python manage.py migrate
+          docker compose exec -T backend python manage.py seed_ci_data
+          # 强制修改密码，确保测试账号可用
+          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save(); print('✅ Password reset')"
 
-      # 7. 安装浏览器
-      - name: Install Playwright Browsers
-        run: playwright install chromium --with-deps
-
-      # 9. 运行测试
       - name: Run E2E Tests
         working-directory: ./
         env:
@@ -179,65 +159,58 @@ jobs:
           API_URL: http://localhost:8000
         run: pytest e2e/
 
-      # 10. 失败时打印日志
       - name: Debug Failure (Print Logs)
         if: failure()
         run: |
           docker compose logs backend
           docker compose logs frontend
 
+  # ===================================================
+  # 任务 4：性能压测 (Load Test)
+  # 优化点：并行执行 (needs: lint)，但必须保留全套初始化逻辑
+  # ===================================================
   load-test:
-    needs: e2e-test  # 等 E2E 跑完再跑这个
+    needs: lint  # ✅ 并行优化：不再等待 E2E
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # 1. 启动全栈环境 (复用之前的配置)
+      # ⚠️ 注意：因为是并行跑，这是全新的机器，必须重新生成 .env 和启动环境
+      - name: Create .env and Override
+        run: |
+          echo "DB_ENGINE=django.db.backends.mysql" >> .env
+          echo "DB_NAME=flowspace" >> .env
+          echo "DB_USER=root" >> .env
+          echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+          echo "DB_HOST=db" >> .env
+          echo "DB_PORT=3306" >> .env
+          cat <<EOF > docker-compose.override.yml
+          services:
+            backend:
+              env_file:
+                - .env
+          EOF
+
       - name: Start Full Stack Environment
         run: |
-          docker compose up -d --build
-          echo "Waiting for services..."
-          sleep 15
+          docker compose up -d
+          timeout 60s bash -c 'until curl -s http://localhost:8000/health > /dev/null; do sleep 2; done'
 
-      # 2. 准备测试数据 (Locust 需要登录，所以必须造号)
       - name: Prepare Load Test Data
-        working-directory: ./backend
-        env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_USER: root
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: flowspace # ✅ 必须和 E2E 保持一致
         run: |
-          # 2.1 修复权限 (防止 Python 安装报错)
+          # 必须修复权限，否则 docker exec 可能失败
           sudo chown -R $USER:$USER .
-          sudo chmod -R 777 ../mysql_data || true
-          
-          # 2.2 建库 & 迁移
-          docker compose exec -T db mysql -u root -p"${{ secrets.DB_PASSWORD }}" -e "CREATE DATABASE IF NOT EXISTS flowspace;"
-          pip install -r requirements.txt
-          python manage.py migrate
-          python manage.py seed_ci_data
-          
-          python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save()"
+          # 必须造数据，否则 Locust 登录会 404
+          docker compose exec -T backend python manage.py migrate
+          docker compose exec -T backend python manage.py seed_ci_data
+          docker compose exec -T backend python manage.py shell -c "from django.contrib.auth import get_user_model; User=get_user_model(); u=User.objects.get(username='mongoblue'); u.set_password('13579mnb'); u.save();"
 
-      # 4. 运行无头模式 (Headless) 压测
       - name: Run Locust Smoke Test
-        run: |
-          # 参数策略：
-          # -u 50 : 50个并发用户 (对 CI 环境比较友好)
-          # -r 5  : 每秒启动5个
-          # -t 30s: 只跑30秒，速战速决
-          # --headless: 无界面模式
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install locust
           locust -f backend/performance/locustfile.py \
-            --headless \
-            -u 50 -r 5 \
-            --run-time 30s \
+            --headless -u 50 -r 5 --run-time 30s \
             --host http://localhost:8000
-
-      # 11. 清理
-      - name: Teardown & Clean Up
-        if: always()
-        run: |
-          docker compose down -v
-          sudo rm -rf redis_data mysql_data
