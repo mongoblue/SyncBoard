@@ -1,73 +1,82 @@
 import re
 import time
+import os
 from playwright.sync_api import Page, expect
 
-# 封装一个登录动作，方便复用
+BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost")
+
 def login(page: Page):
-    page.goto("http://localhost/login")
+    page.goto(f"{BASE_URL}/login")
     page.get_by_placeholder("用户名").fill("mongoblue")
     page.get_by_placeholder("密码").fill("13579mnb")
     page.get_by_role("button", name="登录").click()
-    # 等待进入项目列表页
     expect(page).to_have_url(re.compile("/projects"))
 
 def test_create_task_success(page: Page):
-    # 1. 先登录
+    # --- 准备工作 ---
     print("1. 正在登录...")
     login(page)
     
-    # 2. 进入第一个项目
     print("2. 正在进入第一个项目...")
-    # 等待项目列表加载出来 (通过寻找项目卡片或文字)
-    # 假设项目卡片上有"点击进入"或者项目名称，我们这里简单粗暴点，找第一个箭头图标或者卡片
-    # 注意：你需要确保你的账号里至少有一个项目！
-    # 这里我们尝试点击页面上出现的第一个"进入"相关的元素，或者直接点击第一个 .chat-list-item (如果复用了样式)
-    # 最稳妥的方式：点击第一个出现的项目卡片
-    # 假设项目列表里的项目有特定类名，或者我们直接找文本
-    
-    # ⚠️ 调试点：这里可能需要根据你实际页面调整。
-    # 假设卡片上有个按钮或者整个卡片可点。我们试着点第一个 .project-card (如果有) 或者直接根据文本
-    # 先截图看看列表页长啥样，防止抓瞎，不过通常页面会有 "进入项目" 按钮？
-    # 让我们尝试点击页面上第一个非导航栏的链接或卡片
-    
-    # 【策略】等待页面上出现 "2026" (日期) 或 你的项目名，或者直接找 .el-card
-    # 这里假设你之前创建过一个项目。
-    # 我们用 css 选择器找第一个卡片
-    first_project = page.locator(".el-card").first
-    first_project.click()
+    try:
+        page.locator(".el-card").first.click(timeout=5000)
+    except:
+        page.get_by_text("项目", exact=False).first.click()
 
-    # 3. 验证进入了看板
     print("3. 验证进入看板...")
     expect(page).to_have_url(re.compile(r"/board"))
-    
-    # 4. 点击 "To Do" 列的 "+" 号
-    print("4. 点击创建按钮...")
-    # 找到包含 "To Do" 文本的列，然后找它里面的加号按钮
-    # 这是一个级联查找
-    todo_column = page.locator(".board-column", has_text="To Do")
-    add_btn = todo_column.locator(".add-btn") # 假设你在 Vue 里给加号按钮加了这个类
-    # 如果没加类名，可以用 icon 查找：
-    if add_btn.count() == 0:
-        add_btn = todo_column.locator("button").first 
-        
-    add_btn.click()
+    page.wait_for_load_state("networkidle")
 
-    # 5. 填写任务标题
-    print("5. 填写任务标题...")
-    # ElementPlus 的 MessageBox 输入框通常有 placeholder 或者特定的结构
-    # 这里的 placeholder 取决于你 ElMessageBox.prompt 的配置
-    # 你之前的代码是：ElMessageBox.prompt('请输入任务标题', ...)
-    # 所以 placeholder 可能是空，或者我们直接找 input 标签
-    page.get_by_role("textbox").fill("E2E自动测试任务")
+    # --- 第一阶段：创建任务 (Create) ---
+    print("4. [Phase 1] 点击加号，开始创建...")
+    todo_column = page.locator(".board-column").filter(has_text="To Do")
     
-    # 点击弹窗上的 "确定" 或 "Create"
-    # ElementPlus 的确定按钮通常叫 "OK" 或者根据你设置的 confirmButtonText: '创建'
-    page.get_by_role("button", name="创建").click()
+    # 点击加号
+    if todo_column.locator(".add-btn").count() > 0:
+        todo_column.locator(".add-btn").click()
+    else:
+        todo_column.locator("button").first.click()
 
-    # 6. 验证任务是否出现
-    print("6. 验证任务是否存在...")
-    # 等待页面上出现这个文本
-    expect(page.get_by_text("E2E自动测试任务")).to_be_visible()
+    print("5. [Phase 1] 填写新任务标题...")
+    # 这里的输入框可能是 ElementPlus 的 MessageBox 或者是 Dialog
+    # 我们用 get_by_role("textbox") 可以通吃
+    input_box = page.get_by_role("textbox").first
+    input_box.fill("E2E测试任务")
     
-    print("✅ 业务流测试通过！截图保存中...")
-    page.screenshot(path="task_create_success.png")
+    # 点击“确定”或者“创建”
+    # ElementPlus 的 MessageBox 确定按钮通常叫 "OK" 或者 "确定"
+    print("6. [Phase 1] 确认创建...")
+    confirm_btn = page.get_by_role("button", name=re.compile(r"确定|创建|OK|Confirm"))
+    confirm_btn.click()
+
+    # --- 第二阶段：编辑详情 (Edit) ---
+    print("7. [Phase 2] 等待任务卡片出现...")
+    # 验证列表里出现了我们刚才创建的任务
+    new_card = todo_column.get_by_text("E2E测试任务").first
+    expect(new_card).to_be_visible()
+
+    print("8. [Phase 2] 点击卡片，进入详情页...")
+    # 点击卡片，打开大弹窗
+    new_card.click()
+
+    print("9. [Phase 2] 详情弹窗已打开，准备保存...")
+    # 等待详情弹窗出现 (标题通常包含"任务详情"或者输入框里有我们的标题)
+    detail_dialog = page.locator(".el-dialog__body")
+    expect(detail_dialog).to_be_visible()
+    
+    # 验证一下标题对不对 (可选)
+    # expect(detail_dialog.get_by_display_value("E2E测试任务")).to_be_visible()
+
+    # === ✨ 关键修正：点击你截图里的“保存修改” ===
+    # 不管它在 DOM 哪里，直接找页面上可见的、文字为"保存修改"的按钮
+    save_btn = page.get_by_role("button", name="保存修改")
+    
+    # 确保它是可见的再点
+    expect(save_btn).to_be_visible()
+    save_btn.click()
+
+    print("10. 验证弹窗关闭...")
+    expect(detail_dialog).not_to_be_visible()
+    
+    print("✅ 完整流程测试通过！截图保存中...")
+    page.screenshot(path="task_flow_success.png")

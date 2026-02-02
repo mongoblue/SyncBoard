@@ -1,34 +1,29 @@
-FROM python:3.12-slim
+# 使用微软官方 Playwright 镜像
+FROM mcr.microsoft.com/playwright/python:v1.49.1-noble
 
-# 设置工作目录
+# 1. 优化系统源（阿里云加速）
+RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list \
+    && sed -i 's/security.ubuntu.com/mirrors.aliyun.com/g' /etc/apt/sources.list
+
 WORKDIR /app
 
-# 防止 Python 生成 .pyc 文件
-ENV PYTHONDONTWRITEBYTECODE 1
-# 实时打印日志到控制台
-ENV PYTHONUNBUFFERED 1
-
-# 安装系统依赖 (mysqlclient 需要)
+# 2. 安装编译依赖
+# gcc, python3-dev, default-libmysqlclient-dev 是编译 mysqlclient 必须的
 RUN apt-get update && apt-get install -y \
-    gcc \
-    pkg-config \
     default-libmysqlclient-dev \
-    build-essential \
+    pkg-config \
+    gcc \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Python 依赖
 COPY requirements.txt .
-RUN pip install --upgrade pip
-RUN pip install --no-cache-dir -r requirements.txt
-# 确保装了 daphne
-RUN pip install daphne 
 
-# 复制代码
+# 3. 安装 Python 依赖（清华源加速）
+# 【关键修改】加上 --break-system-packages 参数，解决 Ubuntu 24.04 禁止 pip 的限制
+RUN pip install --no-cache-dir --break-system-packages -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 4. 复制代码
 COPY . .
 
-# 暴露端口
-EXPOSE 8000
-
-# 启动命令 (使用 Daphne)
-CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "backend.asgi:application"]
+# 启动命令
+CMD ["uvicorn", "backend.asgi:application", "--host", "0.0.0.0", "--port", "8000"]

@@ -13,22 +13,27 @@
       
       <div class="right-section" style="display:flex; align-items:center; gap:10px">
         <div class="members-list" v-if="boardStore.currentProject">
-        <div class="avatar-circle owner" :title="'负责人: ' + boardStore.currentProject.owner_details.username">
-            {{ boardStore.currentProject.owner_details.username.substring(0,2).toUpperCase() }}
+          <div class="avatar-circle owner" :title="'负责人: ' + boardStore.currentProject.owner_details.username">
+              {{ boardStore.currentProject.owner_details.username.substring(0,2).toUpperCase() }}
+          </div>
+          <div 
+              v-for="member in boardStore.currentProject.members_details" 
+              :key="member.id"
+              class="avatar-circle member"
+              :title="'成员: ' + member.username"
+          >
+              {{ member.username.substring(0,2).toUpperCase() }}
+          </div>
         </div>
-        
-        <div 
-            v-for="member in boardStore.currentProject.members_details" 
-            :key="member.id"
-            class="avatar-circle member"
-            :title="'成员: ' + member.username"
-        >
-            {{ member.username.substring(0,2).toUpperCase() }}
-        </div>
-    </div>
-          <el-button type="primary" icon="Plus" @click="inviteDialogVisible = true">
-            邀请成员
-          </el-button>
+
+        <el-button type="success" plain @click="openTestConsole">
+          <el-icon style="margin-right: 5px"><Cpu /></el-icon>
+          质量中心
+        </el-button>
+
+        <el-button type="primary" icon="Plus" @click="inviteDialogVisible = true">
+          邀请成员
+        </el-button>
       </div>
 
       <div class="status-indicator">
@@ -48,21 +53,22 @@
 
     <div class="board-container">
       <div v-for="col in boardStore.Columns" :key="col.id" class="board-column">
-        
         <div class="column-header">
           <div class="header-left">
             <h3>{{ col.title }}</h3>
             <span class="count">{{ col.tasks?.length || 0 }}</span>
           </div>
 
-          <el-button 
-            type="primary" 
-            link 
-            class="add-btn"
-            @click="handleAddTask(col.id)"
-          >
-            <el-icon :size="20"><Plus /></el-icon>
-          </el-button>
+          <div class="header-right" style="display: flex; align-items: center; gap: 5px;">
+            <el-tooltip content="[QA工具] 一键生成测试数据" placement="top">
+              <el-button type="warning" link class="qa-btn" @click="handleDataFactory(col.id)">
+                <el-icon :size="18"><MagicStick /></el-icon>
+              </el-button>
+            </el-tooltip>
+            <el-button type="primary" link class="add-btn" @click="handleAddTask(col.id)">
+              <el-icon :size="20"><Plus /></el-icon>
+            </el-button>
+          </div>
         </div>
 
         <draggable
@@ -71,36 +77,24 @@
           group="tasks"
           item-key="id"
           ghost-class="ghost"
-          @change="(event: any) => onDragChange(event, col.id)"
+          @change="(event:any) => onDragChange(event, col.id)"
         >
           <template #item="{ element }">
             <el-card class="task-card" shadow="hover" @click="openTaskDetail(element)">
               <template #header>
                 <div class="card-header">
                   <span>{{ element.title }}</span>
-                  <el-icon 
-                      class="delete-btn" 
-                      @click.stop="handleDeleteTask(element.id)"
-                    >
+                  <el-icon class="delete-btn" @click.stop="handleDeleteTask(element.id)">
                       <Delete />
-                    </el-icon>
+                  </el-icon>
                 </div>
               </template>
               <div class="tags-container" v-if="element.tags_details && element.tags_details.length">
-                  <el-tag
-                    v-for="tag in element.tags_details"
-                    :key="tag.id"
-                    size="small"
-                    :color="tag.color"
-                    effect="dark"
-                    style="margin-right: 4px; border: none;"
-                  >
+                  <el-tag v-for="tag in element.tags_details" :key="tag.id" size="small" :color="tag.color" effect="dark" style="margin-right: 4px; border: none;">
                     {{ tag.name }}
                   </el-tag>
                 </div>
-                <div class="card-content">
-                  {{ element.content }}
-                </div>
+                <div class="card-content">{{ element.content }}</div>
               <div class="card-footer" v-if="element.assignee">
                 <div class="avatar-circle" :title="'User ID: ' + element.assignee">
                   {{ getUserName(element.assignee) }}
@@ -112,50 +106,25 @@
       </div>
     </div>
 
-    <el-dialog
-      v-model="dialogVisible"
-      title="任务详情"
-      width="50%"
-      :before-close="handleClose"
-    >
+    <el-dialog v-model="dialogVisible" title="任务详情" width="50%" :before-close="handleClose">
       <el-form :model="editingTask" label-position="top">
         <el-form-item label="标题">
           <el-input v-model="editingTask.title" placeholder="输入标题"/>
         </el-form-item>
         <el-form-item label="执行人">
           <el-select v-model="editingTask.assignee" placeholder="选择负责人" clearable>
-            <el-option
-              v-for="user in boardStore.Users"
-              :key="user.id"
-              :label="user.username"
-              :value="user.id"
-            />
+            <el-option v-for="user in boardStore.Users" :key="user.id" :label="user.username" :value="user.id"/>
           </el-select>
         </el-form-item>
-          <el-form-item label="标签">
-            <el-select 
-              v-model="editingTask.tags" 
-              multiple 
-              placeholder="选择标签" 
-              collapse-tags
-            >
-              <el-option
-                v-for="tag in boardStore.currentProject?.available_tags || []"
-                :key="tag.id"
-                :label="tag.name"
-                :value="tag.id"
-              >
+        <el-form-item label="标签">
+            <el-select v-model="editingTask.tags" multiple placeholder="选择标签" collapse-tags>
+              <el-option v-for="tag in boardStore.currentProject?.available_tags || []" :key="tag.id" :label="tag.name" :value="tag.id">
                 <span :style="{ color: tag.color, fontWeight: 'bold' }">● {{ tag.name }}</span>
               </el-option>
             </el-select>
-          </el-form-item>
+        </el-form-item>
         <el-form-item label="详细信息">
-          <el-input
-          v-model="editingTask.content"
-          type="textarea"
-          :rows="6"
-          placeholder="支持Markdown纯文本描述"
-          ></el-input>
+          <el-input v-model="editingTask.content" type="textarea" :rows="6" placeholder="支持Markdown纯文本描述"></el-input>
         </el-form-item>
       </el-form> 
       <template #footer>
@@ -173,6 +142,9 @@
         <el-button type="primary" @click="handleInvite">确认邀请</el-button>
       </template>
     </el-dialog>
+
+    <TestConsole ref="testConsoleRef" />
+
   </div>
 </template>
 
@@ -184,7 +156,10 @@ import { ElMessageBox, ElMessage } from 'element-plus';
 import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/Auth';
 import service from '@/utils/request';
-import { Delete, Plus, Back } from '@element-plus/icons-vue'; // 确保引入图标
+import { Delete, Plus, Back,MagicStick } from '@element-plus/icons-vue'; // 确保引入图标
+import { ElLoading } from 'element-plus';
+import TestConsole from '@/components/TestConsole.vue';
+import { Cpu } from '@element-plus/icons-vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -204,6 +179,15 @@ const editingTask = ref({
   assignee: null as number | null,
   tags: [] as number[],
 });
+
+const testConsoleRef = ref<InstanceType<typeof TestConsole> | null>(null);
+
+// 3. 打开控制台的方法
+const openTestConsole = () => {
+  if (testConsoleRef.value) {
+    testConsoleRef.value.open();
+  }
+};
 
 onMounted(() => {
   const projectId = route.params.projectId as string;
@@ -264,6 +248,44 @@ const saveTaskDetail = async () => {
     dialogVisible.value = false;
   } catch (e) {
     console.error(e);
+  }
+};
+
+const handleDataFactory = async (columnId: string) => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入要生成的任务数量 (1-1000)', 'QA 数据工厂', {
+      confirmButtonText: '立即生成',
+      cancelButtonText: '取消',
+      inputPattern: /^(?:[1-9][0-9]{0,2}|1000)$/,
+      inputErrorMessage: '请输入 1-1000 之间的整数',
+      inputValue: '10'
+    });
+
+    if (value) {
+      // 开启全屏 Loading
+      const loading = ElLoading.service({
+        lock: true,
+        text: `正在生产 ${value} 条测试数据，请稍候...`,
+        background: 'rgba(0, 0, 0, 0.7)',
+      });
+
+      try {
+        await service.post('/api/qa/data-factory/', {
+          column_id: columnId,
+          count: parseInt(value)
+        });
+
+        // 刷新数据
+        await boardStore.fetchColumns(boardStore.currentProjectId);
+
+        ElMessage.success(`成功生成 ${value} 条数据！`);
+      } finally {
+        // 无论成功失败，都关闭 Loading
+        loading.close();
+      }
+    }
+  } catch (e) {
+    // Cancelled
   }
 };
 
