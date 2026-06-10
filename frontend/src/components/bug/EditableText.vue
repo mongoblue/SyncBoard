@@ -55,6 +55,7 @@ const commit = () => {
 }
 
 const onKeydown = (e: KeyboardEvent) => {
+  // 兼容 @vue/test-utils 的 trigger('keydown.esc') 简写
   if (e.key === 'Escape' || e.key === 'esc') {
     e.preventDefault()
     editing.value = false
