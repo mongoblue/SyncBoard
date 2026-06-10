@@ -99,6 +99,21 @@
         <el-option label="性能测试" value="performance" />
         <el-option label="UI 自动化" value="ui_auto" />
       </el-select>
+
+      <el-select
+        v-model="filters.assignee"
+        placeholder="指派人"
+        clearable filterable
+        style="width: 160px"
+        @change="reload"
+      >
+        <el-option
+          v-for="m in projectMembers"
+          :key="m.user_id"
+          :label="m.username"
+          :value="m.user_id"
+        />
+      </el-select>
     </div>
 
     <!-- 列表 -->
@@ -146,6 +161,51 @@
           {{ formatTime(row.created_at) }}
         </template>
       </el-table-column>
+      <el-table-column label="关联任务" width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.linked_task" :title="row.linked_task" class="linked-task-chip">
+            #{{ row.linked_task.slice(0, 8) }}
+          </span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="操作" width="180" fixed="right">
+        <template #default="{ row }">
+          <el-dropdown
+            v-if="row.allowed_transitions?.length"
+            trigger="click"
+            @command="(cmd: BugStatus) => onQuickTransition(row, cmd)"
+            style="margin-right: 8px"
+          >
+            <el-button size="small">
+              流转<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="s in row.allowed_transitions"
+                  :key="s"
+                  :command="s"
+                >
+                  → {{ STATUS_LABEL[s as BugStatus] }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-popconfirm
+            title="确认删除此 Bug？"
+            confirm-button-text="删除"
+            cancel-button-text="取消"
+            @confirm="confirmDelete(row)"
+          >
+            <template #reference>
+              <el-button size="small" type="danger" plain>
+                <el-icon><Delete /></el-icon> 删除
+              </el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
     </el-table>
 
     <el-pagination
@@ -163,6 +223,19 @@
       <el-form :model="createForm" label-width="100px">
         <el-form-item label="标题" required>
           <el-input v-model="createForm.title" placeholder="简短描述问题" />
+        </el-form-item>
+        <el-form-item label="指派给">
+          <el-select v-model="createForm.assignee_id" placeholder="（可选）" clearable filterable style="width: 100%">
+            <el-option
+              v-for="m in projectMembers"
+              :key="m.user_id"
+              :label="m.username"
+              :value="m.user_id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联任务">
+          <el-input v-model="createForm.linked_task" placeholder="（可选）任务 UUID" />
         </el-form-item>
         <el-form-item label="严重程度">
           <el-select v-model="createForm.severity" style="width: 100%">
@@ -207,10 +280,14 @@ import { Plus, Refresh, Search, TrendCharts } from '@element-plus/icons-vue';
 import { useBoardStore } from '@/stores/board';
 import { useAuthStore } from '@/stores/Auth';
 import {
-  listBugs, createBug, getBugStats, seedDemoBugs,
-  STATUS_TAG_TYPE, SEVERITY_TAG_TYPE, PRIORITY_TAG_TYPE,
+  listBugs, createBug, deleteBug, transitionBug, getBugStats, seedDemoBugs,
+  getProjectMembers,
+  STATUS_TAG_TYPE, SEVERITY_TAG_TYPE, PRIORITY_TAG_TYPE, STATUS_LABEL,
   type BugListItem, type BugStats, type BugSeverity, type BugPriority,
+  type BugStatus, type ProjectMemberBrief, type BugCreatePayload,
 } from '@/api/bug';
+import { ArrowDown, Delete } from '@element-plus/icons-vue';
+import { extractErrorMessage } from '@/utils/error';
 
 const boardStore = useBoardStore();
 const authStore = useAuthStore();
@@ -246,6 +323,7 @@ const PRIORITY_OPTIONS = [
 
 const loading = ref(false);
 const bugs = ref<BugListItem[]>([]);
+const projectMembers = ref<ProjectMemberBrief[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
@@ -261,6 +339,7 @@ interface Filters {
   severity: string[];
   priority: string[];
   source_test_type: string;
+  assignee: number | null;
 }
 const filters = reactive<Filters>({
   keyword: '',
@@ -268,6 +347,7 @@ const filters = reactive<Filters>({
   severity: [],
   priority: [],
   source_test_type: '',
+  assignee: null,
 });
 
 const reload = () => { page.value = 1; loadList(); };
@@ -285,13 +365,14 @@ const loadList = async () => {
     if (filters.severity.length) params.severity = filters.severity.join(',');
     if (filters.priority.length) params.priority = filters.priority.join(',');
     if (filters.source_test_type) params.source_test_type = filters.source_test_type;
+    if (filters.assignee) params.assignee = filters.assignee;
 
     const res = await listBugs(params);
     bugs.value = res.results;
     total.value = res.count;
   } catch (e) {
     console.error(e);
-    ElMessage.error('加载 Bug 列表失败');
+    ElMessage.error(extractErrorMessage(e, '加载 Bug 列表失败'));
   } finally {
     loading.value = false;
   }
@@ -305,6 +386,14 @@ const loadStats = async () => {
   }
 };
 
+const loadMembers = async () => {
+  try {
+    projectMembers.value = await getProjectMembers(projectId);
+  } catch {
+    // 指派人筛选不可用不影响主列表
+  }
+};
+
 const handleSeedDemo = async () => {
   try {
     const res = await seedDemoBugs(projectId);
@@ -312,7 +401,7 @@ const handleSeedDemo = async () => {
     await loadList();
     await loadStats();
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.error || '导入失败');
+    ElMessage.error(extractErrorMessage(e, '导入失败'));
   }
 };
 
@@ -327,6 +416,8 @@ const createForm = reactive({
   environment: '',
   severity: 'major' as BugSeverity,
   priority: 'p2' as BugPriority,
+  assignee_id: null as number | null,
+  linked_task: '',
 });
 
 const openCreate = () => {
@@ -334,6 +425,7 @@ const openCreate = () => {
     title: '', description: '', steps_to_reproduce: '',
     expected: '', actual: '', environment: '',
     severity: 'major', priority: 'p2',
+    assignee_id: null, linked_task: '',
   });
   createDialogVisible.value = true;
 };
@@ -345,14 +437,51 @@ const submitCreate = async () => {
   }
   submitting.value = true;
   try {
-    const bug = await createBug({ project: projectId, ...createForm });
+    const payload: Record<string, any> = {
+      project: projectId,
+      title: createForm.title,
+      description: createForm.description,
+      steps_to_reproduce: createForm.steps_to_reproduce,
+      expected: createForm.expected,
+      actual: createForm.actual,
+      environment: createForm.environment,
+      severity: createForm.severity,
+      priority: createForm.priority,
+    };
+    if (createForm.assignee_id) payload.assignee_id = createForm.assignee_id;
+    if (createForm.linked_task.trim()) payload.linked_task = createForm.linked_task.trim();
+    const bug = await createBug(payload as BugCreatePayload);
     ElMessage.success('Bug 已创建');
     createDialogVisible.value = false;
     router.push(`/projects/${projectId}/bugs/${bug.id}`);
   } catch (e) {
-    ElMessage.error('创建失败');
+    ElMessage.error(extractErrorMessage(e, '创建失败'));
   } finally {
     submitting.value = false;
+  }
+};
+
+const confirmDelete = async (row: BugListItem) => {
+  try {
+    await deleteBug(row.id);
+    ElMessage.success('已删除');
+    await Promise.all([loadList(), loadStats()]);
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e, '删除失败'));
+  }
+};
+
+const onQuickTransition = async (row: BugListItem, to: BugStatus) => {
+  try {
+    const updated = await transitionBug(row.id, to, '');
+    Object.assign(row, {
+      status: updated.status,
+      status_display: updated.status_display,
+    });
+    ElMessage.success(`已流转到 ${STATUS_LABEL[to]}`);
+    await loadStats();
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e, '流转失败'));
   }
 };
 
@@ -370,6 +499,7 @@ const formatTime = (t: string) => t ? new Date(t).toLocaleString() : '-';
 onMounted(() => {
   loadList();
   loadStats();
+  loadMembers();
 });
 </script>
 
@@ -404,4 +534,9 @@ onMounted(() => {
   padding: 12px 16px; background: var(--el-fill-color-light);
   margin-bottom: 12px; border: 1px dashed var(--el-border-color);
 }
+.linked-task-chip {
+  font-family: monospace;
+  color: var(--el-text-color-secondary);
+}
+.muted { color: var(--el-text-color-placeholder); }
 </style>
