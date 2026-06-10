@@ -1,63 +1,81 @@
+version: '3.8'
+
 services:
   # 1. 数据库
   db:
     image: mysql:8.0
+    container_name: mysql-dev
     restart: always
     environment:
-      MYSQL_DATABASE: flowspace
+      MYSQL_DATABASE: syncboard
+      # 这里配置普通用户（对应你 settings.py 里的 Liujia）
       MYSQL_USER: Liujia
-      MYSQL_PASSWORD: 13579Mnb!
-      MYSQL_ROOT_PASSWORD: 13579Mnb!
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
+      # root 密码依然保留，以备不时之需
+      MYSQL_ROOT_PASSWORD: root
     volumes:
       - db_data:/var/lib/mysql
     ports:
       - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
 
   # 2. Redis
   redis:
     image: redis:7-alpine
+    container_name: redis-dev
     restart: always
     ports:
       - "6379:6379"
     volumes:
-      - ./redis_data:/data
+      - redis_data:/data
     command: redis-server --appendonly yes
 
-  # 3. 后端 (Django)
-  backend:
-    build: ./backend
-    restart: always
-    command: sh -c "python manage.py collectstatic --noinput && python manage.py migrate && gunicorn backend.asgi:application -k uvicorn.workers.UvicornWorker -w 2 --bind 0.0.0.0:8000"
+  # 3. Elasticsearch
+  elasticsearch:
+    image: elasticsearch:7.17.18
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+
+  # 4. Celery Worker
+  celery_worker:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: celery-worker
+    command: celery -A backend worker -l info
     volumes:
       - ./backend:/app
-      - ./e2e:/app/e2e
-      - static_volume:/app/staticfiles
-    ports:
-      - "8000:8000"
-      - "8089:8089"
-    depends_on:
-      - db
-      - redis
     environment:
-      DB_HOST: db
-      REDIS_HOST: redis
-      DB_NAME: flowspace
-      DB_USER: Liujia
-      DB_PASSWORD: 13579Mnb!
-      DJANGO_SECRET_KEY: "prod-secret-key-change-me"
-      DEBUG: "False"
-
-  # 4. 前端 (Nginx + Vue)
-  frontend:
-    build: ./frontend
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - static_volume:/app/staticfiles
+      - DB_NAME=syncboard
+      - DB_USER=Liujia
+      - DB_PASSWORD=${MYSQL_PASSWORD:-changeme}
+      - DB_HOST=db
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # 连接 ES 需要使用容器名
+      - HAYSTACK_URL=http://elasticsearch:9200/
     depends_on:
-      - backend
+      - redis
+      - db
+      - elasticsearch
+
+  # 开发阶段：后端和前端都在本地跑，所以下面全部注释掉
+  # backend:
+  #   ...
+  # frontend:
+  #   ...
 
 volumes:
   db_data:
-  static_volume:
+  redis_data:
+  es_data:
