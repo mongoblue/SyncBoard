@@ -32,6 +32,8 @@ export interface BugListItem {
   source_test_type: BugSource;
   created_at: string;
   updated_at: string;
+  linked_task: string | null;
+  allowed_transitions?: BugStatus[];
 }
 
 export interface BugTransition {
@@ -80,6 +82,7 @@ export interface BugCreatePayload {
   severity?: BugSeverity;
   priority?: BugPriority;
   assignee_id?: number | null;
+  linked_task?: string | null;
 }
 
 export interface BugListParams {
@@ -121,7 +124,9 @@ export const getBug = (id: number): Promise<BugDetail> =>
 export const createBug = (payload: BugCreatePayload): Promise<BugDetail> =>
   service.post(`${BASE}/`, payload) as Promise<BugDetail>;
 
-export const updateBug = (id: number, payload: Partial<BugCreatePayload>): Promise<BugDetail> =>
+export type BugUpdatePayload = Partial<Omit<BugCreatePayload, 'project'>>
+
+export const updateBug = (id: number, payload: BugUpdatePayload): Promise<BugDetail> =>
   service.patch(`${BASE}/${id}/`, payload) as Promise<BugDetail>;
 
 export const deleteBug = (id: number): Promise<void> =>
@@ -152,6 +157,20 @@ export const getBugStats = (project?: string): Promise<BugStats> =>
 
 export const seedDemoBugs = (projectId: string): Promise<{ added: number; total: number }> =>
   service.post(`/bugs/seed-demo/`, null, { params: { project_id: projectId } }) as Promise<{ added: number; total: number }>;
+
+export interface ProjectMemberBrief {
+  user_id: number;
+  username: string;
+}
+
+export const getProjectMembers = async (projectId: string): Promise<ProjectMemberBrief[]> => {
+  const res: any = await service.get(`/projects/${projectId}/members/`)
+  const list = Array.isArray(res) ? res : (res?.results || [])
+  return list.map((m: any) => ({
+    user_id: m.user_id || m.user?.id || m.user_detail?.id || m.id,
+    username: m.username || m.user?.username || m.user_detail?.username || '',
+  }))
+}
 
 // 状态、严重度、优先级显示工具
 export const STATUS_TAG_TYPE: Record<BugStatus, 'info' | 'warning' | 'primary' | 'success' | 'danger' | ''> = {
