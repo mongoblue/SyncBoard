@@ -34,10 +34,10 @@
 
 | 子项目 | 范围 | spec |
 |--------|------|------|
-| **1. API 测试** | 断言修复 + 批量数据模型 + cURL + 趋势 | **本文件** |
-| 2. UI 测试 | Playwright 启动与守护线程修复、断言补齐 | `2026-06-XX-qa-ui-test-repair-design.md` |
-| 3. DevOps 压测 | IPC 重构 + 多业务场景 + 指标落库 | `2026-06-XX-qa-devops-stress-design.md` |
-| 4. 结果展示 | 已有子项目 1/2/3 的结果模型基础上重写 `TestResultList.vue` | `2026-06-XX-qa-result-display-design.md` |
+| **1. API 测试** | 断言修复 + 批量数据模型 + cURL + 趋势 | **本文件**(2026-06-11) |
+| 2. UI 测试 | Playwright 启动与守护线程修复、断言补齐 | 后续 `docs/superpowers/specs/2026-06-XX-qa-ui-test-repair-design.md` |
+| 3. DevOps 压测 | IPC 重构 + 多业务场景 + 指标落库 | 后续 `docs/superpowers/specs/2026-06-XX-qa-devops-stress-design.md` |
+| 4. 结果展示 | 已有子项目 1/2/3 的结果模型基础上重写 `TestResultList.vue` | 后续 `docs/superpowers/specs/2026-06-XX-qa-result-display-design.md` |
 
 > 注:子项目 4 的前端重写会复用本 spec 产出的 `TestRun` / `TestRunCaseResult` API。
 
@@ -238,9 +238,10 @@ response_extractions = JSONField(default=list, blank=True)
 #### `POST /api/qa/api-cases/run-batch/` (新增)
 - Request: `{case_ids: [..], name?, environment_id?, max_workers?}`
 - 默认 `max_workers=4`,可通过请求覆盖
+- HTTP 请求**同步**返回 `{run_id}`;执行在后台 `ThreadPoolExecutor` 中跑
 - 立刻创建 `TestRun(status='running', total_count=len(case_ids))`,返回 `{run_id}`
 - 内部 `concurrent.futures.ThreadPoolExecutor(max_workers=4)` 并发执行
-- 每条完成后:写 `ApiTestResult` + `TestRunCaseResult` + 用 `F()` 原子更新 `TestRun` 计数
+- 每条完成后:写 `ApiTestResult` + `TestRunCaseResult`(`request_snapshot` 用实际 method/url/headers/body 填一次,`curl` 同步生成)+ 用 `F()` 原子更新 `TestRun` 计数
 - 全部完成:`status=passed|failed|error`、`completed_at=now()`、`duration_ms=...`
 - WebSocket 推 `test_run_{run_id}` 群:`{type: 'case_done', sequence, status, passed_count, failed_count}`
 
