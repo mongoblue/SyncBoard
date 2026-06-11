@@ -32,7 +32,13 @@ from .views_devops import (
 )
 from .views_run_plan import TestRunPlanViewSet
 from .views_environment import TestEnvironmentViewSet, TestGlobalVarViewSet
-from .views_test_run import cancel_test_run
+from .views_test_run import (
+    cancel_test_run,
+    list_test_runs,
+    test_run_detail,
+    test_run_cases,
+    test_run_case_detail,
+)
 
 router = DefaultRouter()
 router.register(r'api-cases', ApiTestCaseViewSet, basename='api_test_case')
@@ -56,6 +62,10 @@ urlpatterns = [
     path('run-test/', RunTestView.as_view(), name='run_test'),
     path('api-cases/run-batch/', ApiTestCaseBatchRunView.as_view(), name='api_case_run_batch'),
     path('runs/<int:run_id>/cancel/', cancel_test_run, name='test_run_cancel'),
+    path('runs/', list_test_runs, name='test_run_list'),
+    path('runs/<int:run_id>/', test_run_detail, name='test_run_detail'),
+    path('runs/<int:run_id>/cases/', test_run_cases, name='test_run_cases'),
+    path('runs/<int:run_id>/cases/<int:case_result_id>/', test_run_case_detail, name='test_run_case_detail'),
     path('', include(router.urls)),
     path('auto-execute/', ApiAutoTestExecuteView.as_view(), name='api_auto_execute'),
     path('devops/stats/', DashboardStatsView.as_view(), name='devops_stats'),

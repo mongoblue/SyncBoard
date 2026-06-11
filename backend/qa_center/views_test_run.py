@@ -40,3 +40,133 @@ def cancel_test_run(request, run_id):
         status='cancelled', completed_at=timezone.now(),
     )
     return Response({'status': 'cancelled', 'run_id': run.id})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def list_test_runs(request):
+    """GET /api/qa/runs/?project=&status=&test_type=&page=&page_size="""
+    qs = TestRun.objects.select_related('project', 'triggered_by')
+    project_id = request.query_params.get('project')
+    if project_id:
+        qs = qs.filter(project_id=project_id)
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    test_type = request.query_params.get('test_type')
+    if test_type:
+        qs = qs.filter(test_type=test_type)
+
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 20)), 100)
+    total = qs.count()
+    start = (page - 1) * page_size
+    items = qs[start:start + page_size]
+
+    return Response({
+        'count': total,
+        'page': page,
+        'page_size': page_size,
+        'results': [_serialize_run(r) for r in items],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def test_run_detail(request, run_id):
+    try:
+        run = TestRun.objects.select_related('project', 'triggered_by').get(id=run_id)
+    except TestRun.DoesNotExist:
+        return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    data = _serialize_run(run)
+    data['case_count'] = run.case_results.count()
+    data['summary'] = run.summary
+    return Response(data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def test_run_cases(request, run_id):
+    try:
+        run = TestRun.objects.get(id=run_id)
+    except TestRun.DoesNotExist:
+        return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+    qs = run.case_results.select_related('api_test_case', 'ui_test_case').order_by('sequence')
+    status_filter = request.query_params.get('status')
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+
+    page = int(request.query_params.get('page', 1))
+    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+    total = qs.count()
+    start = (page - 1) * page_size
+    items = qs[start:start + page_size]
+
+    return Response({
+        'count': total,
+        'page': page,
+        'page_size': page_size,
+        'results': [_serialize_case_result(r) for r in items],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def test_run_case_detail(request, run_id, case_result_id):
+    try:
+        case_result = TestRunCaseResult.objects.select_related(
+            'test_run', 'api_test_case', 'ui_test_case'
+        ).get(id=case_result_id, test_run_id=run_id)
+    except TestRunCaseResult.DoesNotExist:
+        return Response({'error': 'CaseResult 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    return Response(_serialize_case_result(case_result, full=True))
+
+
+def _serialize_run(run):
+    return {
+        'id': run.id,
+        'project_id': run.project_id,
+        'project_name': run.project.name if run.project else '',
+        'name': run.name,
+        'trigger': run.trigger,
+        'test_type': run.test_type,
+        'status': run.status,
+        'total_count': run.total_count,
+        'passed_count': run.passed_count,
+        'failed_count': run.failed_count,
+        'error_count': run.error_count,
+        'pass_rate': float(run.pass_rate) if run.pass_rate is not None else 0,
+        'duration_ms': run.duration_ms,
+        'triggered_by': run.triggered_by.username if run.triggered_by else None,
+        'started_at': run.started_at.isoformat() if run.started_at else None,
+        'completed_at': run.completed_at.isoformat() if run.completed_at else None,
+        'created_at': run.created_at.isoformat() if run.created_at else None,
+    }
+
+
+def _serialize_case_result(r, full=False):
+    base = {
+        'id': r.id,
+        'test_run_id': r.test_run_id,
+        'case_type': r.case_type,
+        'sequence': r.sequence,
+        'api_test_case_id': r.api_test_case_id,
+        'ui_test_case_id': r.ui_test_case_id,
+        'name': r.api_test_case.name if r.api_test_case else (r.ui_test_case.name if r.ui_test_case else ''),
+        'status': r.status,
+        'duration_ms': r.duration_ms,
+        'status_code': r.status_code,
+        'error_message': r.error_message,
+        'started_at': r.started_at.isoformat() if r.started_at else None,
+        'completed_at': r.completed_at.isoformat() if r.completed_at else None,
+    }
+    if full:
+        base.update({
+            'response_body': r.response_body,
+            'response_headers': r.response_headers,
+            'assertion_results': r.assertion_results,
+            'request_snapshot': r.request_snapshot,
+            'curl': r.curl,
+        })
+    return base
