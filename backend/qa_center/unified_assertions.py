@@ -286,6 +286,15 @@ class ResponseContext:
     # 解析后的 JSON（None 表示响应体不是合法 JSON）
     response_json: Optional[Any] = None
 
+    def __post_init__(self):
+        # 直接构造 ResponseContext 时,允许 response_json 缺省由 body 自动解析。
+        # from_raw 会显式赋值,所以这里只在确实为 None 且 body 不空时才尝试。
+        if self.response_json is None and self.response_body:
+            try:
+                self.response_json = json.loads(self.response_body)
+            except (json.JSONDecodeError, TypeError):
+                self.response_json = None
+
     @classmethod
     def from_raw(
         cls,
@@ -526,7 +535,9 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.actual_value = target
             if target is None:
                 res.passed = False
-                res.error_message = a.error_message or '目标为空，无法匹配正则'
+                res.error_message = a.error_message or (
+                    f'正则匹配目标为空:路径 "{a.path}" 不存在或响应不是合法 JSON'
+                )
                 return res
             pat = a.expected if isinstance(a.expected, str) else str(a.expected)
             try:
@@ -656,16 +667,18 @@ def _maybe_loads_json(v: Any) -> Any:
 
 
 def _maybe_loads_structured(v: Any) -> Any:
-    """只解析结构化 JSON（对象/数组/true/false/null），不把数字字符串转成数字。
+    """只解析结构化 JSON（对象/数组/字符串字面量/true/false/null），不把裸数字字符串转成数字。
 
-    用于 eq/ne 这种严格相等场景，避免 "30" == 30 这种类型混淆。
+    用于 eq/ne 这种场景:既要把 ``"\"1\""`` 解出 ``"1"`` (用户在 UI 里
+    粘了一个 JSON 字符串字面量),又不能把 ``"30"`` 解成 ``30`` (避免
+    类型混淆——这步交给 ``_smart_eq`` 做数字↔字符串容错)。
     """
     if not isinstance(v, str):
         return v
     s = v.strip()
     if not s:
         return v
-    if s[0] in '{[' or s in ('true', 'false', 'null'):
+    if s[0] in '{[' or s in ('true', 'false', 'null') or (s[0] == '"' and s[-1] == '"'):
         try:
             return json.loads(s)
         except json.JSONDecodeError:

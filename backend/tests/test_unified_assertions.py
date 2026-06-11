@@ -367,3 +367,37 @@ def test_smart_ne_inverse_of_eq():
     assert _smart_ne(30, "30") is False   # 30 == '30', so != False
     assert _smart_ne(True, 1) is True     # True != 1
     assert _smart_ne("abc", "abd") is True
+
+
+# --------------------------------------------------------------------------- 失败时附实际/期望渲染 + regex 友好错误
+
+
+def test_json_equals_renders_expected_and_actual():
+    """失败时附 expected_rendered/actual_rendered 字符串"""
+    assertion = Assertion(
+        kind=KIND_JSON_EQUALS, operator='eq', expected='"1"',
+        path='$.user.id', error_message='',
+    )
+    ctx = ResponseContext(
+        status_code=200, response_body='{"user":{"id":1}}',
+        response_headers={}, response_time_ms=10.0,
+    )
+    res = evaluate(assertion, ctx)
+    assert res.passed is True
+    assert res.expected_value == '"1"' or res.expected_value == '1'
+    assert res.actual_value == 1
+
+
+def test_regex_match_none_target_friendly_error():
+    """regex 目标为 None 时,error_message 应该友好"""
+    assertion = Assertion(
+        kind=KIND_REGEX_MATCH, operator='eq', expected='.*',
+        path='$.missing', error_message='',
+    )
+    ctx = ResponseContext(
+        status_code=200, response_body='{}',
+        response_headers={}, response_time_ms=10.0,
+    )
+    res = evaluate(assertion, ctx)
+    assert res.passed is False
+    assert "目标为空" in res.error_message or "不存在" in res.error_message
