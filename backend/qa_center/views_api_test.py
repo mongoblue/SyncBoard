@@ -7,7 +7,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.test import Client
 from django.urls import resolve
 from django.http import HttpRequest
-from .models import ApiTestCase, ApiTestResult, TestResult
+from django.utils import timezone
+from django.db.models import F
+from .models import ApiTestCase, ApiTestResult, TestResult, TestRun, TestRunCaseResult
+from .utils.curl import to_curl
 from .serializers import (
     ApiTestCaseSerializer,
     ApiTestCaseListSerializer,
@@ -49,7 +52,20 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
         POST /api/qa/api-cases/{id}/run/
         """
         test_case = self.get_object()
-        
+
+        # 双写: 创建 TestRun(单条也视为一次运行)
+        test_run = TestRun.objects.create(
+            project=test_case.project,
+            name=f"{test_case.name} @ {timezone.now().strftime('%Y-%m-%d %H:%M')}",
+            trigger='manual',
+            test_type='api',
+            status='running',
+            total_count=1,
+            started_at=timezone.now(),
+            triggered_by=request.user,
+            config_snapshot={'source': 'single', 'case_id': test_case.id},
+        )
+
         # 获取运行参数（支持临时覆盖）
         override_data = request.data
         url = override_data.get('url', test_case.url)
@@ -208,6 +224,49 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 executed_by=request.user
             )
 
+            # 双写: 写 TestRunCaseResult
+            request_snapshot = {
+                'method': method,
+                'url': url,
+                'headers': headers,
+                'body': body,
+            }
+            curl_str = to_curl(method, url, headers, body,
+                               content_type=test_case.content_type or 'application/json')
+            case_result = TestRunCaseResult.objects.create(
+                test_run=test_run,
+                case_type='api',
+                sequence=1,
+                api_test_case=test_case,
+                status='passed' if passed else 'failed',
+                duration_ms=response_time_ms,
+                status_code=status_code,
+                response_body=response_body[:10000],
+                response_headers=response_headers,
+                assertion_results=assertion_results,
+                request_snapshot=request_snapshot,
+                curl=curl_str,
+                legacy_api_result_id=result.id,
+                legacy_test_result_id=None,  # 后面 TestResult 写完后回填
+                started_at=test_run.started_at,
+                completed_at=timezone.now(),
+            )
+            # 更新 TestRun 计数与状态
+            if passed:
+                TestRun.objects.filter(id=test_run.id).update(
+                    passed_count=F('passed_count') + 1
+                )
+            else:
+                TestRun.objects.filter(id=test_run.id).update(
+                    failed_count=F('failed_count') + 1
+                )
+            test_run.refresh_from_db()
+            test_run.recompute_pass_rate()
+            test_run.status = 'passed' if test_run.failed_count == 0 and test_run.error_count == 0 else 'failed'
+            test_run.completed_at = timezone.now()
+            test_run.duration_ms = response_time_ms
+            test_run.save()
+
             # 构建完整的执行日志
             execution_log = {
                 'summary': {
@@ -238,7 +297,7 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 }]
             }
 
-            TestResult.objects.create(
+            test_result = TestResult.objects.create(
                 test_type='api',
                 name=test_case.name,
                 source='single',
@@ -250,7 +309,10 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 actual_result=response_body[:2000] if response_body else '',
                 test_log=json.dumps(execution_log, ensure_ascii=False, default=str),
             )
-            
+            # 回填 legacy_test_result_id
+            case_result.legacy_test_result_id = test_result.id
+            case_result.save(update_fields=['legacy_test_result_id'])
+
             # 返回执行结果
             result_data = {
                 'status_code': status_code,
@@ -260,7 +322,10 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 'passed': passed,
                 'expected_status': test_case.expected_status,
                 'assertion_results': assertion_results,
-                'result_id': result.id
+                'result_id': result.id,
+                'run_id': test_run.id,
+                'case_result_id': case_result.id,
+                'curl': curl_str,
             }
             
             return Response(result_data)
@@ -290,6 +355,51 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 error_message=str(e),
                 executed_by=request.user
             )
+
+            # 双写: 异常路径也写 TestRunCaseResult
+            safe_method = method if isinstance(method, str) else (test_case.method or 'GET')
+            safe_url = url if isinstance(url, str) else (test_case.url or '')
+            safe_headers = headers if isinstance(headers, dict) else {}
+            safe_body = body if not isinstance(body, str) else None
+            request_snapshot = {
+                'method': safe_method,
+                'url': safe_url,
+                'headers': safe_headers,
+                'body': safe_body,
+            }
+            try:
+                curl_str = to_curl(safe_method, safe_url, safe_headers, safe_body,
+                                   content_type=test_case.content_type or 'application/json')
+            except Exception:
+                curl_str = ''
+            case_result = TestRunCaseResult.objects.create(
+                test_run=test_run,
+                case_type='api',
+                sequence=1,
+                api_test_case=test_case,
+                status='error',
+                duration_ms=response_time_ms,
+                status_code=0,
+                response_body='',
+                response_headers={},
+                assertion_results=assertion_results,
+                request_snapshot=request_snapshot,
+                curl=curl_str,
+                error_message=str(e),
+                legacy_api_result_id=result.id,
+                legacy_test_result_id=None,
+                started_at=test_run.started_at,
+                completed_at=timezone.now(),
+            )
+            TestRun.objects.filter(id=test_run.id).update(
+                error_count=F('error_count') + 1
+            )
+            test_run.refresh_from_db()
+            test_run.recompute_pass_rate()
+            test_run.status = 'error'
+            test_run.completed_at = timezone.now()
+            test_run.duration_ms = response_time_ms
+            test_run.save()
 
             # 构建异常情况的执行日志
             error_log = {
@@ -321,7 +431,7 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 }]
             }
 
-            TestResult.objects.create(
+            test_result = TestResult.objects.create(
                 test_type='api',
                 name=test_case.name,
                 source='single',
@@ -333,6 +443,9 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 error_message=str(e),
                 test_log=json.dumps(error_log, ensure_ascii=False, default=str),
             )
+            # 回填 legacy_test_result_id
+            case_result.legacy_test_result_id = test_result.id
+            case_result.save(update_fields=['legacy_test_result_id'])
             return Response({
                 'status_code': 0,
                 'response_body': '',
@@ -342,7 +455,10 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 'expected_status': test_case.expected_status,
                 'assertion_results': assertion_results,
                 'error_message': str(e),
-                'result_id': result.id
+                'result_id': result.id,
+                'run_id': test_run.id,
+                'case_result_id': case_result.id,
+                'curl': curl_str,
             })
     
     @action(detail=True, methods=['get'])
