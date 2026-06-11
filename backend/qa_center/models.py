@@ -941,11 +941,9 @@ class TestRun(models.Model):
     def __str__(self):
         return f"{self.name} [{self.status}]"
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # 运行时标记:批量执行后台线程读取此字段决定是否标 cancelled
-        # 非 DB 字段,不参与持久化
-        self.cancelled = False
+    # 运行时标记槽位:不写 DB。当前 finalizer 通过重读 DB status 来识别 cancel,
+    # 此属性保留作为未来协作式取消(让运行中的 worker 主动停下)的信号位。
+    cancelled = False
 
     def recompute_pass_rate(self):
         completed = self.passed_count + self.failed_count + self.error_count

@@ -33,9 +33,9 @@ def cancel_test_run(request, run_id):
         test_run=run, status='pending',
     ).update(status='skipped', completed_at=timezone.now())
 
-    # 标记 cancelled (临时属性,后台执行器会读取)
-    run.cancelled = True
-    # 用 update 防止覆盖后台线程对 count/pass_rate 的写
+    # 仅标记 DB status='cancelled'。已在跑的 worker 会继续完成,
+    # 后台 finalizer 重读 DB status 后会尊重 'cancelled',不再覆盖。
+    # 用 update 防止覆盖后台线程对 count/pass_rate 的写。
     TestRun.objects.filter(id=run.id).update(
         status='cancelled', completed_at=timezone.now(),
     )

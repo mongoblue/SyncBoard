@@ -64,6 +64,7 @@ def test_run_batch_creates_one_case_result_per_case(batch_auth_client, five_case
         if run.status != 'running':
             break
         time.sleep(0.3)
+    assert run.status != 'running', f'background did not complete: status={run.status}'
     results = TestRunCaseResult.objects.filter(test_run_id=run_id).order_by('sequence')
     assert results.count() == 5
     assert {r.sequence for r in results} == {1, 2, 3, 4, 5}
@@ -86,6 +87,7 @@ def test_run_batch_updates_counts(batch_auth_client, five_cases):
         if run.status != 'running':
             break
         time.sleep(0.3)
+    assert run.status != 'running', f'background did not complete: status={run.status}'
     run = TestRun.objects.get(id=run_id)
     assert run.passed_count + run.failed_count + run.error_count == 5
 

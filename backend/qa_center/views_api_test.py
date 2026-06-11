@@ -561,9 +561,7 @@ class ApiTestCaseBatchRunView(APIView):
             },
         )
 
-        # 抓取 cookies(主线程,避免子线程访问 request.session)
-        session_cookie = request.COOKIES.get('sessionid', '')
-        csrf_cookie = request.COOKIES.get('csrftoken', '')
+        # 后台线程需要的用户(用于 force_login + executed_by)
         triggered_user = request.user
 
         def _execute_single_case(case, parent_run, sequence):
@@ -583,10 +581,8 @@ class ApiTestCaseBatchRunView(APIView):
                     body = None
 
                 test_client = Client()
-                if session_cookie:
-                    test_client.cookies['sessionid'] = session_cookie
-                if csrf_cookie:
-                    test_client.cookies['csrftoken'] = csrf_cookie
+                if triggered_user:
+                    test_client.force_login(triggered_user)
 
                 request_headers = dict(headers) if headers else {}
                 if body and 'Content-Type' not in request_headers:
@@ -680,8 +676,8 @@ class ApiTestCaseBatchRunView(APIView):
                         started_at=parent_run.started_at, completed_at=timezone.now(),
                     )
                     TestRun.objects.filter(id=parent_run.id).update(error_count=F('error_count') + 1)
-                except Exception as inner:
-                    logger.error(f'Failed to record case error: {inner}')
+                except Exception:
+                    logger.exception('Failed to record case error')
                 return False, str(e)
             finally:
                 close_old_connections()
@@ -699,15 +695,26 @@ class ApiTestCaseBatchRunView(APIView):
                     for future in as_completed(futures):
                         try:
                             future.result()
-                        except Exception as e:
-                            logger.error(f'Batch run case error: {e}')
+                        except Exception:
+                            logger.exception('Batch run case error')
             finally:
                 # 收尾:刷新 pass_rate + 状态
                 try:
+                    # 重新从 DB 读 status,尊重期间发生的 cancel
+                    # (cancel 端点直接 update DB status='cancelled',
+                    # 不会传到此处闭包捕获的 run 实例)
+                    current_status = TestRun.objects.filter(
+                        id=run.id,
+                    ).values_list('status', flat=True).first()
                     run.refresh_from_db()
                     run.recompute_pass_rate()
-                    if getattr(run, 'cancelled', False):
-                        run.status = 'cancelled'
+                    run.completed_at = timezone.now()
+                    if run.started_at:
+                        delta = (run.completed_at - run.started_at).total_seconds() * 1000
+                        run.duration_ms = int(delta)
+                    if current_status == 'cancelled':
+                        # 已被取消:不要覆盖 status,只补 pass_rate / 完成时间
+                        run.save(update_fields=['pass_rate', 'completed_at', 'duration_ms'])
                     else:
                         if run.failed_count == 0 and run.error_count == 0:
                             run.status = 'passed'
@@ -715,13 +722,10 @@ class ApiTestCaseBatchRunView(APIView):
                             run.status = 'error'
                         else:
                             run.status = 'failed'
-                    run.completed_at = timezone.now()
-                    if run.started_at:
-                        delta = (run.completed_at - run.started_at).total_seconds() * 1000
-                        run.duration_ms = int(delta)
-                    run.save()
-                except Exception as e:
-                    logger.error(f'Failed to finalize batch run: {e}')
+                        # update_fields 限定字段,避免 full save 覆盖 F() 计数。
+                        run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
+                except Exception:
+                    logger.exception('Failed to finalize batch run')
                 finally:
                     close_old_connections()
 
