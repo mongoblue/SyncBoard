@@ -883,3 +883,129 @@ class TestGlobalVar(models.Model):
         constraints = [
             models.UniqueConstraint(fields=('project', 'key'), name='uniq_global_var_per_project_key'),
         ]
+
+
+class TestRun(models.Model):
+    """一次批量执行(父任务)"""
+    STATUS = [
+        ('pending', '待执行'), ('running', '执行中'),
+        ('passed', '全部通过'), ('failed', '有失败'),
+        ('error', '执行异常'), ('cancelled', '已取消'),
+    ]
+    TRIGGER = [
+        ('manual', '手动'), ('scheduled', '定时'),
+        ('cicd', 'CI/CD'), ('regression', '回归'),
+    ]
+    TEST_TYPE = [
+        ('api', 'API'), ('ui', 'UI'),
+        ('performance', '性能'), ('mixed', '混合'),
+    ]
+
+    project = models.ForeignKey(
+        'room.Project', on_delete=models.CASCADE, related_name='test_runs'
+    )
+    name = models.CharField(max_length=200)
+    trigger = models.CharField(max_length=20, choices=TRIGGER, default='manual')
+    test_type = models.CharField(max_length=20, choices=TEST_TYPE, default='api')
+    status = models.CharField(max_length=20, choices=STATUS, default='pending')
+
+    total_count = models.IntegerField(default=0)
+    passed_count = models.IntegerField(default=0)
+    failed_count = models.IntegerField(default=0)
+    error_count = models.IntegerField(default=0)
+    pass_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    duration_ms = models.IntegerField(null=True)
+
+    config_snapshot = models.JSONField(default=dict, blank=True)
+    curl_template = models.TextField(blank=True)
+
+    triggered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        related_name='triggered_test_runs',
+    )
+    started_at = models.DateTimeField(null=True)
+    completed_at = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    summary = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = 'qa_test_runs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['project', '-created_at']),
+            models.Index(fields=['status']),
+        ]
+        verbose_name = '测试运行'
+        verbose_name_plural = '测试运行'
+
+    def __str__(self):
+        return f"{self.name} [{self.status}]"
+
+    def recompute_pass_rate(self):
+        completed = self.passed_count + self.failed_count + self.error_count
+        self.pass_rate = (
+            round(self.passed_count / completed * 100, 2)
+            if completed > 0 else 0
+        )
+
+
+class TestRunCaseResult(models.Model):
+    """批量执行里单条用例的结果"""
+    STATUS = [
+        ('pending', '待执行'), ('running', '执行中'),
+        ('passed', '通过'), ('failed', '失败'),
+        ('error', '异常'), ('skipped', '跳过'),
+    ]
+    CASE_TYPE = [
+        ('api', 'API'), ('ui', 'UI'), ('performance', '性能'),
+    ]
+
+    test_run = models.ForeignKey(
+        TestRun, on_delete=models.CASCADE, related_name='case_results'
+    )
+    case_type = models.CharField(max_length=20, choices=CASE_TYPE, default='api')
+    sequence = models.IntegerField()
+
+    api_test_case = models.ForeignKey(
+        'ApiTestCase', null=True, on_delete=models.SET_NULL,
+        related_name='run_case_results',
+    )
+    ui_test_case = models.ForeignKey(
+        'UiTestCase', null=True, on_delete=models.SET_NULL,
+        related_name='run_case_results',
+    )
+
+    status = models.CharField(max_length=20, choices=STATUS, default='pending')
+    duration_ms = models.IntegerField(null=True)
+    status_code = models.IntegerField(null=True)
+    response_body = models.TextField(blank=True)
+    response_headers = models.JSONField(default=dict, blank=True)
+    assertion_results = models.JSONField(default=list, blank=True)
+    request_snapshot = models.JSONField(default=dict, blank=True)
+    curl = models.TextField(blank=True)
+    error_message = models.TextField(blank=True)
+
+    legacy_api_result_id = models.IntegerField(null=True)
+    legacy_test_result_id = models.IntegerField(null=True)
+
+    started_at = models.DateTimeField(null=True)
+    completed_at = models.DateTimeField(null=True)
+
+    class Meta:
+        db_table = 'qa_test_run_case_results'
+        ordering = ['sequence']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['test_run', 'sequence'],
+                name='uniq_test_run_sequence',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['test_run', 'status']),
+            models.Index(fields=['api_test_case', '-completed_at']),
+        ]
+        verbose_name = '测试运行用例结果'
+        verbose_name_plural = '测试运行用例结果'
+
+    def __str__(self):
+        return f"#{self.sequence} {self.status}"
