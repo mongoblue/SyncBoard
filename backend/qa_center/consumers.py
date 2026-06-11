@@ -208,3 +208,29 @@ class PerformanceTestConsumer(AsyncWebsocketConsumer):
     async def test_update(self, event):
         """接收测试数据更新"""
         await self.send(text_data=json.dumps(event['data']))
+
+
+class TestRunProgressConsumer(AsyncWebsocketConsumer):
+    """TestRun 实时进度推送
+
+    URL: /ws/qa/test-run/{run_id}/
+    消息: {type: 'case_done', sequence, status, passed_count, ...}
+    """
+    async def connect(self):
+        self.run_id = self.scope['url_route']['kwargs'].get('run_id')
+        self.group_name = f"test_run_{self.run_id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send(text_data=json.dumps({
+            'type': 'connected', 'run_id': self.run_id,
+            'message': f'已订阅 TestRun {self.run_id} 的进度',
+        }))
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def case_done(self, event):
+        await self.send(text_data=json.dumps(event['data']))
+
+    async def run_finished(self, event):
+        await self.send(text_data=json.dumps(event['data']))
