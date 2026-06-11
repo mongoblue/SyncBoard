@@ -67,6 +67,11 @@ class ApiTestCase(models.Model):
         related_name='linked_api_test_cases',
         verbose_name='关联任务',
     )
+    response_extractions = models.JSONField(
+        default=list, blank=True,
+        verbose_name='响应变量提取',
+        help_text='[{"json_path": "$.token", "var_name": "auth_token", "default": null}]'
+    )
 
     class Meta:
         verbose_name = 'API测试用例'
