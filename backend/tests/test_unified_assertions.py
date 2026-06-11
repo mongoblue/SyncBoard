@@ -401,3 +401,38 @@ def test_regex_match_none_target_friendly_error():
     res = evaluate(assertion, ctx)
     assert res.passed is False
     assert "目标为空" in res.error_message or "不存在" in res.error_message
+
+
+def test_assertion_result_to_dict_includes_rendered():
+    """AssertionResult.to_dict 失败时应该带 expected_rendered/actual_rendered 字符串"""
+    from qa_center.unified_assertions import AssertionResult
+    res = AssertionResult(
+        assertion_type='json_equals', operator='eq',
+        expected_value=30, actual_value='30', passed=False,
+        error_message='mismatch', json_path='$.id',
+    )
+    res.expected_rendered = '30 (int)'
+    res.actual_rendered = '30 (str)'
+    d = res.to_dict()
+    assert d['expected_rendered'] == '30 (int)'
+    assert d['actual_rendered'] == '30 (str)'
+
+
+def test_evaluate_fills_rendered_on_failure():
+    """evaluate 失败时自动填 expected_rendered/actual_rendered"""
+    from qa_center.unified_assertions import (
+        evaluate, Assertion, ResponseContext, KIND_JSON_EQUALS,
+    )
+    assertion = Assertion(
+        kind=KIND_JSON_EQUALS, operator='eq', expected='xxx', path='$.id',
+    )
+    ctx = ResponseContext(
+        status_code=200, response_body='{"id":30}',
+        response_headers={}, response_time_ms=10.0,
+    )
+    res = evaluate(assertion, ctx)
+    assert res.passed is False
+    assert hasattr(res, 'expected_rendered')
+    assert hasattr(res, 'actual_rendered')
+    assert 'xxx' in res.expected_rendered
+    assert '30' in res.actual_rendered

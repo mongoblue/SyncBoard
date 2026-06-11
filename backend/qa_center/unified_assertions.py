@@ -182,6 +182,8 @@ class AssertionResult:
     error_message: str = ''
     json_path: str = ''
     header_name: str = ''
+    expected_rendered: str = ''
+    actual_rendered: str = ''
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -192,6 +194,8 @@ class AssertionResult:
             'actual_value': self.actual_value,
             'passed': self.passed,
             'error_message': self.error_message,
+            'expected_rendered': self.expected_rendered,
+            'actual_rendered': self.actual_rendered,
         }
         if self.json_path:
             d['json_path'] = self.json_path
@@ -413,6 +417,24 @@ _TYPE_TO_PY = {
 }
 
 
+def _format_value(v: Any) -> str:
+    """人类可读的格式化,带类型注解。"""
+    if v is None:
+        return 'null'
+    if isinstance(v, bool):
+        return f'{v} (bool)'
+    if isinstance(v, (int, float)):
+        return f'{v} ({type(v).__name__})'
+    if isinstance(v, str):
+        return f'"{v}" (str)'
+    if isinstance(v, (dict, list)):
+        s = json.dumps(v, ensure_ascii=False)
+        if len(s) > 100:
+            s = s[:100] + '...'
+        return f'{s} ({type(v).__name__})'
+    return f'{v} ({type(v).__name__})'
+
+
 def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
     """对单条断言做评估，必定返回 ``AssertionResult``（含错误描述）。"""
 
@@ -431,6 +453,8 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.actual_value = actual
             res.passed = OPERATORS.get(a.operator, OPERATORS['eq'])(actual, expected)
             if not res.passed:
+                res.expected_rendered = _format_value(expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or (
                     f'状态码不匹配：实际 {actual}，期望 {a.operator} {expected}'
                 )
@@ -445,6 +469,8 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.passed = OPERATORS[op](actual, expected)
             res.operator = op
             if not res.passed:
+                res.expected_rendered = _format_value(expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or (
                     f'响应时间不达标：实际 {actual:.0f}ms，期望 {op} {expected}ms'
                 )
@@ -472,6 +498,8 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
                 expected = _maybe_loads_json(a.expected)
             res.passed = OPERATORS.get(a.operator, OPERATORS['eq'])(actual, expected)
             if not res.passed:
+                res.expected_rendered = _format_value(expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or (
                     f'路径 "{a.path}" 实际 {actual!r}, 期望 {a.operator} {expected!r}'
                 )
@@ -482,10 +510,14 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.actual_value = actual
             if actual is None:
                 res.passed = False
+                res.expected_rendered = _format_value(a.expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or f'路径 "{a.path}" 不存在'
                 return res
             res.passed = OPERATORS['contains'](actual, a.expected)
             if not res.passed:
+                res.expected_rendered = _format_value(a.expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or (
                     f'路径 "{a.path}" 的值 {actual!r} 不包含 {a.expected!r}'
                 )
@@ -508,6 +540,8 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.actual_value = v
             res.passed = OPERATORS.get(a.operator, OPERATORS['eq'])(v, a.expected)
             if not res.passed:
+                res.expected_rendered = _format_value(a.expected)
+                res.actual_rendered = _format_value(v)
                 res.error_message = a.error_message or (
                     f'响应头 "{a.header_name}" 实际 {v!r}, 期望 {a.operator} {a.expected!r}'
                 )
@@ -522,6 +556,8 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             res.passed = OPERATORS[op](actual, expected)
             res.operator = op
             if not res.passed:
+                res.expected_rendered = _format_value(expected)
+                res.actual_rendered = _format_value(actual)
                 res.error_message = a.error_message or (
                     f'响应体大小不符：实际 {actual} 字节，期望 {op} {expected}'
                 )
