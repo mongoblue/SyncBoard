@@ -8,6 +8,21 @@ from django.utils import timezone
 from .models import TestRun, TestRunCaseResult
 
 
+def _parse_pagination(request, default_size=20, max_size=100):
+    """解析 page / page_size,失败返回 400 Response。"""
+    try:
+        page = max(1, int(request.query_params.get('page', 1)))
+        page_size = min(
+            max_size,
+            max(1, int(request.query_params.get('page_size', default_size))),
+        )
+    except (ValueError, TypeError):
+        return None, None, Response(
+            {'error': 'invalid page or page_size'}, status=400,
+        )
+    return page, page_size, None
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def cancel_test_run(request, run_id):
@@ -57,8 +72,9 @@ def list_test_runs(request):
     if test_type:
         qs = qs.filter(test_type=test_type)
 
-    page = int(request.query_params.get('page', 1))
-    page_size = min(int(request.query_params.get('page_size', 20)), 100)
+    page, page_size, err = _parse_pagination(request, default_size=20, max_size=100)
+    if err:
+        return err
     total = qs.count()
     start = (page - 1) * page_size
     items = qs[start:start + page_size]
@@ -97,8 +113,9 @@ def test_run_cases(request, run_id):
     if status_filter:
         qs = qs.filter(status=status_filter)
 
-    page = int(request.query_params.get('page', 1))
-    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+    page, page_size, err = _parse_pagination(request, default_size=50, max_size=200)
+    if err:
+        return err
     total = qs.count()
     start = (page - 1) * page_size
     items = qs[start:start + page_size]
@@ -136,7 +153,7 @@ def _serialize_run(run):
         'passed_count': run.passed_count,
         'failed_count': run.failed_count,
         'error_count': run.error_count,
-        'pass_rate': float(run.pass_rate) if run.pass_rate is not None else 0,
+        'pass_rate': float(run.pass_rate) if run.pass_rate is not None else 0.0,
         'duration_ms': run.duration_ms,
         'triggered_by': run.triggered_by.username if run.triggered_by else None,
         'started_at': run.started_at.isoformat() if run.started_at else None,

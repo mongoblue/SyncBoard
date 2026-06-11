@@ -106,3 +106,10 @@ def test_run_case_detail(tr_auth_client, two_runs):
     assert data['status'] == 'failed'
     assert data['status_code'] == 500
     assert 'curl' in data
+
+
+@pytest.mark.django_db
+def test_list_runs_invalid_page_returns_400(tr_auth_client, two_runs):
+    client, _ = tr_auth_client
+    response = client.get('/api/qa/runs/?page=abc')
+    assert response.status_code == 400
