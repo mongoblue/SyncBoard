@@ -153,7 +153,34 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 ),
             )
 
-            # 判断测试是否通过
+            # 变量提取(M3.3): 从响应里抽出变量,稍后挂到 assertion_results 末尾
+            from . import extractors as ext
+            parsed_body = None
+            if response_body:
+                try:
+                    parsed_body = json.loads(response_body)
+                except (json.JSONDecodeError, TypeError):
+                    parsed_body = None
+            extracted = {}
+            for spec in (test_case.response_extractions or []):
+                if not isinstance(spec, dict):
+                    continue
+                name = (spec.get('var_name') or spec.get('name') or '').strip()
+                if not name:
+                    continue
+                value = ext.extract_value(
+                    source=spec.get('source', 'body'),
+                    expression=spec.get('json_path') or spec.get('expression') or '',
+                    response_json=parsed_body,
+                    response_headers=response_headers,
+                    status_code=status_code,
+                    response_time_ms=response_time_ms,
+                    default=spec.get('default'),
+                )
+                extracted[name] = value
+            extractions_summary = ext.summarize_extractions(extracted)
+
+            # 判断测试是否通过(extractions 块不参与 passed 计算,放到后面追加)
             all_assertions_passed = all(r['passed'] for r in assertion_results) if assertion_results else True
 
             # 检查状态码
@@ -164,7 +191,11 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 status_passed = (200 <= status_code < 300)
 
             passed = all_assertions_passed and status_passed
-            
+
+            # 把 extractions 块挂到 assertion_results 末尾(不影响 passed 判定)
+            if extractions_summary:
+                assertion_results = list(assertion_results) + [{'extractions': extractions_summary}]
+
             # 保存测试结果
             result = ApiTestResult.objects.create(
                 test_case=test_case,
