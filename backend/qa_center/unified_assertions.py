@@ -63,9 +63,52 @@ _SYMBOL_TO_OP = {
     '>=': 'gte', '<=': 'lte',
 }
 
+
+def _smart_eq(a: Any, b: Any) -> bool:
+    """类型容错的相等比较。
+
+    顺序:
+    1. bool 永远不与 int 互通(True != 1) —— 必须先做,否则
+       Python 的 True == 1 会让首步直接短路
+    2. 严格相等优先
+    3. 数字/字符串互通:30 == "30"、30.0 == "30"
+    4. 字符串化的 JSON 自动 parse 后比较
+    5. 其它情况 False
+    """
+    # 1. bool 隔离:即使 True == 1 在 Python 里成立,我们也明确拒绝这种互通
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    # 2. 严格相等
+    if a == b:
+        return True
+    # 3. None 永不等于其它值
+    if a is None or b is None:
+        return False
+
+    def _to_num(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    na, nb = _to_num(a), _to_num(b)
+    if na is not None and nb is not None and na == nb:
+        return True
+    if isinstance(a, str) and isinstance(b, str):
+        try:
+            return json.loads(a) == json.loads(b)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return False
+
+
+def _smart_ne(a: Any, b: Any) -> bool:
+    return not _smart_eq(a, b)
+
+
 OPERATORS: Dict[str, Any] = {
-    'eq': lambda a, b: a == b,
-    'ne': lambda a, b: a != b,
+    'eq': _smart_eq,
+    'ne': _smart_ne,
     'gt': lambda a, b: _safe_cmp(a, b, lambda x, y: x > y),
     'gte': lambda a, b: _safe_cmp(a, b, lambda x, y: x >= y),
     'lt': lambda a, b: _safe_cmp(a, b, lambda x, y: x < y),

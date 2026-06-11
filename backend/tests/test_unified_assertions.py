@@ -10,6 +10,11 @@ from __future__ import annotations
 import pytest
 
 from qa_center import unified_assertions as ua
+from qa_center.unified_assertions import (
+    _smart_eq, _smart_ne,
+    evaluate, Assertion, ResponseContext,
+    KIND_JSON_EQUALS, KIND_REGEX_MATCH,
+)
 
 
 # --------------------------------------------------------------------------- ctx
@@ -143,10 +148,9 @@ class TestJsonEquals:
         assert r.passed is True
 
     def test_numeric_eq_with_string_input(self, ctx_json):
-        # 用户配置经常把 30 存成 "30"
+        # 用户配置经常把 30 存成 "30";M3.2 起 eq 也做类型容错(数字↔字符串互通)
         r = ua.evaluate(ua.Assertion(kind='json_equals', path='$.data.user.age', expected='30'), ctx_json)
-        # eq 走严格相等：30 != "30"。这是合理行为；让 gte/lte 走 _safe_cmp 处理类型
-        assert r.passed is False
+        assert r.passed is True
         r2 = ua.evaluate(ua.Assertion(kind='json_equals', path='$.data.user.age', operator='gte', expected='18'), ctx_json)
         assert r2.passed is True
 
@@ -329,3 +333,37 @@ class TestRunAssertions:
     def test_empty_returns_empty(self, ctx_json):
         assert ua.run_assertions([], ctx_json) == []
         assert ua.run_assertions(None, ctx_json) == []
+
+
+# --------------------------------------------------------------------------- 类型容错的相等比较 (M3.2 — _smart_eq / _smart_ne)
+
+
+def test_smart_eq_int_and_numeric_string():
+    """30 应该等于 '30'"""
+    assert _smart_eq(30, "30") is True
+
+
+def test_smart_eq_float_and_numeric_string():
+    assert _smart_eq(30.0, "30") is True
+
+
+def test_smart_eq_strict_equal_unchanged():
+    assert _smart_eq("abc", "abc") is True
+    assert _smart_eq(30, 30) is True
+
+
+def test_smart_eq_bool_not_equal_int():
+    """True 不应等于 1"""
+    assert _smart_eq(True, 1) is False
+    assert _smart_eq(False, 0) is False
+
+
+def test_smart_eq_none_not_equal_empty_string():
+    assert _smart_eq(None, "") is False
+    assert _smart_eq(None, "x") is False
+
+
+def test_smart_ne_inverse_of_eq():
+    assert _smart_ne(30, "30") is False   # 30 == '30', so != False
+    assert _smart_ne(True, 1) is True     # True != 1
+    assert _smart_ne("abc", "abd") is True
