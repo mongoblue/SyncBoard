@@ -53,26 +53,13 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
         """
         test_case = self.get_object()
 
-        # 双写: 创建 TestRun(单条也视为一次运行)
-        test_run = TestRun.objects.create(
-            project=test_case.project,
-            name=f"{test_case.name} @ {timezone.now().strftime('%Y-%m-%d %H:%M')}",
-            trigger='manual',
-            test_type='api',
-            status='running',
-            total_count=1,
-            started_at=timezone.now(),
-            triggered_by=request.user,
-            config_snapshot={'source': 'single', 'case_id': test_case.id},
-        )
-
         # 获取运行参数（支持临时覆盖）
         override_data = request.data
         url = override_data.get('url', test_case.url)
         method = override_data.get('method', test_case.method)
         headers = override_data.get('headers', test_case.headers)
         body = override_data.get('body', test_case.body)
-        
+
         # 处理 headers 和 body 的 JSON 解析
         if isinstance(headers, str):
             try:
@@ -82,7 +69,7 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                     {'error': 'Headers JSON 格式错误'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-        
+
         if isinstance(body, str):
             try:
                 body = json.loads(body)
@@ -102,7 +89,21 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
             url = te.resolve_url(url, variables)
             headers = te.render_value(headers, variables)
             body = te.render_value(body, variables)
-        
+
+        # 双写: 创建 TestRun(单条也视为一次运行)。放在所有输入校验通过后，
+        # 避免 400 时残留 status='running' 的孤儿 TestRun。
+        test_run = TestRun.objects.create(
+            project=test_case.project,
+            name=f"{test_case.name} @ {timezone.now().strftime('%Y-%m-%d %H:%M')}",
+            trigger='manual',
+            test_type='api',
+            status='running',
+            total_count=1,
+            started_at=timezone.now(),
+            triggered_by=request.user,
+            config_snapshot={'source': 'single', 'case_id': test_case.id},
+        )
+
         # 使用 Django Test Client 发送请求（自动携带当前用户 session）
         start_time = time.time()
         try:
@@ -135,6 +136,11 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
             elif method == 'OPTIONS':
                 response = client.options(url, **request_headers)
             else:
+                # 不支持的 method：标记 TestRun 为 error 后再返回，避免孤儿。
+                test_run.status = 'error'
+                test_run.completed_at = timezone.now()
+                test_run.duration_ms = int((time.time() - start_time) * 1000)
+                test_run.save(update_fields=['status', 'completed_at', 'duration_ms'])
                 return Response(
                     {'error': f'不支持的请求方法: {method}'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -265,7 +271,8 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
             test_run.status = 'passed' if test_run.failed_count == 0 and test_run.error_count == 0 else 'failed'
             test_run.completed_at = timezone.now()
             test_run.duration_ms = response_time_ms
-            test_run.save()
+            # update_fields 限定字段，避免 full save 覆盖 F() 已经更新过的计数。
+            test_run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
 
             # 构建完整的执行日志
             execution_log = {
@@ -356,19 +363,17 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
                 executed_by=request.user
             )
 
-            # 双写: 异常路径也写 TestRunCaseResult
-            safe_method = method if isinstance(method, str) else (test_case.method or 'GET')
-            safe_url = url if isinstance(url, str) else (test_case.url or '')
-            safe_headers = headers if isinstance(headers, dict) else {}
-            safe_body = body if not isinstance(body, str) else None
+            # 双写: 异常路径也写 TestRunCaseResult。
+            # 走到这里时 method/url/headers/body 都已经经过校验，是合法类型；
+            # 只有 to_curl 自己可能因为 header 值类型异常抛错，单独防护。
             request_snapshot = {
-                'method': safe_method,
-                'url': safe_url,
-                'headers': safe_headers,
-                'body': safe_body,
+                'method': method,
+                'url': url,
+                'headers': headers,
+                'body': body,
             }
             try:
-                curl_str = to_curl(safe_method, safe_url, safe_headers, safe_body,
+                curl_str = to_curl(method, url, headers, body,
                                    content_type=test_case.content_type or 'application/json')
             except Exception:
                 curl_str = ''
@@ -399,7 +404,7 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
             test_run.status = 'error'
             test_run.completed_at = timezone.now()
             test_run.duration_ms = response_time_ms
-            test_run.save()
+            test_run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
 
             # 构建异常情况的执行日志
             error_log = {

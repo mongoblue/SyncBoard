@@ -489,6 +489,10 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             return res
 
         if a.kind == KIND_JSON_EQUALS:
+            # 预先把 expected/actual 初始化为安全默认，避免 _maybe_loads_*
+            # 抛错时 _format_value(expected) 触发 NameError。
+            expected: Any = a.expected
+            actual: Any = None
             actual = _extract_by_jsonpath(ctx.response_json, a.path)
             res.actual_value = actual
             # 对 eq/ne 走严格相等（不强制把 "30" 解析成 30）；其余比较走 _safe_cmp 自动处理。
