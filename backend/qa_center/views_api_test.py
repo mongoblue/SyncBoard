@@ -1,6 +1,8 @@
 import time
 import json
+import logging
 from rest_framework import viewsets, status
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +12,8 @@ from django.http import HttpRequest
 from django.utils import timezone
 from django.db.models import F
 from .models import ApiTestCase, ApiTestResult, TestResult, TestRun, TestRunCaseResult
+
+logger = logging.getLogger(__name__)
 from .utils.curl import to_curl
 from .serializers import (
     ApiTestCaseSerializer,
@@ -509,3 +513,224 @@ def execute_api_test_cases(case_ids):
     """
     from .test_executor import execute_api_test_cases as executor
     return executor(case_ids)
+
+
+class ApiTestCaseBatchRunView(APIView):
+    """批量执行 API 用例
+
+    POST /api/qa/api-cases/run-batch/
+    Body: {case_ids: [..], name?, environment_id?, max_workers?}
+    Returns: 202 Accepted {run_id, total_count}
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from django.db import close_old_connections
+
+        case_ids = request.data.get('case_ids', [])
+        if not case_ids:
+            return Response(
+                {'error': 'case_ids 不能为空'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        name = request.data.get('name') or f"批量执行 {timezone.now().strftime('%Y-%m-%d %H:%M')}"
+        max_workers = int(request.data.get('max_workers', 4))
+
+        cases = list(ApiTestCase.objects.filter(id__in=case_ids))
+        if not cases:
+            return Response(
+                {'error': '未找到任何 case'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        project = cases[0].project
+        run = TestRun.objects.create(
+            project=project,
+            name=name,
+            trigger='manual',
+            test_type='api',
+            status='running',
+            total_count=len(cases),
+            started_at=timezone.now(),
+            triggered_by=request.user,
+            config_snapshot={
+                'case_ids': [c.id for c in cases],
+                'max_workers': max_workers,
+                'environment_id': request.data.get('environment_id'),
+            },
+        )
+
+        # 抓取 cookies(主线程,避免子线程访问 request.session)
+        session_cookie = request.COOKIES.get('sessionid', '')
+        csrf_cookie = request.COOKIES.get('csrftoken', '')
+        triggered_user = request.user
+
+        def _execute_single_case(case, parent_run, sequence):
+            """同步执行一条用例, 写 ApiTestResult + TestRunCaseResult, 返回 (passed, error)"""
+            close_old_connections()
+            try:
+                url = case.url
+                method = case.method
+                headers = case.headers or {}
+                body_str = case.body or ''
+                if isinstance(body_str, str) and body_str:
+                    try:
+                        body = json.loads(body_str)
+                    except json.JSONDecodeError:
+                        body = body_str
+                else:
+                    body = None
+
+                test_client = Client()
+                if session_cookie:
+                    test_client.cookies['sessionid'] = session_cookie
+                if csrf_cookie:
+                    test_client.cookies['csrftoken'] = csrf_cookie
+
+                request_headers = dict(headers) if headers else {}
+                if body and 'Content-Type' not in request_headers:
+                    request_headers['Content-Type'] = 'application/json'
+
+                start = time.time()
+                if method == 'GET':
+                    response = test_client.get(url, **request_headers)
+                elif method == 'POST':
+                    response = test_client.post(
+                        url,
+                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                        content_type='application/json', **request_headers,
+                    )
+                elif method == 'PUT':
+                    response = test_client.put(
+                        url,
+                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                        content_type='application/json', **request_headers,
+                    )
+                elif method == 'PATCH':
+                    response = test_client.patch(
+                        url,
+                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                        content_type='application/json', **request_headers,
+                    )
+                elif method == 'DELETE':
+                    response = test_client.delete(url, **request_headers)
+                else:
+                    return False, f'不支持的请求方法: {method}'
+
+                duration = int((time.time() - start) * 1000)
+                status_code = response.status_code
+                resp_body = response.content.decode('utf-8', errors='replace')
+                resp_headers = dict(response.headers)
+
+                expected = case.expected_response or {}
+                if isinstance(expected, str):
+                    try:
+                        expected = json.loads(expected)
+                    except json.JSONDecodeError:
+                        expected = {}
+                if isinstance(expected, dict):
+                    assertions = expected.get('assertions', [])
+                else:
+                    assertions = []
+
+                ctx = ua.ResponseContext.from_raw(
+                    status_code=status_code, response_body=resp_body,
+                    response_headers=resp_headers, response_time_ms=duration,
+                )
+                assertion_results = ua.run_assertions(assertions, ctx)
+
+                expected_status = case.expected_status
+                status_passed = (status_code == expected_status) if expected_status else (200 <= status_code < 300)
+                all_passed = all(r.get('passed', False) for r in assertion_results if isinstance(r, dict)) if assertion_results else True
+                passed = status_passed and all_passed
+
+                api_result = ApiTestResult.objects.create(
+                    test_case=case, status_code=status_code,
+                    response_body=resp_body[:10000], response_headers=resp_headers,
+                    response_time_ms=duration, passed=passed,
+                    assertion_results=assertion_results,
+                    executed_by=triggered_user,
+                )
+
+                curl_str = to_curl(
+                    method, url, headers, body,
+                    content_type=case.content_type or 'application/json',
+                )
+                TestRunCaseResult.objects.create(
+                    test_run=parent_run, case_type='api', sequence=sequence,
+                    api_test_case=case, status='passed' if passed else 'failed',
+                    duration_ms=duration, status_code=status_code,
+                    response_body=resp_body[:10000], response_headers=resp_headers,
+                    assertion_results=assertion_results,
+                    request_snapshot={'method': method, 'url': url, 'headers': headers, 'body': body},
+                    curl=curl_str,
+                    legacy_api_result_id=api_result.id,
+                    started_at=parent_run.started_at, completed_at=timezone.now(),
+                )
+
+                field = 'passed_count' if passed else 'failed_count'
+                TestRun.objects.filter(id=parent_run.id).update(**{field: F(field) + 1})
+                return passed, None
+            except Exception as e:
+                try:
+                    TestRunCaseResult.objects.create(
+                        test_run=parent_run, case_type='api', sequence=sequence,
+                        api_test_case=case, status='error', error_message=str(e),
+                        started_at=parent_run.started_at, completed_at=timezone.now(),
+                    )
+                    TestRun.objects.filter(id=parent_run.id).update(error_count=F('error_count') + 1)
+                except Exception as inner:
+                    logger.error(f'Failed to record case error: {inner}')
+                return False, str(e)
+            finally:
+                close_old_connections()
+
+        def run_one(sequence, case):
+            return sequence, case, _execute_single_case(case, run, sequence)
+
+        def run_all_in_background():
+            try:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = [
+                        executor.submit(run_one, idx + 1, case)
+                        for idx, case in enumerate(cases)
+                    ]
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logger.error(f'Batch run case error: {e}')
+            finally:
+                # 收尾:刷新 pass_rate + 状态
+                try:
+                    run.refresh_from_db()
+                    run.recompute_pass_rate()
+                    if getattr(run, 'cancelled', False):
+                        run.status = 'cancelled'
+                    else:
+                        if run.failed_count == 0 and run.error_count == 0:
+                            run.status = 'passed'
+                        elif run.error_count > 0:
+                            run.status = 'error'
+                        else:
+                            run.status = 'failed'
+                    run.completed_at = timezone.now()
+                    if run.started_at:
+                        delta = (run.completed_at - run.started_at).total_seconds() * 1000
+                        run.duration_ms = int(delta)
+                    run.save()
+                except Exception as e:
+                    logger.error(f'Failed to finalize batch run: {e}')
+                finally:
+                    close_old_connections()
+
+        import threading
+        thread = threading.Thread(target=run_all_in_background)
+        thread.daemon = True
+        thread.start()
+
+        return Response(
+            {'run_id': run.id, 'total_count': run.total_count},
+            status=status.HTTP_202_ACCEPTED,
+        )

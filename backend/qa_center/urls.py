@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import DataFactoryView, RunTestView
-from .views_api_test import ApiTestCaseViewSet, ApiTestResultViewSet
+from .views_api_test import ApiTestCaseViewSet, ApiTestResultViewSet, ApiTestCaseBatchRunView
 from .views_ui_test import UiTestCaseViewSet
 from .views_test_result import TestResultViewSet
 from .views_performance import PerformanceTestCaseViewSet, PerformanceTestResultViewSet
@@ -53,6 +53,7 @@ router.register(r'global-vars', TestGlobalVarViewSet, basename='test_global_var'
 urlpatterns = [
     path('data-factory/', DataFactoryView.as_view(), name='data_factory'),
     path('run-test/', RunTestView.as_view(), name='run_test'),
+    path('api-cases/run-batch/', ApiTestCaseBatchRunView.as_view(), name='api_case_run_batch'),
     path('', include(router.urls)),
     path('auto-execute/', ApiAutoTestExecuteView.as_view(), name='api_auto_execute'),
     path('devops/stats/', DashboardStatsView.as_view(), name='devops_stats'),
