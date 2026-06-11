@@ -477,6 +477,7 @@ const onQuickTransition = async (row: BugListItem, to: BugStatus) => {
     Object.assign(row, {
       status: updated.status,
       status_display: updated.status_display,
+      allowed_transitions: updated.allowed_transitions,
     });
     ElMessage.success(`已流转到 ${STATUS_LABEL[to]}`);
     await loadStats();
