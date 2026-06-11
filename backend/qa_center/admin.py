@@ -1,7 +1,8 @@
 from django.contrib import admin
 from .models import (
     ApiAutoTestSuite, ApiAutoTestCase, ApiAutoTestAssertion,
-    ApiAutoTestResult, ApiAutoTestCaseResult
+    ApiAutoTestResult, ApiAutoTestCaseResult,
+    TestRun, TestRunCaseResult,
 )
 
 
@@ -56,3 +57,18 @@ class ApiAutoTestCaseResultAdmin(admin.ModelAdmin):
     list_filter = ['passed', 'status_code']
     search_fields = ['case__name']
     raw_id_fields = ['case', 'test_result']
+
+
+@admin.register(TestRun)
+class TestRunAdmin(admin.ModelAdmin):
+    list_display = ('id', 'name', 'project', 'test_type', 'status',
+                    'total_count', 'passed_count', 'failed_count', 'created_at')
+    list_filter = ('status', 'test_type', 'trigger')
+    search_fields = ('name',)
+
+
+@admin.register(TestRunCaseResult)
+class TestRunCaseResultAdmin(admin.ModelAdmin):
+    list_display = ('id', 'test_run', 'sequence', 'status',
+                    'status_code', 'duration_ms', 'completed_at')
+    list_filter = ('status', 'case_type')
