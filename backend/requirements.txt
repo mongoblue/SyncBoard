@@ -1,52 +1,48 @@
-asgiref==3.11.0
-attrs==25.4.0
-autobahn>=24.4.2
-Automat==25.4.16
-cbor2==5.8.0
-certifi==2026.1.4
-cffi==2.0.0
-channels==4.3.2
-channels_redis==4.3.0
-charset-normalizer==3.4.4
-constantly==23.10.4
-cryptography==46.0.3
-Django==6.0.1
-django-cors-headers==4.9.0
-djangorestframework==3.16.1
-hyperlink==21.0.0
-idna==3.11
-Incremental==24.11.0
-msgpack==1.1.2
-mysqlclient==2.2.7
-oauthlib==3.3.1
-packaging==25.0
-py-ubjson==0.16.1
-pyasn1==0.6.1
-pyasn1_modules==0.4.2
-pycparser==2.23
-pyOpenSSL==25.3.0
-redis==7.1.0
-requests
-requests-oauthlib==2.0.0
-service-identity==24.2.0
-setuptools==80.9.0
-six==1.17.0
-sqlparse==0.5.5
-Twisted==25.5.0
-txaio==25.12.2
-typing_extensions==4.15.0
-ujson==5.11.0
-urllib3==2.6.3
-wheel==0.45.1
-zope.interface==8.2
-whitenoise==6.6.0
-pytest==8.0.0
-pytest-django==4.8.0
-locust==2.24.0  
-zope.event==5.0  
-gevent==23.9.1   
-uvicorn[standard]==0.27.0 
-gunicorn==21.2.0
+# 核心框架
+django>=4.0,<7.0
+djangorestframework
+django-cors-headers
+django-haystack
+channels
+
+# 任务队列
+celery
+redis
+
+# 数据库 & 搜索
+mysqlclient
+elasticsearch>=7.0.0,<8.0.0
+whoosh
+jieba
+
+# AI & API
+openai
+python-dotenv
+
+# 图片处理
+Pillow
+
+# API 测试断言
+jsonpath-ng
+jsonschema>=4.0
+
+# WebSocket 服务器
+uvicorn
+websockets
+asgiref
+
+# 数据生成
 faker
-playwright==1.49.1
-pytest-playwright>=0.4.4
+
+# 测试
+pytest
+pytest-django
+pytest-cov
+playwright
+
+# 性能测试
+locust
+
+# 代码质量
+coverage
+flake8
