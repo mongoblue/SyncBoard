@@ -941,6 +941,12 @@ class TestRun(models.Model):
     def __str__(self):
         return f"{self.name} [{self.status}]"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 运行时标记:批量执行后台线程读取此字段决定是否标 cancelled
+        # 非 DB 字段,不参与持久化
+        self.cancelled = False
+
     def recompute_pass_rate(self):
         completed = self.passed_count + self.failed_count + self.error_count
         self.pass_rate = (

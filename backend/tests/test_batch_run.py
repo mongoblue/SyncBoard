@@ -88,3 +88,24 @@ def test_run_batch_updates_counts(batch_auth_client, five_cases):
         time.sleep(0.3)
     run = TestRun.objects.get(id=run_id)
     assert run.passed_count + run.failed_count + run.error_count == 5
+
+
+@pytest.mark.django_db
+def test_cancel_run_marks_pending_as_skipped(batch_auth_client, five_cases, test_project):
+    client, _ = batch_auth_client
+    # 创建一 run 但不执行
+    run = TestRun.objects.create(
+        project=test_project, name='manual', test_type='api',
+        status='pending', total_count=3,
+    )
+    for seq, case in enumerate(five_cases[:3], 1):
+        TestRunCaseResult.objects.create(
+            test_run=run, case_type='api', sequence=seq, api_test_case=case,
+            status='pending',
+        )
+    response = client.post(f'/api/qa/runs/{run.id}/cancel/')
+    assert response.status_code == 200
+    run.refresh_from_db()
+    assert run.status == 'cancelled'
+    for r in run.case_results.all():
+        assert r.status == 'skipped'
