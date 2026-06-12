@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -60,6 +60,7 @@ const cases = ref<TestRunCaseResult[]>([])
 const loading = ref(false)
 const filterStatus = ref('')
 const statuses = ['pending', 'running', 'passed', 'failed', 'error', 'skipped']
+let ws: WebSocket | null = null
 
 const runId = computed(() => Number(route.params.id))
 
@@ -104,8 +105,38 @@ function tagType(s: string): 'success' | 'danger' | 'warning' | 'info' {
   return 'info'
 }
 
+function openWs() {
+  if (ws) return
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  ws = new WebSocket(`${proto}//${window.location.host}/ws/qa/test-run/${runId.value}/`)
+  ws.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data)
+      if (msg.type === 'case_done' || msg.type === 'run_finished') {
+        // 后端推完一条 case 或整个 run 收尾,刷新计数 + 列表
+        loadRun().catch(() => {})
+        loadCases().catch(() => {})
+      }
+    } catch { /* ignore non-JSON */ }
+  }
+  ws.onerror = () => { /* 静默,降级到轮询 */ }
+}
+function closeWs() {
+  if (ws) {
+    ws.close()
+    ws = null
+  }
+}
+
 watch(filterStatus, () => loadCases())
-onMounted(loadData)
+onMounted(() => {
+  loadData().then(() => {
+    if (run.value && (run.value.status === 'pending' || run.value.status === 'running')) {
+      openWs()
+    }
+  })
+})
+onBeforeUnmount(closeWs)
 </script>
 
 <style scoped>

@@ -2,14 +2,14 @@
   <div class="tests-panel">
     <div class="tests-summary">
       <span class="tests-count">
-        通过 {{ passedCount }} / 共 {{ results.length }}
+        通过 {{ passedCount }} / 共 {{ assertionResults.length }}
       </span>
-      <span v-if="results.length > 0" :class="['tests-rate', allPassed ? 'pass' : 'fail']">
+      <span v-if="assertionResults.length > 0" :class="['tests-rate', allPassed ? 'pass' : 'fail']">
         {{ allPassed ? '✓ 全部通过' : '✗ 存在失败' }}
       </span>
     </div>
     <ul class="tests-list">
-      <li v-for="(r, idx) in results" :key="idx" :class="['test-item', r.passed ? 'pass' : 'fail']">
+      <li v-for="(r, idx) in assertionResults" :key="idx" :class="['test-item', r.passed ? 'pass' : 'fail']">
         <div class="test-row" @click="toggle(idx)">
           <span class="test-icon">{{ r.passed ? '✓' : '✗' }}</span>
           <span class="test-desc">{{ describe(r) }}</span>
@@ -43,10 +43,10 @@
         </div>
       </li>
     </ul>
-    <div v-if="extractions && extractions.length > 0" class="extractions">
+    <div v-if="allExtractions && allExtractions.length > 0" class="extractions">
       <h4>变量提取</h4>
       <ul>
-        <li v-for="(ex, i) in extractions" :key="i">
+        <li v-for="(ex, i) in allExtractions" :key="i">
           <code>{{ ex.name }}</code>: <code>{{ ex.value_preview }}</code>
         </li>
       </ul>
@@ -64,8 +64,19 @@ const props = defineProps<{
 
 const expanded = ref<Record<number, boolean>>({})
 
-const passedCount = computed(() => props.results.filter((r) => r.passed).length)
-const allPassed = computed(() => passedCount.value === props.results.length)
+// 后端在单条 run 时把 {'extractions': [...]} 追加到 assertion_results 末尾,
+// 这里过滤出真正的断言项;extractions 通过单独的 prop 传入。
+const assertionResults = computed(() =>
+  (props.results || []).filter((r) => r && !('extractions' in r) && 'passed' in r)
+)
+const inlineExtractions = computed(() => {
+  const block = (props.results || []).find((r) => r && 'extractions' in r)
+  return block?.extractions
+})
+const allExtractions = computed(() => props.extractions || inlineExtractions.value || [])
+
+const passedCount = computed(() => assertionResults.value.filter((r) => r.passed).length)
+const allPassed = computed(() => passedCount.value === assertionResults.value.length)
 
 function toggle(idx: number) {
   expanded.value[idx] = !expanded.value[idx]

@@ -26,7 +26,7 @@
           :headers="caseResult.response_headers || {}"
         />
       </el-tab-pane>
-      <el-tab-pane :label="`Tests(${caseResult.assertion_results?.length || 0})`" name="tests">
+      <el-tab-pane :label="`Tests(${assertionCount})`" name="tests">
         <TestsPanel
           :results="caseResult.assertion_results || []"
         />
@@ -65,6 +65,11 @@ const statusTagType = computed(() => {
   if (s === 'error') return 'warning'
   if (s === 'skipped') return 'info'
   return 'info'
+})
+
+const assertionCount = computed(() => {
+  const list = caseResult.value?.assertion_results || []
+  return list.filter((r: any) => r && !('extractions' in r) && 'passed' in r).length
 })
 
 async function loadData() {
