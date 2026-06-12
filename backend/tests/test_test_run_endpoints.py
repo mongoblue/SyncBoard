@@ -113,3 +113,39 @@ def test_list_runs_invalid_page_returns_400(tr_auth_client, two_runs):
     client, _ = tr_auth_client
     response = client.get('/api/qa/runs/?page=abc')
     assert response.status_code == 400
+
+
+@pytest.mark.django_db(transaction=True)
+def test_rerun_creates_new_test_run(tr_auth_client, two_runs):
+    client, _ = tr_auth_client
+    _, r2, case = two_runs
+    # r2 在 fixture 中没设 config_snapshot,走 case_results.api_test_case 兜底分支
+    response = client.post(f'/api/qa/runs/{r2.id}/rerun/')
+    assert response.status_code == 202
+    data = response.json()
+    assert 'new_run_id' in data
+    new_run = TestRun.objects.get(id=data['new_run_id'])
+    assert new_run.config_snapshot.get('rerun_from') == r2.id
+    # case_ids 写进了 config_snapshot
+    assert case.id in new_run.config_snapshot.get('case_ids', [])
+    # 新 run 至少有 1 个 case
+    assert new_run.total_count >= 1
+
+
+@pytest.mark.django_db
+def test_rerun_404_when_run_missing(tr_auth_client):
+    client, _ = tr_auth_client
+    response = client.post('/api/qa/runs/999999/rerun/')
+    assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_rerun_400_when_no_cases(tr_auth_client, test_project):
+    """原 run 既无 config_snapshot.case_ids 也无 case_results,应 400。"""
+    client, _ = tr_auth_client
+    empty_run = TestRun.objects.create(
+        project=test_project, name='empty', test_type='api', status='passed',
+        total_count=0, passed_count=0, failed_count=0, error_count=0,
+    )
+    response = client.post(f'/api/qa/runs/{empty_run.id}/rerun/')
+    assert response.status_code == 400

@@ -1,11 +1,18 @@
 """TestRun 操作端点 (cancel 等)"""
+import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
+from django.db import close_old_connections
 
-from .models import TestRun, TestRunCaseResult
+from .models import TestRun, TestRunCaseResult, ApiTestCase
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_pagination(request, default_size=20, max_size=100):
@@ -187,3 +194,99 @@ def _serialize_case_result(r, full=False):
             'curl': r.curl,
         })
     return base
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def rerun_test_run(request, run_id):
+    """用 config_snapshot 重新执行一个 TestRun。
+
+    创建新 TestRun,继承原 run 的 case_ids / max_workers / environment_id,
+    在后台线程里跑完后更新 status。
+    """
+    from .views_api_test import execute_single_api_case
+
+    try:
+        old_run = TestRun.objects.get(id=run_id)
+    except TestRun.DoesNotExist:
+        return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+    config = old_run.config_snapshot or {}
+    case_ids = config.get('case_ids', [])
+    if not case_ids:
+        # 兼容老的单条 run: 用 api_test_case 找原 case
+        first_cr = old_run.case_results.filter(api_test_case__isnull=False).first()
+        if first_cr:
+            case_ids = [first_cr.api_test_case_id]
+
+    if not case_ids:
+        return Response(
+            {'error': '原 TestRun 没有可重跑的 case'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    cases = list(ApiTestCase.objects.filter(id__in=case_ids))
+    if not cases:
+        return Response(
+            {'error': '原 case 已被删除,无法重跑'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    max_workers = int(config.get('max_workers', 4))
+    triggered_user = request.user
+
+    new_run = TestRun.objects.create(
+        project=old_run.project,
+        name=f"{old_run.name} (重跑)",
+        trigger='manual',
+        test_type=old_run.test_type,
+        status='running',
+        total_count=len(cases),
+        started_at=timezone.now(),
+        triggered_by=triggered_user,
+        config_snapshot={
+            **config,
+            'rerun_from': old_run.id,
+            'case_ids': [c.id for c in cases],
+        },
+    )
+
+    def _background():
+        try:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(execute_single_api_case, case, new_run, idx + 1, triggered_user)
+                    for idx, case in enumerate(cases)
+                ]
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception:
+                        logger.exception('Rerun case error')
+        finally:
+            close_old_connections()
+            new_run.refresh_from_db()
+            new_run.recompute_pass_rate()
+            current = TestRun.objects.filter(id=new_run.id).values_list('status', flat=True).first()
+            if current == 'cancelled':
+                new_run.completed_at = timezone.now()
+                if new_run.started_at:
+                    new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
+                new_run.save(update_fields=['pass_rate', 'completed_at', 'duration_ms'])
+                return
+            if new_run.failed_count == 0 and new_run.error_count == 0:
+                new_run.status = 'passed'
+            elif new_run.error_count > 0:
+                new_run.status = 'error'
+            else:
+                new_run.status = 'failed'
+            new_run.completed_at = timezone.now()
+            if new_run.started_at:
+                new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
+            new_run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
+
+    thread = threading.Thread(target=_background)
+    thread.daemon = True
+    thread.start()
+
+    return Response({'new_run_id': new_run.id}, status=status.HTTP_202_ACCEPTED)

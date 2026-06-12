@@ -38,6 +38,7 @@ from .views_test_run import (
     test_run_detail,
     test_run_cases,
     test_run_case_detail,
+    rerun_test_run,
 )
 
 router = DefaultRouter()
@@ -62,6 +63,7 @@ urlpatterns = [
     path('run-test/', RunTestView.as_view(), name='run_test'),
     path('api-cases/run-batch/', ApiTestCaseBatchRunView.as_view(), name='api_case_run_batch'),
     path('runs/<int:run_id>/cancel/', cancel_test_run, name='test_run_cancel'),
+    path('runs/<int:run_id>/rerun/', rerun_test_run, name='test_run_rerun'),
     path('runs/', list_test_runs, name='test_run_list'),
     path('runs/<int:run_id>/', test_run_detail, name='test_run_detail'),
     path('runs/<int:run_id>/cases/', test_run_cases, name='test_run_cases'),
