@@ -515,6 +515,131 @@ def execute_api_test_cases(case_ids):
     return executor(case_ids)
 
 
+def execute_single_api_case(case, parent_run, sequence, triggered_user):
+    """执行一条 API 用例,写 ApiTestResult + TestRunCaseResult,更新 TestRun 计数。
+
+    模块级共享函数,供 ApiTestCaseBatchRunView 与 rerun_test_run 共用。
+    返回 (passed, error_message)。
+    """
+    from django.db import close_old_connections
+
+    close_old_connections()
+    try:
+        url = case.url
+        method = case.method
+        headers = case.headers or {}
+        body_str = case.body or ''
+        if isinstance(body_str, str) and body_str:
+            try:
+                body = json.loads(body_str)
+            except json.JSONDecodeError:
+                body = body_str
+        else:
+            body = None
+
+        test_client = Client()
+        if triggered_user:
+            test_client.force_login(triggered_user)
+
+        request_headers = dict(headers) if headers else {}
+        if body and 'Content-Type' not in request_headers:
+            request_headers['Content-Type'] = 'application/json'
+
+        start = time.time()
+        if method == 'GET':
+            response = test_client.get(url, **request_headers)
+        elif method == 'POST':
+            response = test_client.post(
+                url,
+                data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                content_type='application/json', **request_headers,
+            )
+        elif method == 'PUT':
+            response = test_client.put(
+                url,
+                data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                content_type='application/json', **request_headers,
+            )
+        elif method == 'PATCH':
+            response = test_client.patch(
+                url,
+                data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
+                content_type='application/json', **request_headers,
+            )
+        elif method == 'DELETE':
+            response = test_client.delete(url, **request_headers)
+        else:
+            return False, f'不支持的请求方法: {method}'
+
+        duration = int((time.time() - start) * 1000)
+        status_code = response.status_code
+        resp_body = response.content.decode('utf-8', errors='replace')
+        resp_headers = dict(response.headers)
+
+        expected = case.expected_response or {}
+        if isinstance(expected, str):
+            try:
+                expected = json.loads(expected)
+            except json.JSONDecodeError:
+                expected = {}
+        if isinstance(expected, dict):
+            assertions = expected.get('assertions', [])
+        else:
+            assertions = []
+
+        ctx = ua.ResponseContext.from_raw(
+            status_code=status_code, response_body=resp_body,
+            response_headers=resp_headers, response_time_ms=duration,
+        )
+        assertion_results = ua.run_assertions(assertions, ctx)
+
+        expected_status = case.expected_status
+        status_passed = (status_code == expected_status) if expected_status else (200 <= status_code < 300)
+        all_passed = all(r.get('passed', False) for r in assertion_results if isinstance(r, dict)) if assertion_results else True
+        passed = status_passed and all_passed
+
+        api_result = ApiTestResult.objects.create(
+            test_case=case, status_code=status_code,
+            response_body=resp_body[:10000], response_headers=resp_headers,
+            response_time_ms=duration, passed=passed,
+            assertion_results=assertion_results,
+            executed_by=triggered_user,
+        )
+
+        curl_str = to_curl(
+            method, url, headers, body,
+            content_type=case.content_type or 'application/json',
+        )
+        TestRunCaseResult.objects.create(
+            test_run=parent_run, case_type='api', sequence=sequence,
+            api_test_case=case, status='passed' if passed else 'failed',
+            duration_ms=duration, status_code=status_code,
+            response_body=resp_body[:10000], response_headers=resp_headers,
+            assertion_results=assertion_results,
+            request_snapshot={'method': method, 'url': url, 'headers': headers, 'body': body},
+            curl=curl_str,
+            legacy_api_result_id=api_result.id,
+            started_at=parent_run.started_at, completed_at=timezone.now(),
+        )
+
+        field = 'passed_count' if passed else 'failed_count'
+        TestRun.objects.filter(id=parent_run.id).update(**{field: F(field) + 1})
+        return passed, None
+    except Exception as e:
+        try:
+            TestRunCaseResult.objects.create(
+                test_run=parent_run, case_type='api', sequence=sequence,
+                api_test_case=case, status='error', error_message=str(e),
+                started_at=parent_run.started_at, completed_at=timezone.now(),
+            )
+            TestRun.objects.filter(id=parent_run.id).update(error_count=F('error_count') + 1)
+        except Exception:
+            logger.exception('Failed to record case error')
+        return False, str(e)
+    finally:
+        close_old_connections()
+
+
 class ApiTestCaseBatchRunView(APIView):
     """批量执行 API 用例
 
@@ -564,126 +689,8 @@ class ApiTestCaseBatchRunView(APIView):
         # 后台线程需要的用户(用于 force_login + executed_by)
         triggered_user = request.user
 
-        def _execute_single_case(case, parent_run, sequence):
-            """同步执行一条用例, 写 ApiTestResult + TestRunCaseResult, 返回 (passed, error)"""
-            close_old_connections()
-            try:
-                url = case.url
-                method = case.method
-                headers = case.headers or {}
-                body_str = case.body or ''
-                if isinstance(body_str, str) and body_str:
-                    try:
-                        body = json.loads(body_str)
-                    except json.JSONDecodeError:
-                        body = body_str
-                else:
-                    body = None
-
-                test_client = Client()
-                if triggered_user:
-                    test_client.force_login(triggered_user)
-
-                request_headers = dict(headers) if headers else {}
-                if body and 'Content-Type' not in request_headers:
-                    request_headers['Content-Type'] = 'application/json'
-
-                start = time.time()
-                if method == 'GET':
-                    response = test_client.get(url, **request_headers)
-                elif method == 'POST':
-                    response = test_client.post(
-                        url,
-                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
-                        content_type='application/json', **request_headers,
-                    )
-                elif method == 'PUT':
-                    response = test_client.put(
-                        url,
-                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
-                        content_type='application/json', **request_headers,
-                    )
-                elif method == 'PATCH':
-                    response = test_client.patch(
-                        url,
-                        data=json.dumps(body) if isinstance(body, (dict, list)) else (body or {}),
-                        content_type='application/json', **request_headers,
-                    )
-                elif method == 'DELETE':
-                    response = test_client.delete(url, **request_headers)
-                else:
-                    return False, f'不支持的请求方法: {method}'
-
-                duration = int((time.time() - start) * 1000)
-                status_code = response.status_code
-                resp_body = response.content.decode('utf-8', errors='replace')
-                resp_headers = dict(response.headers)
-
-                expected = case.expected_response or {}
-                if isinstance(expected, str):
-                    try:
-                        expected = json.loads(expected)
-                    except json.JSONDecodeError:
-                        expected = {}
-                if isinstance(expected, dict):
-                    assertions = expected.get('assertions', [])
-                else:
-                    assertions = []
-
-                ctx = ua.ResponseContext.from_raw(
-                    status_code=status_code, response_body=resp_body,
-                    response_headers=resp_headers, response_time_ms=duration,
-                )
-                assertion_results = ua.run_assertions(assertions, ctx)
-
-                expected_status = case.expected_status
-                status_passed = (status_code == expected_status) if expected_status else (200 <= status_code < 300)
-                all_passed = all(r.get('passed', False) for r in assertion_results if isinstance(r, dict)) if assertion_results else True
-                passed = status_passed and all_passed
-
-                api_result = ApiTestResult.objects.create(
-                    test_case=case, status_code=status_code,
-                    response_body=resp_body[:10000], response_headers=resp_headers,
-                    response_time_ms=duration, passed=passed,
-                    assertion_results=assertion_results,
-                    executed_by=triggered_user,
-                )
-
-                curl_str = to_curl(
-                    method, url, headers, body,
-                    content_type=case.content_type or 'application/json',
-                )
-                TestRunCaseResult.objects.create(
-                    test_run=parent_run, case_type='api', sequence=sequence,
-                    api_test_case=case, status='passed' if passed else 'failed',
-                    duration_ms=duration, status_code=status_code,
-                    response_body=resp_body[:10000], response_headers=resp_headers,
-                    assertion_results=assertion_results,
-                    request_snapshot={'method': method, 'url': url, 'headers': headers, 'body': body},
-                    curl=curl_str,
-                    legacy_api_result_id=api_result.id,
-                    started_at=parent_run.started_at, completed_at=timezone.now(),
-                )
-
-                field = 'passed_count' if passed else 'failed_count'
-                TestRun.objects.filter(id=parent_run.id).update(**{field: F(field) + 1})
-                return passed, None
-            except Exception as e:
-                try:
-                    TestRunCaseResult.objects.create(
-                        test_run=parent_run, case_type='api', sequence=sequence,
-                        api_test_case=case, status='error', error_message=str(e),
-                        started_at=parent_run.started_at, completed_at=timezone.now(),
-                    )
-                    TestRun.objects.filter(id=parent_run.id).update(error_count=F('error_count') + 1)
-                except Exception:
-                    logger.exception('Failed to record case error')
-                return False, str(e)
-            finally:
-                close_old_connections()
-
         def run_one(sequence, case):
-            return sequence, case, _execute_single_case(case, run, sequence)
+            return sequence, case, execute_single_api_case(case, run, sequence, triggered_user)
 
         def run_all_in_background():
             try:
