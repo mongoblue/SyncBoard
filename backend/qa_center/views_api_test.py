@@ -745,14 +745,18 @@ class ApiTestCaseBatchRunView(APIView):
                     ).values_list('status', flat=True).first()
                     run.refresh_from_db()
                     run.recompute_pass_rate()
-                    run.completed_at = timezone.now()
-                    if run.started_at:
-                        delta = (run.completed_at - run.started_at).total_seconds() * 1000
-                        run.duration_ms = int(delta)
                     if current_status == 'cancelled':
-                        # 已被取消:不要覆盖 status,只补 pass_rate / 完成时间
-                        run.save(update_fields=['pass_rate', 'completed_at', 'duration_ms'])
+                        # 已被取消:cancel 端点已写 completed_at,不要覆盖。
+                        # 只补 pass_rate + duration_ms(用 cancel 写下的 completed_at 算)
+                        if run.started_at and run.completed_at:
+                            delta = (run.completed_at - run.started_at).total_seconds() * 1000
+                            run.duration_ms = int(delta)
+                        run.save(update_fields=['pass_rate', 'duration_ms'])
                     else:
+                        run.completed_at = timezone.now()
+                        if run.started_at:
+                            delta = (run.completed_at - run.started_at).total_seconds() * 1000
+                            run.duration_ms = int(delta)
                         if run.failed_count == 0 and run.error_count == 0:
                             run.status = 'passed'
                         elif run.error_count > 0:

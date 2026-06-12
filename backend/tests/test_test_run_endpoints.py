@@ -149,3 +149,15 @@ def test_rerun_400_when_no_cases(tr_auth_client, test_project):
     )
     response = client.post(f'/api/qa/runs/{empty_run.id}/rerun/')
     assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_rerun_400_when_run_still_running(tr_auth_client, test_project):
+    """正在跑的 run 不允许重跑,避免并发触发放大负载。"""
+    client, _ = tr_auth_client
+    running_run = TestRun.objects.create(
+        project=test_project, name='running', test_type='api', status='running',
+        total_count=1, passed_count=0, failed_count=0, error_count=0,
+    )
+    response = client.post(f'/api/qa/runs/{running_run.id}/rerun/')
+    assert response.status_code == 400

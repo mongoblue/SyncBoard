@@ -211,6 +211,12 @@ def rerun_test_run(request, run_id):
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
 
+    if old_run.status not in ('passed', 'failed', 'error', 'cancelled'):
+        return Response(
+            {'error': f'TestRun 当前状态 {old_run.status},不可重跑'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     config = old_run.config_snapshot or {}
     case_ids = config.get('case_ids', [])
     if not case_ids:
@@ -263,16 +269,14 @@ def rerun_test_run(request, run_id):
                         future.result()
                     except Exception:
                         logger.exception('Rerun case error')
-        finally:
-            close_old_connections()
             new_run.refresh_from_db()
             new_run.recompute_pass_rate()
             current = TestRun.objects.filter(id=new_run.id).values_list('status', flat=True).first()
             if current == 'cancelled':
-                new_run.completed_at = timezone.now()
-                if new_run.started_at:
+                # cancel 端点已写 completed_at,不要覆盖
+                if new_run.started_at and new_run.completed_at:
                     new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
-                new_run.save(update_fields=['pass_rate', 'completed_at', 'duration_ms'])
+                new_run.save(update_fields=['pass_rate', 'duration_ms'])
                 return
             if new_run.failed_count == 0 and new_run.error_count == 0:
                 new_run.status = 'passed'
@@ -284,6 +288,10 @@ def rerun_test_run(request, run_id):
             if new_run.started_at:
                 new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
             new_run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
+        except Exception:
+            logger.exception('Failed to finalize rerun')
+        finally:
+            close_old_connections()
 
     thread = threading.Thread(target=_background)
     thread.daemon = True
