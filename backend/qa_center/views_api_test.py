@@ -624,6 +624,7 @@ def execute_single_api_case(case, parent_run, sequence, triggered_user):
 
         field = 'passed_count' if passed else 'failed_count'
         TestRun.objects.filter(id=parent_run.id).update(**{field: F(field) + 1})
+        _push_case_done(parent_run, sequence, 'passed' if passed else 'failed')
         return passed, None
     except Exception as e:
         try:
@@ -633,11 +634,40 @@ def execute_single_api_case(case, parent_run, sequence, triggered_user):
                 started_at=parent_run.started_at, completed_at=timezone.now(),
             )
             TestRun.objects.filter(id=parent_run.id).update(error_count=F('error_count') + 1)
+            _push_case_done(parent_run, sequence, 'error')
         except Exception:
             logger.exception('Failed to record case error')
         return False, str(e)
     finally:
         close_old_connections()
+
+
+def _push_case_done(parent_run, sequence, case_status):
+    """Push case completion to WebSocket subscribers of this TestRun."""
+    from channels.layers import get_channel_layer
+    from asgiref.sync import async_to_sync
+    try:
+        channel_layer = get_channel_layer()
+        if not channel_layer:
+            return
+        parent_run.refresh_from_db()
+        async_to_sync(channel_layer.group_send)(
+            f"test_run_{parent_run.id}",
+            {
+                'type': 'case_done',
+                'data': {
+                    'type': 'case_done',
+                    'sequence': sequence,
+                    'status': case_status,
+                    'passed_count': parent_run.passed_count,
+                    'failed_count': parent_run.failed_count,
+                    'error_count': parent_run.error_count,
+                    'total_count': parent_run.total_count,
+                },
+            }
+        )
+    except Exception:
+        logger.exception('Failed to push case_done over WebSocket')
 
 
 class ApiTestCaseBatchRunView(APIView):
