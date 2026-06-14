@@ -1,0 +1,32 @@
+[run]
+source = .
+omit =
+    */migrations/*
+    */tests/*
+    */test_*.py
+    */__pycache__/*
+    */venv/*
+    */.venv/*
+    manage.py
+    */asgi.py
+    */wsgi.py
+    */settings/*
+    conftest.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+show_missing = True
+skip_covered = True
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml

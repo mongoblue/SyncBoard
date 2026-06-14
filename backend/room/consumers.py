@@ -1,32 +1,50 @@
-# backend/board/consumers.py
+# backend/room/consumers.py
 import json
+import html
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from django.db.models import Q
+from .models import Project
+
+
+def sanitize_html(text):
+    """转义 HTML 特殊字符，防止 XSS 攻击"""
+    if text is None:
+        return ''
+    return html.escape(str(text), quote=True)
 
 
 class BoardConsumer(AsyncWebsocketConsumer):
+    @database_sync_to_async
+    def _is_project_member(self, user, project_id):
+        """检查用户是否为项目成员"""
+        if not user.is_authenticated:
+            return False
+        return Project.objects.filter(
+            Q(id=project_id) & (Q(owner=user) | Q(members=user))
+        ).exists()
+
     async def connect(self):
-        # ✅ 修复 1: 这里的 key 必须和 routing.py 里的 (?P<project_id>...) 保持一致
         self.room_name = self.scope['url_route']['kwargs']['project_id']
         self.room_group_name = f'board_{self.room_name}'
         self.user = self.scope['user']
 
-        # 1. 加入群组
+        # 鉴权: 检查用户是否为项目成员
+        if not await self._is_project_member(self.user, self.room_name):
+            await self.close(code=4003)
+            return
+
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
 
-        # 2. 接受连接
         await self.accept()
 
-        # 3. 广播 "用户加入" 消息
         if self.user.is_authenticated:
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
-                    # ✅ 修复 2: type 必须和下面的方法名 (board_update) 对应！
-                    # Channels 会自动把 . 变成 _，所以这里写 'board.update' 或 'board_update' 都可以
-                    # 但必须能对应上 method name
                     'type': 'board_update',
                     'message': {
                         'action': 'user_joined',
@@ -79,10 +97,24 @@ class BoardConsumer(AsyncWebsocketConsumer):
     async def board_update(self, event):
         message = event['message']
 
+        # 安全处理：对所有用户输入进行 HTML 转义
+        safe_message = {}
+        for key, value in message.items():
+            if isinstance(value, str):
+                safe_message[key] = sanitize_html(value)
+            elif isinstance(value, dict):
+                safe_message[key] = {k: sanitize_html(v) if isinstance(v, str) else v for k, v in value.items()}
+            elif isinstance(value, list):
+                safe_message[key] = [
+                    sanitize_html(item) if isinstance(item, str) else item for item in value
+                ]
+            else:
+                safe_message[key] = value
+
         # 发送给 WebSocket 前端
         await self.send(text_data=json.dumps({
             # 这里传给前端的数据结构
             # 前端 Board.ts 里 handleSocketMessage 读取的是 payload.data 或 payload
-            'data': message,
-            'action': message.get('action')  # 方便前端直接读
+            'data': safe_message,
+            'action': safe_message.get('action')  # 方便前端直接读
         }))

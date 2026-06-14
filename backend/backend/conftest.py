@@ -50,7 +50,7 @@ def pytest_collection_finish(session):
     async_to_sync(channel_layer.group_send)(
         GROUP_NAME,
         {
-            "type": "test_start",
+            "type": "test_meta",
             "total": total
         }
     )

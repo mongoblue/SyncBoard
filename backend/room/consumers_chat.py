@@ -1,21 +1,42 @@
-import json,os
+import json, os, html
 import redis
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.db import database_sync_to_async
+from django.db.models import Q
+from .models import Project
 
-# 初始化一个直接连接 Redis 的客户端 (用于操作 Stream)
-# 注意：生产环境应该从 settings 获取配置
-redis_host = os.getenv('REDIS_HOST', '127.0.0.1')
-r = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
+
+def _get_redis():
+    host = os.getenv('REDIS_HOST', '127.0.0.1')
+    return redis.Redis(host=host, port=6379, db=0, decode_responses=True)
+
+
+def sanitize_html(text):
+    if text is None:
+        return ''
+    return html.escape(str(text), quote=True)
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
+    @database_sync_to_async
+    def _is_project_member(self, user, project_id):
+        if not user.is_authenticated:
+            return False
+        return Project.objects.filter(
+            Q(id=project_id) & (Q(owner=user) | Q(members=user))
+        ).exists()
+
     async def connect(self):
-        # 从 URL 获取房间号，比如 ws/chat/project_101/
         self.room_id = self.scope['url_route']['kwargs']['project_id']
         self.room_group_name = f"chat_{self.room_id}"
         self.stream_key = f"stream:chat:{self.room_id}"
+        self.redis = _get_redis()
 
-        # 1. 加入广播组
+        # 鉴权: 检查用户是否为项目成员
+        if not await self._is_project_member(self.scope['user'], self.room_id):
+            await self.close(code=4003)
+            return
+
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
@@ -25,7 +46,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         # 2. 【关键】连接成功后，立刻读取历史记录发给用户
         # XRANGE: 读取流中的数据，min='-' (最早), max='+' (最新)
         try:
-            history = r.xrange(self.stream_key, min='-', max='+')
+            history = self.redis.xrange(self.stream_key, min='-', max='+')
             history_data = []
             for item in history:
                 msg_id, fields = item
@@ -65,10 +86,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         else:
             username = "Anonymous"  # 或者直接 return 不处理
 
+        # Sanitize message content against XSS
+        safe_message = sanitize_html(message)
+        safe_username = sanitize_html(username)
+
         # 持久化到 Redis
-        msg_id = r.xadd(self.stream_key, {
-            'user': username,  # 用真实名字
-            'content': message,
+        msg_id = self.redis.xadd(self.stream_key, {
+            'user': safe_username,
+            'content': safe_message,
             'time': str(data.get('time', ''))
         })
 
@@ -77,9 +102,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             self.room_group_name,
             {
                 'type': 'chat_message',
-                'id': msg_id,  # Redis 生成的 ID
-                'user': username,
-                'content': message,
+                'id': msg_id,
+                'user': safe_username,
+                'content': safe_message,
                 'time': data.get('time', '')
             }
         )
