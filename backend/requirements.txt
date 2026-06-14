@@ -4,6 +4,7 @@ djangorestframework
 django-cors-headers
 django-haystack
 channels
+whitenoise
 
 # 任务队列
 celery
