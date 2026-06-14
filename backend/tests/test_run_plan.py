@@ -56,7 +56,9 @@ class TestRunPlanCrud:
             'case_ids': [],
         }, content_type='application/json')
         assert resp.status_code == 400
-        assert 'case_ids' in resp.json()
+        body = resp.json()
+        details = body.get('details', body)
+        assert 'case_ids' in details
 
     def test_create_rejects_cases_from_other_project(
         self, auth_client, test_project, test_user, suite, cases,
@@ -68,7 +70,9 @@ class TestRunPlanCrud:
             'case_ids': [cases[0].id, 999999],
         }, content_type='application/json')
         assert resp.status_code == 400
-        assert 'case_ids' in resp.json()
+        body = resp.json()
+        details = body.get('details', body)
+        assert 'case_ids' in details
 
     def test_create_normalizes_and_dedupes_case_ids(
         self, auth_client, test_project, cases,
@@ -181,6 +185,8 @@ class TestRunPlanExecutor:
             result = TestRunPlanExecutor(plan, user=test_user).execute()
         assert result.passed_cases == 3
         assert ApiAutoTestCaseResult.objects.filter(test_result=result).count() == 3
+    # 并发执行器的子线程在 MySQL 下会被 default 的事务包裹卡住,需要显式 transaction=True
+    test_parallel_all_executed = pytest.mark.django_db(transaction=True)(test_parallel_all_executed)
 
     def test_progress_broadcast_called(self, test_project, test_user, cases):
         from qa_center.run_plan_executor import TestRunPlanExecutor

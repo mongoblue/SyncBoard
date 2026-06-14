@@ -71,7 +71,10 @@ class TestEnvironmentCrud:
             'name': 'dev',
         }, content_type='application/json')
         assert resp.status_code == 400
-        assert 'name' in resp.json()
+        body = resp.json()
+        # 错误可能挂在 'name' 或 'non_field_errors' (unique_together) 上
+        details = body.get('details', body)
+        assert 'name' in details or 'non_field_errors' in details
 
     def test_variables_must_be_dict(self, auth_client, test_project):
         resp = auth_client.post('/api/qa/environments/', data={

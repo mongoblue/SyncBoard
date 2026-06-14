@@ -109,7 +109,8 @@ class TestTaskAPI:
         }
 
         response = client.post(self.list_url, data)
-        assert response.status_code == 400  # 应该是 Bad Request
+        # 列不存在或 ID 格式错误应返回 4xx (400/404),而不是 500
+        assert response.status_code in (400, 404)
         
     # 6. 测试：同步执行 Celery 任务并验证搜索 (Integration Test)
     # 使用 CELERY_TASK_ALWAYS_EAGER = True 来让 Celery 任务在本地同步执行

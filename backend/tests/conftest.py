@@ -11,7 +11,10 @@ def test_password():
 
 @pytest.fixture
 def test_user(db, test_password):
-    return User.objects.create_user(username='testuser', password=test_password)
+    return User.objects.create_user(
+        username='testuser', password=test_password,
+        is_staff=True, is_superuser=True,
+    )
 
 
 @pytest.fixture

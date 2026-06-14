@@ -126,17 +126,17 @@
       <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="STATUS_TAG_TYPE[row.status]" size="small">{{ row.status_display }}</el-tag>
+          <el-tag :type="STATUS_TAG_TYPE[row.status as keyof typeof STATUS_TAG_TYPE]" size="small">{{ row.status_display }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="严重度" width="90">
         <template #default="{ row }">
-          <el-tag :type="SEVERITY_TAG_TYPE[row.severity]" size="small">{{ row.severity_display }}</el-tag>
+          <el-tag :type="SEVERITY_TAG_TYPE[row.severity as keyof typeof SEVERITY_TAG_TYPE]" size="small">{{ row.severity_display }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="优先级" width="80">
         <template #default="{ row }">
-          <el-tag :type="PRIORITY_TAG_TYPE[row.priority]" size="small">{{ row.priority_display }}</el-tag>
+          <el-tag :type="PRIORITY_TAG_TYPE[row.priority as keyof typeof PRIORITY_TAG_TYPE]" size="small">{{ row.priority_display }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="负责人" width="120">

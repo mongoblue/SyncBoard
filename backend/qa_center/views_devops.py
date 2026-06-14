@@ -95,7 +95,8 @@ class DashboardStatsView(APIView):
 
         # 按类型统计
         type_stats = {}
-        for test_type, _ in TestResult.TEST_TYPE_CHOICES:
+        test_type_choices = TestResult._meta.get_field('test_type').choices or []
+        for test_type, _ in test_type_choices:
             type_stats[test_type] = recent_results.filter(test_type=test_type).count()
 
         # 按天统计趋势

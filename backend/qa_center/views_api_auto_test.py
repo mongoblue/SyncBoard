@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.pagination import PageNumberPagination
 from django.db.models import Q
 from django.utils import timezone
 import json
@@ -21,6 +22,13 @@ from .serializers import (
     ApiAutoTestExtractorSerializer,
 )
 from .api_auto_executor import run_api_auto_test
+
+
+class _CaseResultsPagination(PageNumberPagination):
+    """允许 ?page_size=N 覆盖默认值,用于 cases 明细分页。"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 200
 
 
 class ApiAutoTestSuiteViewSet(viewsets.ModelViewSet):
@@ -206,6 +214,15 @@ class ApiAutoTestExtractorViewSet(viewsets.ModelViewSet):
 class ApiAutoTestResultViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ApiAutoTestResult.objects.all()
     serializer_class = ApiAutoTestResultSerializer
+
+    @property
+    def paginator(self):
+        # cases action 用自定义分页器(允许 ?page_size=N)
+        if getattr(self, 'action', None) == 'cases':
+            if not hasattr(self, '_cases_paginator'):
+                self._cases_paginator = _CaseResultsPagination()
+            return self._cases_paginator
+        return super().paginator
 
     def get_queryset(self):
         queryset = super().get_queryset()

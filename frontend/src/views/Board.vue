@@ -384,7 +384,7 @@ const projectMembers = computed(() => {
   }));
   const all = owner ? [{ id: owner.id, username: owner.username, profile: owner.profile }, ...members] : members;
   const seen = new Set<number>();
-  return all.filter((u) => u && u.id != null && !seen.has(u.id) && seen.add(u.id));
+  return all.filter((u: any) => u && u.id != null && !seen.has(u.id) && seen.add(u.id));
 });
 
 // ============ 方法 ============
@@ -604,7 +604,7 @@ const onColumnDragEnd = async (event: any) => {
   let newPos = 0;
 
   if (!prevColumn && !nextColumn) newPos = DEFAULT_POSITION;
-  else if (!prevColumn) newPos = nextColumn.position / 2;
+  else if (!prevColumn) newPos = nextColumn!.position / 2;
   else if (!nextColumn) newPos = prevColumn.position + DEFAULT_POSITION;
   else newPos = (prevColumn.position + nextColumn.position) / 2;
 
