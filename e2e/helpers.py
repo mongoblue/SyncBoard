@@ -64,9 +64,19 @@ def open_board(page: Page, project_id: str) -> None:
 
     不能用 wait_for_load_state('networkidle') —— 看板有 WebSocket 长连接，
     networkidle 永远不会到。改成等第一列可见即认为页面就绪。
+
+    若 router guard 因权限不足把我们踢回 /projects，立刻 fail 并把当前 URL
+    报出来，避免 30s 超时无意义等待。
     """
-    page.goto(f"{BASE_URL}/projects/{project_id}/board")
-    expect(page).to_have_url(re.compile(rf"/projects/{re.escape(str(project_id))}/board"), timeout=15000)
+    target = f"{BASE_URL}/projects/{project_id}/board"
+    page.goto(target)
+    try:
+        expect(page).to_have_url(re.compile(rf"/projects/{re.escape(str(project_id))}/board"), timeout=8000)
+    except AssertionError:
+        raise AssertionError(
+            f"open_board: 跳转 {target} 失败，当前 URL = {page.url}。"
+            "通常是后端 RBAC 没给当前用户 board:list 权限，router guard 把你踢回了 /projects。"
+        )
     expect(page.locator(".board-column").first).to_be_visible(timeout=15000)
 
 
