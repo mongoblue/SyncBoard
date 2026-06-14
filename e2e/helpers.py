@@ -60,10 +60,14 @@ def get_or_create_project(page: Page, name: str | None = None) -> dict:
 
 
 def open_board(page: Page, project_id: str) -> None:
-    """直接跳板看板 URL，绕过项目卡片点击。"""
+    """直接跳板看板 URL，绕过项目卡片点击。
+
+    不能用 wait_for_load_state('networkidle') —— 看板有 WebSocket 长连接，
+    networkidle 永远不会到。改成等第一列可见即认为页面就绪。
+    """
     page.goto(f"{BASE_URL}/projects/{project_id}/board")
     expect(page).to_have_url(re.compile(rf"/projects/{re.escape(str(project_id))}/board"), timeout=15000)
-    page.wait_for_load_state("networkidle")
+    expect(page.locator(".board-column").first).to_be_visible(timeout=15000)
 
 
 def open_project_card(page: Page, name: str | None = None) -> str:
