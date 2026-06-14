@@ -193,8 +193,8 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.UserRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/min',
-        'user': '1000/min',
+        'anon': os.environ.get('ANON_THROTTLE_RATE', '100/min'),
+        'user': os.environ.get('USER_THROTTLE_RATE', '1000/min'),
     },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,

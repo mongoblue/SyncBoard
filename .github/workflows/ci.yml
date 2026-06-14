@@ -95,6 +95,11 @@ jobs:
           echo "DB_PORT=3306" >> .env
           echo "DEBUG=True" >> .env
           echo "ALLOWED_HOSTS=*" >> .env
+          echo "LOGIN_THROTTLE_RATE=10000/minute" >> .env
+          echo "ANON_THROTTLE_RATE=10000/min" >> .env
+          echo "USER_THROTTLE_RATE=10000/min" >> .env
+          echo "AI_THROTTLE_RATE=10000/minute" >> .env
+          echo "WS_THROTTLE_RATE=10000/minute" >> .env
 
       # 4. 必须保留：生成 Override 文件 (防止脑裂)
       - name: Create Docker Compose Override
@@ -184,6 +189,11 @@ jobs:
           echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
           echo "DB_HOST=db" >> .env
           echo "DB_PORT=3306" >> .env
+          echo "LOGIN_THROTTLE_RATE=10000/minute" >> .env
+          echo "ANON_THROTTLE_RATE=10000/min" >> .env
+          echo "USER_THROTTLE_RATE=10000/min" >> .env
+          echo "AI_THROTTLE_RATE=10000/minute" >> .env
+          echo "WS_THROTTLE_RATE=10000/minute" >> .env
           cat <<EOF > docker-compose.override.yml
           services:
             backend:
