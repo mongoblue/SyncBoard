@@ -23,7 +23,9 @@ def test_drag_task_to_done(page: Page):
     print("1. 登录并进入看板...")
     login(page)
 
-    page.locator(".el-card, .project-card").first.click(timeout=10000)
+    first_card = page.locator(".project-card").first
+    expect(first_card).to_be_visible(timeout=10000)
+    first_card.locator(".project-name").click(timeout=10000, force=True)
     expect(page).to_have_url(re.compile(r"/board"), timeout=10000)
     page.wait_for_load_state("networkidle")
 

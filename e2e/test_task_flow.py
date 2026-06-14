@@ -24,7 +24,9 @@ def test_create_task_success(page: Page):
     login(page)
 
     print("2. 正在进入第一个项目...")
-    page.locator(".el-card, .project-card").first.click(timeout=10000)
+    first_card = page.locator(".project-card").first
+    expect(first_card).to_be_visible(timeout=10000)
+    first_card.locator(".project-name").click(timeout=10000, force=True)
 
     print("3. 验证进入看板...")
     expect(page).to_have_url(re.compile(r"/board"), timeout=10000)

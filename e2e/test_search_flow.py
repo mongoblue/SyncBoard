@@ -39,7 +39,7 @@ def test_search_flow(page: Page):
     login_btn.click()
     expect(page).to_have_url(re.compile(r"/projects"), timeout=15000)
 
-    create_btn = page.get_by_text("创建新项目")
+    create_btn = page.get_by_role("button", name="创建新项目")
     create_btn.wait_for(state="visible", timeout=10000)
     create_btn.click()
 
