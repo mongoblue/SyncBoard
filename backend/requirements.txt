@@ -5,6 +5,7 @@ django-cors-headers
 django-haystack
 channels
 whitenoise
+channels-redis
 
 # 任务队列
 celery

@@ -8,10 +8,15 @@ BASE_URL = os.getenv("BASE_URL", os.getenv("E2E_BASE_URL", "http://localhost"))
 
 def login(page: Page):
     page.goto(f"{BASE_URL}/login")
-    page.get_by_placeholder("用户名").fill("mongoblue")
+    expect(page).to_have_title(re.compile("FlowSpace"), timeout=10000)
+    username = page.get_by_placeholder("用户名")
+    expect(username).to_be_visible(timeout=10000)
+    username.fill("mongoblue")
     page.get_by_placeholder("密码").fill("13579mnb")
-    page.get_by_role("button", name=re.compile(r"登\s*录")).click()
-    expect(page).to_have_url(re.compile("/projects"), timeout=10000)
+    login_btn = page.get_by_role("button", name=re.compile(r"登\s*录"))
+    expect(login_btn).to_be_enabled(timeout=10000)
+    login_btn.click()
+    expect(page).to_have_url(re.compile("/projects"), timeout=15000)
 
 
 def test_create_task_success(page: Page):

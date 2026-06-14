@@ -29,10 +29,15 @@ def test_search_flow(page: Page):
     password = "13579mnb"
 
     page.goto(f"{BASE_URL}/login")
-    page.get_by_placeholder("用户名").fill(username)
+    expect(page).to_have_title(re.compile("FlowSpace"), timeout=10000)
+    username_input = page.get_by_placeholder("用户名")
+    expect(username_input).to_be_visible(timeout=10000)
+    username_input.fill(username)
     page.get_by_placeholder("密码").fill(password)
-    page.get_by_role("button", name=re.compile(r"登\s*录")).click()
-    expect(page).to_have_url(re.compile(r"/projects"), timeout=10000)
+    login_btn = page.get_by_role("button", name=re.compile(r"登\s*录"))
+    expect(login_btn).to_be_enabled(timeout=10000)
+    login_btn.click()
+    expect(page).to_have_url(re.compile(r"/projects"), timeout=15000)
 
     create_btn = page.get_by_text("创建新项目")
     create_btn.wait_for(state="visible", timeout=10000)
