@@ -5,12 +5,12 @@ services:
     container_name: mysql-dev
     restart: always
     environment:
-      MYSQL_DATABASE: syncboard
-      # 这里配置普通用户（对应你 settings.py 里的 Liujia）
-      MYSQL_USER: Liujia
+      MYSQL_DATABASE: ${DB_NAME:-syncboard}
+      # 普通用户（对应 settings.py 里的 Liujia）
+      MYSQL_USER: ${MYSQL_USER:-Liujia}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-changeme}
-      # root 密码依然保留，以备不时之需
-      MYSQL_ROOT_PASSWORD: root
+      # root 密码：CI 用 secrets.DB_PASSWORD 注入，本地默认 root
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-${MYSQL_PASSWORD:-root}}
     volumes:
       - db_data:/var/lib/mysql
     ports:
