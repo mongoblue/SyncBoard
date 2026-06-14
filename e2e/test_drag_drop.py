@@ -3,31 +3,13 @@ import os
 import time
 from playwright.sync_api import Page, expect
 
-BASE_URL = os.getenv("BASE_URL", os.getenv("E2E_BASE_URL", "http://localhost"))
-
-
-def login(page: Page):
-    page.goto(f"{BASE_URL}/login")
-    expect(page).to_have_title(re.compile("FlowSpace"), timeout=10000)
-    username = page.get_by_placeholder("用户名")
-    expect(username).to_be_visible(timeout=10000)
-    username.fill("mongoblue")
-    page.get_by_placeholder("密码").fill("13579mnb")
-    login_btn = page.get_by_role("button", name=re.compile(r"登\s*录"))
-    expect(login_btn).to_be_enabled(timeout=10000)
-    login_btn.click()
-    expect(page).to_have_url(re.compile("/projects"), timeout=15000)
+from e2e.helpers import BASE_URL, login, open_project_card
 
 
 def test_drag_task_to_done(page: Page):
     print("1. 登录并进入看板...")
     login(page)
-
-    first_card = page.locator(".project-card").first
-    expect(first_card).to_be_visible(timeout=10000)
-    first_card.locator(".project-name").click(timeout=10000, force=True)
-    expect(page).to_have_url(re.compile(r"/board"), timeout=10000)
-    page.wait_for_load_state("networkidle")
+    open_project_card(page)
 
     print("2. 创建拖拽测试任务...")
     task_title = f"DragMe任务_{int(time.time())}"
