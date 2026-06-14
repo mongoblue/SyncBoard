@@ -72,7 +72,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import { useAuthStore } from '@/stores/Auth';
-import { useBoardStore } from '@/stores/Board';
+import { useBoardStore } from '@/stores/board';
 import { ChatDotRound, ArrowRight } from '@element-plus/icons-vue';
 import service from '@/utils/request';
 
@@ -97,8 +97,9 @@ const totalUnread = ref(0); // 简化处理，暂时只做总数
 // 1. 获取用户参与的项目列表
 const fetchMyProjects = async () => {
   try {
-    const res = await service.get('/api/projects/');
-    projectList.value = res.data || res;
+    const res = await service.get('/projects/');
+    const projectArray = Array.isArray(res) ? res : [];
+    projectList.value = projectArray;
   } catch (e) {
     console.error(e);
   }
@@ -124,10 +125,9 @@ const leaveChat = () => {
 // 4. 连接 Socket
 const connectChat = (projectId: string) => {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const hostname = window.location.hostname;
-  const port = '8000';
-  
-  socket = new WebSocket(`${protocol}//${hostname}:${port}/ws/chat/${projectId}/`);
+  const host = window.location.host;
+
+  socket = new WebSocket(`${protocol}//${host}/ws/chat/${projectId}/`);
 
   socket.onopen = () => { isConnected.value = true; };
   
@@ -190,17 +190,17 @@ onUnmounted(() => {
 
 <style scoped>
 /* 样式部分 */
-.chat-fab { position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; background: #409eff; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.chat-fab { position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; background: var(--color-primary-light); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
 .chat-list-container { padding: 10px; }
 .chat-list-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }
-.chat-list-item:hover { background: #f5f7fa; }
-.proj-avatar { width: 40px; height: 40px; background: #409eff; color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+.chat-list-item:hover { background: var(--color-bg); }
+.proj-avatar { width: 40px; height: 40px; background: var(--color-primary-light); color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
 .proj-info { flex: 1; }
 .proj-name { font-size: 14px; font-weight: bold; color: #333; }
 .proj-preview { font-size: 12px; color: #999; }
 .chat-container { display: flex; flex-direction: column; height: 100%; }
 .chat-header-bar { padding: 5px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
-.messages { flex: 1; overflow-y: auto; padding: 10px; background: #f5f7fa; }
+.messages { flex: 1; overflow-y: auto; padding: 10px; background: var(--color-bg); }
 .message-item { margin-bottom: 15px; display: flex; flex-direction: column; align-items: flex-start; }
 .my-msg { align-items: flex-end; }
 .msg-bubble { background: white; padding: 8px 12px; border-radius: 8px; max-width: 85%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }
@@ -208,5 +208,5 @@ onUnmounted(() => {
 .msg-user { font-size: 12px; color: #999; margin-bottom: 2px; }
 .msg-time { font-size: 10px; color: #ccc; margin-left: 5px; }
 .status-dot { width: 8px; height: 8px; background: red; border-radius: 50%; }
-.status-dot.online { background: #67c23a; }
+.status-dot.online { background: var(--color-success); }
 </style>

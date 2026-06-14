@@ -13,9 +13,8 @@ export const useNotificationStore = defineStore('notification',()=>{
         if(socket.value?.readyState === WebSocket.OPEN)return;
         if(!authStore.user) return;
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const hostname = window.location.hostname;
-        const port = 8000;
-        socket.value = new WebSocket(`${protocol}//${hostname}:${port}/ws/global/`)
+        const host = window.location.host;
+        socket.value = new WebSocket(`${protocol}//${host}/ws/global/`)
 
         socket.value.onopen = ()=>{
             console.log('服务已连接');
@@ -33,15 +32,19 @@ export const useNotificationStore = defineStore('notification',()=>{
             notifications.value.unshift(data.message)
             unreadCount.value++
         }
-        socket.value.onclose = ()=>{
-            console.log('服务已断开');
-        }
-        setTimeout(() => {
-            if(authStore.user && (socket.value?.readyState !== WebSocket.OPEN)){
-                console.log('正在重连服务...');
-                InitNotificationSocket()
+        socket.value.onclose = (event)=>{
+            console.log('服务已断开', event.code);
+            socket.value = null;
+            // 仅在非主动关闭时重连
+            if (authStore.user) {
+                setTimeout(() => {
+                    if (authStore.user && !socket.value) {
+                        console.log('正在重连服务...');
+                        InitNotificationSocket();
+                    }
+                }, 5000);
             }
-        }, 5000);
+        }
     }
     return{
         notifications,

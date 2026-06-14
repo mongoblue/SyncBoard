@@ -40,12 +40,13 @@
       <div class="dialog-footer">
         <el-button @click="handleClose" :disabled="testing">关闭窗口</el-button>
         
-        <el-dropdown split-button type="primary" @click="startTest('default')" @command="startTest" :disabled="testing">
+        <el-dropdown split-button type="primary" @click="startTest('regression')" @command="startTest" :disabled="testing">
           <span v-if="testing"><el-icon class="is-loading"><Loading /></el-icon> 测试运行中...</span>
           <span v-else>🚀 启动回归测试</span>
           
           <template #dropdown>
             <el-dropdown-menu>
+              <el-dropdown-item command="regression">🔄 完整回归测试 (All)</el-dropdown-item>
               <el-dropdown-item command="api">🔌 接口测试 (API)</el-dropdown-item>
               <el-dropdown-item command="e2e">🎭 全链路测试 (E2E)</el-dropdown-item>
               <el-dropdown-item command="performance">⚡ 性能压测 (Locust)</el-dropdown-item>
@@ -108,12 +109,10 @@ const handleClose = () => {
 // WebSocket 连接
 const connectSocket = () => {
   if (qaSocket && qaSocket.readyState === WebSocket.OPEN) return;
-  const host = window.location.hostname;
-  // 简单判断环境，如果不是 localhost 可能需要调整端口逻辑
-  const port = (host === 'localhost' || host === '127.0.0.1') ? ':8000' : '';
+  const host = window.location.host;
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  
-  qaSocket = new WebSocket(`${protocol}://${host}${port}/ws/qa/dashboard/`);
+
+  qaSocket = new WebSocket(`${protocol}://${host}/ws/qa/dashboard/`);
 
   qaSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -173,7 +172,7 @@ const startTest = async (type: string = 'default') => {
     logs.value = [];
     testing.value = true;
     currentStatus.value = "启动中...";
-    await service.post('/api/qa/run-test/', { test_type: type });
+    await service.post('/qa/run-test/', { test_type: type });
   } catch (e) {
     testing.value = false;
     currentStatus.value = "启动失败";
@@ -193,11 +192,11 @@ const scrollToBottom = () => {
 const formatLog = (line: string) => {
   if (!line) return '';
   let colored = line
-    .replace(/PASSED/g, '<span style="color:#67C23A; font-weight:bold">PASSED</span>')
-    .replace(/FAILED/g, '<span style="color:#F56C6C; font-weight:bold">FAILED</span>')
-    .replace(/ERROR/g, '<span style="color:#F56C6C; font-weight:bold">ERROR</span>')
-    .replace(/SKIPPED/g, '<span style="color:#E6A23C">SKIPPED</span>')
-    .replace(/collecting .../g, '<span style="color:#409EFF">collecting ...</span>');
+    .replace(/PASSED/g, '<span style="color:var(--color-success); font-weight:bold">PASSED</span>')
+    .replace(/FAILED/g, '<span style="color:var(--color-danger); font-weight:bold">FAILED</span>')
+    .replace(/ERROR/g, '<span style="color:var(--color-danger); font-weight:bold">ERROR</span>')
+    .replace(/SKIPPED/g, '<span style="color:var(--color-warning)">SKIPPED</span>')
+    .replace(/collecting .../g, '<span style="color:var(--color-primary-light)">collecting ...</span>');
   return colored;
 };
 
@@ -211,7 +210,7 @@ defineExpose({ open });
 <style scoped>
 .qa-dialog :deep(.el-dialog__body) {
   padding: 10px 20px;
-  background-color: #f5f7fa;
+  background-color: var(--color-bg);
 }
 
 .dashboard-header {
@@ -236,7 +235,7 @@ defineExpose({ open });
 
 .label {
   font-size: 12px;
-  color: #909399;
+  color: var(--color-text-tertiary);
   margin-bottom: 4px;
 }
 
@@ -245,14 +244,14 @@ defineExpose({ open });
   font-weight: 600;
 }
 
-.text-blue { color: #409EFF; }
-.text-green { color: #67C23A; }
-.text-red { color: #F56C6C; }
-.text-gray { color: #909399; }
+.text-blue { color: var(--color-primary-light); }
+.text-green { color: var(--color-success); }
+.text-red { color: var(--color-danger); }
+.text-gray { color: var(--color-text-tertiary); }
 
 /* 终端样式 */
 .terminal-window {
-  background-color: #1e1e1e; /* VS Code 默认背景色 */
+  background-color: #1E293B; /* VS Code 默认背景色 */
   border-radius: 6px;
   height: 450px;
   overflow-y: auto;
@@ -260,7 +259,7 @@ defineExpose({ open });
   font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
   font-size: 13px;
   line-height: 1.5;
-  color: #d4d4d4;
+  color: var(--color-border);
   border: 1px solid #333;
   box-shadow: inset 0 0 8px rgba(0,0,0,0.2);
 }
@@ -271,7 +270,7 @@ defineExpose({ open });
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #5c6370;
+  color: var(--color-text-secondary);
   opacity: 0.8;
 }
 

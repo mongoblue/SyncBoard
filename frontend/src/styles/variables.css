@@ -1,0 +1,116 @@
+:root {
+  /* Surface — Swiss neutral, no warm paper */
+  --color-bg: #F7F7F8;
+  --color-surface: #FFFFFF;
+  --color-surface-sunken: #FAFAFA;
+
+  /* Text — near black, no teal tint */
+  --color-text: #0A0A0A;
+  --color-text-secondary: #5C5C5C;
+  --color-text-tertiary: #9A9A9A;
+  --color-text-inverse: #FFFFFF;
+
+  /* Border — Swiss hairline system */
+  --color-border: #E5E5E5;
+  --color-border-strong: #1A1A1A;
+  --color-border-light: #F0F0F0;
+
+  /* Brand — teal preserved */
+  --color-primary: #0F766E;
+  --color-primary-light: #14B8A6;
+  --color-primary-dark: #0D9488;
+  --color-primary-bg: #F0FDFA;
+  --color-primary-border: #99F6E4;
+
+  /* Accent — International Orange, used sparingly */
+  --color-accent: #FF4F00;
+  --color-accent-hover: #E64500;
+  --color-accent-bg: #FFF3EC;
+
+  /* Semantic */
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+
+  /* Accent bars — 4-column cycle (board) */
+  --color-accent-bar-0: #0F766E;
+  --color-accent-bar-1: #FF4F00;
+  --color-accent-bar-2: #5C5C5C;
+  --color-accent-bar-3: #14B8A6;
+
+  /* Typography — single sans family, near Akzidenz-Grotesk */
+  --font-heading: 'Inter', 'Helvetica Neue', Helvetica, system-ui, -apple-system, sans-serif;
+  --font-body: 'Inter', 'Helvetica Neue', Helvetica, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, 'Liberation Mono', monospace;
+
+  /* Radius — tight, Swiss square */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-xl: 4px;
+
+  /* Shadow — almost none; only dialogs float */
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px rgba(10, 10, 10, 0.08);
+  --shadow-lg: 0 16px 40px rgba(10, 10, 10, 0.12);
+
+  /* Rhythm */
+  --transition-fast: 120ms ease;
+  --transition-normal: 200ms ease;
+
+  /* Legacy aliases for backward compatibility */
+  --primary-color: var(--color-primary);
+  --primary-light: var(--color-primary-light);
+  --primary-dark: var(--color-primary-dark);
+  --success-color: var(--color-success);
+  --warning-color: var(--color-warning);
+  --danger-color: var(--color-danger);
+  --bg-primary: var(--color-bg);
+  --bg-secondary: var(--color-bg);
+  --bg-card: var(--color-surface);
+  --bg-sidebar: var(--color-surface);
+  --bg-navbar: var(--color-surface);
+  --text-primary: var(--color-text);
+  --text-secondary: var(--color-text-secondary);
+  --text-tertiary: var(--color-text-tertiary);
+  --border-color: var(--color-border);
+  --border-light: var(--color-border-light);
+}
+
+[data-theme="dark"] {
+  --color-bg: #0A0A0A;
+  --color-surface: #141414;
+  --color-surface-sunken: #0F0F0F;
+
+  --color-text: #F5F5F5;
+  --color-text-secondary: #A8A8A8;
+  --color-text-tertiary: #6B6B6B;
+  --color-text-inverse: #0A0A0A;
+
+  --color-border: #2A2A2A;
+  --color-border-strong: #F5F5F5;
+  --color-border-light: #1F1F1F;
+
+  --color-primary: #14B8A6;
+  --color-primary-light: #2DD4BF;
+  --color-primary-dark: #0D9488;
+  --color-primary-bg: #0F2F2B;
+  --color-primary-border: #134E4A;
+
+  --color-accent: #FF6B2C;
+  --color-accent-hover: #FF8552;
+  --color-accent-bg: #2A1810;
+
+  --color-success: #34D399;
+  --color-warning: #FBBF24;
+  --color-danger: #F87171;
+
+  --color-accent-bar-0: #14B8A6;
+  --color-accent-bar-1: #FF6B2C;
+  --color-accent-bar-2: #A8A8A8;
+  --color-accent-bar-3: #2DD4BF;
+
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+}
