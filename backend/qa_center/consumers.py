@@ -234,3 +234,21 @@ class TestRunProgressConsumer(AsyncWebsocketConsumer):
 
     async def run_finished(self, event):
         await self.send(text_data=json.dumps(event['data']))
+
+
+class UiRunConsumer(AsyncWebsocketConsumer):
+    """UI 用例实时运行进度推送
+    URL: /ws/qa/run/{task_id}/
+    """
+    async def connect(self):
+        self.task_id = self.scope["url_route"]["kwargs"].get("task_id")
+        self.group_name = f"ui_run_{self.task_id}"
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send(text_data=json.dumps({"type": "connected", "task_id": self.task_id}))
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def run_event(self, event):
+        await self.send(text_data=json.dumps(event["data"]))
