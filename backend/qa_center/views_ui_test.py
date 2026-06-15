@@ -12,12 +12,13 @@ import uuid
 from datetime import datetime
 
 from rest_framework import viewsets, status
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.utils import timezone
+from django.http import FileResponse, HttpResponseBadRequest, Http404
 
 from .models import UiTestCase
 from .serializers import UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseRunSerializer
@@ -262,3 +263,18 @@ def execute_ui_test_cases(case_ids):
             "assertions": [],
         })
     return results
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def ui_run_screenshot(request):
+    path = request.query_params.get("path", "")
+    if not path:
+        return HttpResponseBadRequest("path required")
+    safe_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(safe_root):
+        return HttpResponseBadRequest("invalid path")
+    if not os.path.exists(abs_path):
+        raise Http404()
+    return FileResponse(open(abs_path, "rb"), content_type="image/png")

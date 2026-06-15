@@ -1,15 +1,15 @@
 <template>
   <div class="ui-case-list">
-    <div class="page-header">
-      <div class="header-left">
-        <h2>UI 测试用例</h2>
-        <p class="subtitle">基于 Playwright 的 E2E 自动化测试</p>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">UI 测试用例</h1>
+        <p class="page-subtitle">基于 Playwright 的 E2E 自动化测试</p>
       </div>
       <el-button type="primary" @click="handleCreate">
-        <el-icon><Plus /></el-icon>
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         新建用例
       </el-button>
-    </div>
+    </header>
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
@@ -156,6 +156,8 @@
         </div>
       </div>
     </el-dialog>
+
+    <RunDrawer v-model="runDrawerVisible" :task-id="currentTaskId" :case-name="currentCaseName" />
   </div>
 </template>
 
@@ -173,6 +175,7 @@ import {
   Delete
 } from '@element-plus/icons-vue';
 import service from '@/utils/request';
+import RunDrawer from './components/RunDrawer.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -185,6 +188,9 @@ const searchKeyword = ref('');
 
 const resultDialogVisible = ref(false);
 const runResult = ref<any>(null);
+const currentTaskId = ref<string>('');
+const currentCaseName = ref<string>('');
+const runDrawerVisible = ref(false);
 
 // 加载项目列表
 const loadProjects = async () => {
@@ -250,14 +256,9 @@ const handleRun = async (row: any) => {
   loading.value = true;
   try {
     const res = await service.post(`/qa/ui-cases/${row.id}/run/`);
-    runResult.value = res;
-    resultDialogVisible.value = true;
-
-    if (res.success) {
-      ElMessage.success('测试执行成功');
-    } else {
-      ElMessage.error('测试执行失败');
-    }
+    currentTaskId.value = res.task_id;
+    currentCaseName.value = row.name;
+    runDrawerVisible.value = true;
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '运行测试失败');
   } finally {
@@ -303,31 +304,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.ui-case-list {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-left h2 {
-  margin: 0 0 5px 0;
-}
-
-.subtitle {
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  margin: 0;
-}
+.ui-case-list { padding: 0; }
 
 .filter-bar {
   display: flex;
-  gap: 15px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 16px;
   align-items: center;
 }
 
@@ -376,10 +358,12 @@ onMounted(() => {
 }
 
 .logs-content {
-  background: var(--color-text);
-  border-radius: 8px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
   padding: 12px;
-  font-family: 'Consolas', 'Monaco', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   max-height: 300px;
@@ -387,23 +371,12 @@ onMounted(() => {
 }
 
 .log-line {
-  color: var(--color-border);
+  color: var(--color-text);
   padding: 2px 0;
 }
 
-.log-success {
-  color: var(--color-primary-light);
-}
-
-.log-error {
-  color: var(--color-danger);
-}
-
-.log-warning {
-  color: var(--color-warning);
-}
-
-.log-info {
-  color: #3B82F6;
-}
+.log-success { color: var(--color-success); }
+.log-error { color: var(--color-danger); }
+.log-warning { color: var(--color-warning); }
+.log-info { color: var(--color-info); }
 </style>
