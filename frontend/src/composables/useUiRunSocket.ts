@@ -33,7 +33,7 @@ export function useUiRunSocket(taskId: string) {
         if (data.type === 'finished' || data.type === 'run_finished_persisted') {
           finished.value = true
         }
-      } catch (e) {}
+      } catch (e) { console.warn('[useUiRunSocket] bad frame', e) }
     }
   }
 
