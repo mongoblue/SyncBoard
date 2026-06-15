@@ -156,54 +156,58 @@ def _run_steps(case_data: dict) -> dict:
                 ],
                 downloads_path=temp_dir,
             )
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                accept_downloads=True,
-            )
-            page = context.new_page()
-
-            emit({"type": "step_start", "index": -1, "action": "goto", "desc": f"导航到 {url}"})
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            emit({"type": "step_log", "index": -1, "message": "页面加载完成"})
-
-            for i, step in enumerate(steps):
-                emit({"type": "step_start", "index": i, "action": step.get("action"), "desc": f"步骤{i+1}"})
+            try:
+                context = browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    accept_downloads=True,
+                )
                 try:
-                    _execute_single_step(page, step, emit)
-                    page.wait_for_timeout(500)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=5000)
-                    except Exception:
-                        pass
-                    shot_path = os.path.join(shots_dir, f"step_{i}.png")
-                    page.screenshot(path=shot_path, full_page=True)
-                    emit({"type": "step_screenshot", "index": i, "path": shot_path})
-                    emit({"type": "step_done", "index": i, "success": True})
-                    passed += 1
-                except Exception as e:
-                    failed += 1
-                    code = _classify_error(e)
-                    tb = traceback.format_exc()
-                    try:
-                        shot_path = os.path.join(shots_dir, f"step_{i}_fail.png")
-                        page.screenshot(path=shot_path, full_page=True)
-                        emit({"type": "step_screenshot", "index": i, "path": shot_path})
-                    except Exception:
-                        pass
-                    emit({"type": "step_done", "index": i, "success": False,
-                          "code": code, "message": str(e), "traceback": tb})
-                    context.close()
-                    browser.close()
-                    return {"success": False, "summary": {"passed": passed, "failed": failed, "total": len(steps)}}
+                    page = context.new_page()
 
-            page.wait_for_timeout(1500)
-            final_path = os.path.join(shots_dir, "final.png")
-            page.screenshot(path=final_path, full_page=True)
-            emit({"type": "step_screenshot", "index": len(steps), "path": final_path})
+                    emit({"type": "step_start", "index": -1, "action": "goto", "desc": f"导航到 {url}"})
+                    page.goto(url, wait_until="networkidle", timeout=30000)
+                    emit({"type": "step_log", "index": -1, "message": "页面加载完成"})
 
-            context.close()
-            browser.close()
-            return {"success": True, "summary": {"passed": passed, "failed": 0, "total": len(steps)}}
+                    for i, step in enumerate(steps):
+                        emit({"type": "step_start", "index": i, "action": step.get("action"), "desc": f"步骤{i+1}"})
+                        try:
+                            _execute_single_step(page, step, emit)
+                            page.wait_for_timeout(500)
+                            try:
+                                page.wait_for_load_state("networkidle", timeout=5000)
+                            except Exception:
+                                pass
+                            shot_path = os.path.join(shots_dir, f"step_{i}.png")
+                            page.screenshot(path=shot_path, full_page=True)
+                            emit({"type": "step_screenshot", "index": i, "path": shot_path})
+                            emit({"type": "step_done", "index": i, "success": True})
+                            passed += 1
+                        except Exception as e:
+                            failed += 1
+                            code = _classify_error(e)
+                            tb = traceback.format_exc()
+                            try:
+                                shot_path = os.path.join(shots_dir, f"step_{i}_fail.png")
+                                page.screenshot(path=shot_path, full_page=True)
+                                emit({"type": "step_screenshot", "index": i, "path": shot_path})
+                            except Exception:
+                                pass
+                            emit({"type": "step_done", "index": i, "success": False,
+                                  "code": code, "message": str(e), "traceback": tb})
+                            return {"success": False, "summary": {"passed": passed, "failed": failed, "total": len(steps)}}
+
+                    page.wait_for_timeout(1500)
+                    final_path = os.path.join(shots_dir, "final.png")
+                    page.screenshot(path=final_path, full_page=True)
+                    emit({"type": "step_screenshot", "index": len(steps), "path": final_path})
+
+                    return {"success": True, "summary": {"passed": passed, "failed": 0, "total": len(steps)}}
+                finally:
+                    try: context.close()
+                    except Exception: pass
+            finally:
+                try: browser.close()
+                except Exception: pass
 
     except Exception as e:
         code = _classify_error(e)
