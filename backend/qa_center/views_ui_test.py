@@ -53,25 +53,43 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def run(self, request, pk=None):
+        from channels.layers import get_channel_layer
+        from asgiref.sync import async_to_sync
+        import uuid as _uuid
+
         test_case = self.get_object()
-        case_data = {
-            "case_id": test_case.id,
-            "url": test_case.url,
-            "steps": test_case.steps or [],
-        }
-        events: list = []
-        result = execute_ui_case(case_data, on_event=events.append)
+        task_id = _uuid.uuid4().hex
+        case_data = {"case_id": test_case.id, "url": test_case.url, "steps": test_case.steps or []}
 
-        payload = self._events_to_payload(events, result)
+        channel_layer = get_channel_layer()
+        group_name = f"ui_run_{task_id}"
 
-        def save_in_background():
+        def push(event_data):
             try:
-                self._save_test_result(test_case, result, events, request)
+                async_to_sync(channel_layer.group_send)(group_name, {
+                    "type": "run_event",
+                    "data": event_data,
+                })
             except Exception:
-                logger.exception("后台保存失败")
+                pass
 
-        threading.Thread(target=save_in_background, daemon=True).start()
-        return Response(payload, status=status.HTTP_200_OK)
+        events: list = []
+
+        def collector(ev):
+            events.append(ev)
+            push(ev)
+
+        def runner_thread():
+            try:
+                result = execute_ui_case(case_data, on_event=collector)
+                push({"type": "run_finished_persisted", "task_id": task_id})
+                self._save_test_result(test_case, result, events, request, task_id=task_id)
+            except Exception:
+                logger.exception("runner_thread 失败", exc_info=_tb.format_exc())
+
+        threading.Thread(target=runner_thread, daemon=True).start()
+
+        return Response({"task_id": task_id}, status=status.HTTP_202_ACCEPTED)
 
     def _events_to_payload(self, events, result):
         logs = []
@@ -107,13 +125,13 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
             "summary": result.get("summary", {}),
         }
 
-    def _save_test_result(self, test_case, result, events, request):
+    def _save_test_result(self, test_case, result, events, request, task_id=None):
         from .models import TestResult, TestScreenshot
         error_msg = ""
         error_code = None
         error_tb = ""
         worker_pid = None
-        task_id = ""
+        task_id = task_id or ""
         temp_dir_path = ""
         for ev in events:
             t = ev.get("type")
@@ -126,7 +144,8 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                 error_code = error_code or ev.get("code")
                 error_tb = error_tb or ev.get("traceback", "")
             elif t == "supervisor_meta":
-                task_id = ev.get("task_id", "") or task_id
+                if not task_id:
+                    task_id = ev.get("task_id", "") or task_id
                 if ev.get("worker_pid") is not None:
                     worker_pid = ev.get("worker_pid")
             elif t == "started":
