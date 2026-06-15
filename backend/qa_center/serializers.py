@@ -225,6 +225,7 @@ class TestResultDetailSerializer(serializers.ModelSerializer):
             'expected_result', 'actual_result', 'error_message', 'test_log',
             'response_time_ms', 'throughput', 'error_rate', 'concurrent_users',
             'test_environment', 'browser_info', 'user_agent',
+            'task_id', 'error_code', 'error_traceback', 'worker_pid', 'temp_dir_path', 'aborted',
             'screenshots', 'created_at', 'updated_at'
         ]
 

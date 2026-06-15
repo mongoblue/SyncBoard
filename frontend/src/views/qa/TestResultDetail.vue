@@ -47,6 +47,18 @@
       </el-card>
 
       <!-- 执行摘要 -->
+      <!-- 错误码/堆栈告警 -->
+      <el-alert
+        v-if="result.error_code"
+        type="error"
+        :closable="false"
+        :title="`[${result.error_code}] ${result.error_message || '执行失败'}`"
+        show-icon
+        style="margin-bottom: 20px;"
+      >
+        <pre v-if="result.error_traceback" class="error-tb">{{ result.error_traceback }}</pre>
+      </el-alert>
+
       <el-card v-if="executionSummary" class="summary-card">
         <template #header>
           <span>执行摘要</span>
@@ -761,9 +773,9 @@ onMounted(() => {
 }
 
 .case-time {
-  color: var(--el-color-primary);
+  color: var(--color-primary);
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .case-detail {
@@ -779,21 +791,22 @@ onMounted(() => {
 }
 
 .section-title {
-  font-weight: bold;
+  font: 600 14px/1.3 var(--font-heading);
   margin-bottom: 12px;
-  color: var(--el-text-color-primary);
+  color: var(--color-text);
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .code-block {
-  background-color: #1E293B;
-  color: var(--color-border);
-  padding: 16px;
-  border-radius: 8px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
   overflow-x: auto;
 }
 
@@ -808,35 +821,20 @@ onMounted(() => {
 }
 
 .method {
-  font-weight: bold;
-  padding: 4px 8px;
-  border-radius: 4px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
   margin-right: 8px;
   font-size: 12px;
 }
 
-.method.get {
-  background-color: #4ec9b0;
-  color: #000;
-}
-
-.method.post {
-  background-color: #4fc1ff;
-  color: #000;
-}
-
-.method.put {
-  background-color: #dcdcaa;
-  color: #000;
-}
-
-.method.delete {
-  background-color: #f48771;
-  color: #000;
-}
+.method.get { background-color: var(--color-info-bg); color: var(--color-info); }
+.method.post { background-color: var(--color-success-bg); color: var(--color-success); }
+.method.put { background-color: var(--color-warning-bg); color: var(--color-warning); }
+.method.delete { background-color: var(--color-danger-bg); color: var(--color-danger); }
 
 .url {
-  color: var(--color-border);
+  color: var(--color-text);
 }
 
 .response-line {
@@ -847,62 +845,53 @@ onMounted(() => {
 }
 
 .status-code {
-  font-weight: bold;
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
 }
 
-.status-code.success {
-  background-color: #4ec9b0;
-  color: #000;
-}
-
-.status-code.warning {
-  background-color: #dcdcaa;
-  color: #000;
-}
-
-.status-code.error {
-  background-color: #f48771;
-  color: #000;
-}
+.status-code.success { background-color: var(--color-success-bg); color: var(--color-success); }
+.status-code.warning { background-color: var(--color-warning-bg); color: var(--color-warning); }
+.status-code.error { background-color: var(--color-danger-bg); color: var(--color-danger); }
 
 .response-time {
-  color: #858585;
+  color: var(--color-text-secondary);
   font-size: 12px;
 }
 
 .sub-title {
-  color: #858585;
+  color: var(--color-text-secondary);
   margin-top: 12px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   font-size: 12px;
+  font-weight: 500;
 }
 
 .message-block {
-  padding: 12px 16px;
-  border-radius: 4px;
-  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
 }
 
 .message-block.success {
-  background-color: #f0f9eb;
-  border-left: 4px solid var(--el-color-success);
-  color: var(--el-color-success);
+  background-color: var(--color-success-bg);
+  border-left: 3px solid var(--color-success);
+  color: var(--color-success);
 }
 
 .message-block.error {
-  background-color: #fef0f0;
-  border-left: 4px solid var(--el-color-danger);
-  color: var(--el-color-danger);
+  background-color: var(--color-danger-bg);
+  border-left: 3px solid var(--color-danger);
+  color: var(--color-danger);
 }
 
 .log-content {
-  background-color: #1E293B;
-  color: var(--color-border);
-  padding: 16px;
-  border-radius: 8px;
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
   overflow-x: auto;
 }
 
@@ -910,26 +899,27 @@ onMounted(() => {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  font-family: 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
 .screenshots-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 16px;
+  gap: 12px;
 }
 
 .screenshot-item {
   cursor: pointer;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  transition: box-shadow 0.3s;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .screenshot-item:hover {
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .screenshot-item img {
@@ -939,18 +929,19 @@ onMounted(() => {
 }
 
 .screenshot-info {
-  padding: 8px;
+  padding: 8px 10px;
 }
 
 .screenshot-name {
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
+  color: var(--color-text);
 }
 
 .screenshot-desc {
   font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
 }
 
 /* 步骤样式 */
@@ -966,30 +957,31 @@ onMounted(() => {
 }
 
 .step-number {
-  font-weight: bold;
-  color: var(--el-text-color-primary);
+  font-weight: 600;
+  color: var(--color-text);
 }
 
 .step-selector {
-  color: var(--el-text-color-secondary);
-  font-family: monospace;
-  background-color: var(--color-bg);
-  padding: 2px 8px;
-  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
 }
 
 .step-value {
-  color: var(--el-color-primary);
-  font-style: italic;
+  color: var(--color-primary);
 }
 
 .step-logs {
   margin-top: 8px;
   padding: 8px 12px;
-  background-color: var(--color-bg);
-  border-radius: 4px;
+  background-color: var(--color-surface-sunken);
+  border-radius: var(--radius-md);
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--color-text-secondary);
 }
 
 .log-line {
@@ -1007,60 +999,41 @@ onMounted(() => {
 }
 
 .perf-metrics-row {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .perf-metric-card {
-  background: linear-gradient(135deg, var(--color-bg) 0%, var(--color-surface) 100%);
-  border-radius: 12px;
-  padding: 20px 12px;
-  text-align: center;
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
-  transition: all 0.3s ease;
+  border-radius: var(--radius-md);
+  padding: 16px 12px;
+  text-align: center;
+  transition: border-color var(--transition-fast);
 }
 
 .perf-metric-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  border-color: var(--color-primary);
 }
 
-.perf-metric-card.rps {
-  border-top: 4px solid var(--color-primary-light);
-}
-
-.perf-metric-card.avg-time {
-  border-top: 4px solid #3B82F6;
-}
-
-.perf-metric-card.error-rate {
-  border-top: 4px solid var(--color-warning);
-}
-
+.perf-metric-card.rps { border-top: 3px solid var(--color-primary); }
+.perf-metric-card.avg-time { border-top: 3px solid var(--color-info); }
+.perf-metric-card.error-rate { border-top: 3px solid var(--color-warning); }
 .perf-metric-card.error-rate.high-error {
-  border-top: 4px solid var(--color-danger);
-  background: linear-gradient(135deg, #fef2f2 0%, var(--color-surface) 100%);
+  border-top: 3px solid var(--color-danger);
+  background: var(--color-danger-bg);
 }
-
-.perf-metric-card.total-req {
-  border-top: 4px solid #a78bfa;
-}
-
-.perf-metric-card.success-req {
-  border-top: 4px solid var(--color-success);
-}
-
-.perf-metric-card.failed-req {
-  border-top: 4px solid var(--color-danger);
-}
+.perf-metric-card.total-req { border-top: 3px solid var(--color-text-secondary); }
+.perf-metric-card.success-req { border-top: 3px solid var(--color-success); }
+.perf-metric-card.failed-req { border-top: 3px solid var(--color-danger); }
 
 .perf-metric-icon {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: 22px;
+  margin-bottom: 6px;
+  color: var(--color-text-secondary);
 }
 
 .perf-metric-value {
-  font-size: 24px;
-  font-weight: 700;
+  font: 600 22px/1.2 var(--font-heading);
   color: var(--color-text);
   margin-bottom: 4px;
 }
@@ -1071,35 +1044,35 @@ onMounted(() => {
 }
 
 .response-time-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   padding: 20px;
-  background: var(--color-bg);
-  border-radius: 12px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
 }
 
 .time-distribution-item {
   text-align: center;
-  padding: 16px 8px;
-  background: white;
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
+  padding: 14px 8px;
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
 }
 
 .time-label {
   font-size: 12px;
   color: var(--color-text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .time-value {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--color-primary-light);
-  font-family: 'Courier New', monospace;
+  font: 600 18px/1.2 var(--font-heading);
+  color: var(--color-primary);
+  font-family: var(--font-mono);
 }
 
 .test-config-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .errors-section {
@@ -1110,7 +1083,7 @@ onMounted(() => {
 .screenshot-preview {
   max-width: 100%;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
 }
 
@@ -1119,10 +1092,20 @@ onMounted(() => {
   max-height: 400px;
   object-fit: contain;
   cursor: pointer;
-  transition: transform 0.3s;
+  transition: transform var(--transition-normal);
 }
 
 .screenshot-preview img:hover {
   transform: scale(1.02);
+}
+
+.error-tb {
+  max-height: 400px;
+  overflow: auto;
+  font-size: 12px;
+  background: #fafafa;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 </style>

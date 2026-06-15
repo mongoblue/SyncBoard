@@ -112,15 +112,25 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         error_msg = ""
         error_code = None
         error_tb = ""
+        worker_pid = None
+        task_id = ""
+        temp_dir_path = ""
         for ev in events:
-            if ev.get("type") == "error":
+            t = ev.get("type")
+            if t == "error":
                 error_msg = ev.get("message", "")
                 error_code = ev.get("code")
                 error_tb = ev.get("traceback", "")
-            elif ev.get("type") == "step_done" and not ev.get("success"):
+            elif t == "step_done" and not ev.get("success"):
                 error_msg = error_msg or ev.get("message", "")
                 error_code = error_code or ev.get("code")
                 error_tb = error_tb or ev.get("traceback", "")
+            elif t == "supervisor_meta":
+                task_id = ev.get("task_id", "") or task_id
+                if ev.get("worker_pid") is not None:
+                    worker_pid = ev.get("worker_pid")
+            elif t == "started":
+                temp_dir_path = ev.get("temp_dir", "") or temp_dir_path
 
         test_result = TestResult.objects.create(
             test_type="ui",
@@ -132,6 +142,12 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
             test_steps=test_case.steps or [],
             actual_result="测试完成" if result.get("success") else error_msg,
             error_message=error_msg,
+            task_id=task_id,
+            error_code=error_code or "",
+            error_traceback=error_tb,
+            worker_pid=worker_pid,
+            temp_dir_path=temp_dir_path,
+            aborted=False,
             test_log="\n".join(ev.get("message", "") for ev in events if ev.get("type") == "step_log"),
             started_at=timezone.now(),
             completed_at=timezone.now(),

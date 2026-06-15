@@ -7,6 +7,7 @@ import os
 import json
 import threading
 import logging
+import uuid as _uuid
 from typing import Callable
 
 logger = logging.getLogger("qa_center.runner")
@@ -39,6 +40,12 @@ def execute_ui_case(case_data: dict,
         errors="replace",
         bufsize=1,
     )
+
+    task_id = _uuid.uuid4().hex
+    try:
+        on_event({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
+    except Exception:
+        logger.exception("emit supervisor_meta 失败")
 
     final_result = {"type": "finished", "success": False,
                     "summary": {"passed": 0, "failed": 0, "total": 0}}
