@@ -31,7 +31,7 @@ class RecorderSession:
         return self.proc.pid if self.proc else None
 
     def start(self):
-        if self.proc:
+        if self.proc and self.proc.poll() is None:
             return
         backend_dir = os.path.abspath(os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "..", ".."
@@ -67,8 +67,8 @@ class RecorderSession:
         self._stopped = True
         try:
             self.send({"cmd": "stop"})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("send stop 失败（worker 可能已退出）: %s", exc)
         if self.proc:
             try:
                 self.proc.wait(timeout=timeout)
@@ -101,7 +101,7 @@ class RecorderSession:
             logger.exception("读 recorder stdout 异常")
         finally:
             # 兜底：进程退出但未发 stopped
-            if self.proc and self.proc.poll() not in (0, None):
+            if self.proc and not self._stopped and self.proc.poll() not in (0, None):
                 self.on_event({
                     "type": "error", "code": "WORKER_CRASHED",
                     "message": f"recorder 退出码 {self.proc.returncode}",
