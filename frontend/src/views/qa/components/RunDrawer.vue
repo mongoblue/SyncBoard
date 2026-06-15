@@ -51,6 +51,14 @@ watch(() => props.modelValue, (v) => {
   else close()
 })
 
+watch(() => props.taskId, (newId, oldId) => {
+  if (newId === oldId) return
+  if (props.modelValue) {
+    close()
+    connect()
+  }
+})
+
 const stepsView = computed(() => {
   const map = new Map<number, any>()
   for (const ev of events.value) {

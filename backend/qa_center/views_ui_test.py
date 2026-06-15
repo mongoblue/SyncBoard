@@ -268,13 +268,19 @@ def execute_ui_test_cases(case_ids):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def ui_run_screenshot(request):
+    # TODO(follow-up): 增加 TestResult 权限校验，确保 path 属于当前用户有权限的用例
     path = request.query_params.get("path", "")
     if not path:
         return HttpResponseBadRequest("path required")
     safe_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
     abs_path = os.path.abspath(path)
-    if not abs_path.startswith(safe_root):
+    try:
+        common = os.path.commonpath([abs_path, safe_root])
+    except ValueError:
+        return HttpResponseBadRequest("invalid path")
+    if common != safe_root:
         return HttpResponseBadRequest("invalid path")
     if not os.path.exists(abs_path):
         raise Http404()
-    return FileResponse(open(abs_path, "rb"), content_type="image/png")
+    with open(abs_path, "rb") as f:
+        return FileResponse(f, content_type="image/png")
