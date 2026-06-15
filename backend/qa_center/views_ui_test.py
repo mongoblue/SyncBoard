@@ -118,9 +118,9 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         for ev in events:
             t = ev.get("type")
             if t == "error":
-                error_msg = ev.get("message", "")
-                error_code = ev.get("code")
-                error_tb = ev.get("traceback", "")
+                error_msg = error_msg or ev.get("message", "")
+                error_code = error_code or ev.get("code")
+                error_tb = error_tb or ev.get("traceback", "")
             elif t == "step_done" and not ev.get("success"):
                 error_msg = error_msg or ev.get("message", "")
                 error_code = error_code or ev.get("code")
