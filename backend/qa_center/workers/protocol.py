@@ -2,7 +2,7 @@
 Worker 通信协议定义
 所有 stdout 事件和 stdin 命令统一为 JSON Lines（每行一个完整 JSON）。
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import json
 
@@ -24,7 +24,7 @@ class RecorderCommand:
     step: Optional[Dict[str, Any]] = None
 
 
-def emit(stream, event: dict):
+def emit(stream, event: dict) -> None:
     """向给定流写一行 JSON 事件并立即 flush。"""
     line = json.dumps(event, ensure_ascii=False, default=str)
     stream.write(line + "\n")
