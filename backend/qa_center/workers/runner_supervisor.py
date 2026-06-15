@@ -60,33 +60,73 @@ def execute_ui_case(case_data: dict,
     t = threading.Thread(target=_drain_stderr, daemon=True)
     t.start()
 
+    timed_out = {"flag": False}
+
+    def _on_timeout():
+        timed_out["flag"] = True
+        logger.warning("worker 运行超时 (%ss)，触发 terminate", timeout_seconds)
+        try:
+            proc.terminate()
+        except Exception:
+            logger.exception("terminate worker 失败")
+
+    watchdog = threading.Timer(timeout_seconds, _on_timeout)
+    watchdog.daemon = True
+    watchdog.start()
+
     try:
-        for line in proc.stdout:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                logger.warning("非 JSON 输出: %s", line)
-                continue
-            try:
-                on_event(event)
-            except Exception:
-                logger.exception("on_event 回调异常")
-            if event.get("type") == "finished":
-                final_result = event
-    except Exception:
-        logger.exception("读 worker stdout 异常")
+        try:
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    logger.warning("非 JSON 输出: %s", line)
+                    continue
+                try:
+                    on_event(event)
+                except Exception:
+                    logger.exception("on_event 回调异常")
+                if event.get("type") == "finished":
+                    final_result = event
+        except Exception:
+            logger.exception("读 worker stdout 异常")
+    finally:
+        watchdog.cancel()
 
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        proc.terminate()
+        try:
+            proc.terminate()
+        except Exception:
+            logger.exception("terminate worker 失败")
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                logger.exception("kill worker 失败")
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.error("worker 在 kill 后仍未退出")
 
     t.join(timeout=5)
 
-    if proc.returncode not in (0, None) and final_result.get("type") != "finished":
+    if timed_out["flag"]:
+        on_event({
+            "type": "error",
+            "code": "STEP_TIMEOUT",
+            "message": f"运行超时 ({timeout_seconds}s)，已强制终止 worker",
+        })
+
+    if (proc.returncode not in (0, None)
+            and final_result.get("type") != "finished"
+            and not timed_out["flag"]):
         crash_msg = "".join(stderr_buf[-20:])
         on_event({
             "type": "error",
