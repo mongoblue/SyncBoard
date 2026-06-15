@@ -34,8 +34,6 @@ class PlaywrightRunner:
         os.makedirs(base_temp, exist_ok=True)
         self.temp_dir = tempfile.mkdtemp(prefix='run_', dir=base_temp)
         os.environ['PLAYWRIGHT_TEMP_DIR'] = self.temp_dir
-        os.environ['TEMP'] = self.temp_dir
-        os.environ['TMP'] = self.temp_dir
         return self.temp_dir
 
     def _cleanup_temp_dir(self):
