@@ -185,6 +185,12 @@ class TestResult(models.Model):
     user_agent = models.TextField(blank=True, verbose_name='User Agent')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    task_id = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name="任务ID")
+    error_code = models.CharField(max_length=64, blank=True, default="", verbose_name="错误码")
+    error_traceback = models.TextField(blank=True, default="", verbose_name="错误堆栈")
+    worker_pid = models.IntegerField(blank=True, null=True, verbose_name="Worker PID")
+    temp_dir_path = models.CharField(max_length=512, blank=True, default="", verbose_name="临时目录")
+    aborted = models.BooleanField(default=False, verbose_name="是否被中止")
     source = models.CharField(
         choices=[
             ('devops', 'DevOps执行'),
