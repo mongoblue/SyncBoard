@@ -64,7 +64,11 @@ def main():
         emit({"type": "ready", "success": True, "temp_dir": temp_dir})
         running = True
         while running:
-            cmd = read_command()
+            try:
+                cmd = read_command()
+            except json.JSONDecodeError as je:
+                emit({"type": "error", "code": "INTERNAL", "message": f"无效 JSON: {je}"})
+                continue
             action = cmd.get("cmd")
             if action == "start":
                 url = cmd.get("url", "")
