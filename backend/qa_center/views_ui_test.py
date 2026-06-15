@@ -85,7 +85,10 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                 push({"type": "run_finished_persisted", "task_id": task_id})
                 self._save_test_result(test_case, result, events, request, task_id=task_id)
             except Exception:
-                logger.exception("runner_thread 失败", exc_info=_tb.format_exc())
+                logger.exception("runner_thread 失败")
+                push({"type": "error", "code": "RUNNER_ABORTED",
+                      "message": "运行线程异常中止，请查看服务端日志"})
+                push({"type": "run_finished_persisted", "task_id": task_id})
 
         threading.Thread(target=runner_thread, daemon=True).start()
 
