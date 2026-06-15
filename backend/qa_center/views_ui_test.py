@@ -3,6 +3,7 @@ UI 测试用例视图
 E2E 自动化测试相关接口
 """
 
+import logging
 import threading
 import traceback as _tb
 import base64
@@ -21,6 +22,9 @@ from django.utils import timezone
 from .models import UiTestCase
 from .serializers import UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseRunSerializer
 from .workers.runner_supervisor import execute_ui_case
+
+
+logger = logging.getLogger("qa_center.runner")
 
 
 class UiTestCaseViewSet(viewsets.ModelViewSet):
@@ -64,7 +68,7 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
             try:
                 self._save_test_result(test_case, result, events, request)
             except Exception:
-                print("[ERROR] 后台保存失败", _tb.format_exc())
+                logger.exception("后台保存失败")
 
         threading.Thread(target=save_in_background, daemon=True).start()
         return Response(payload, status=status.HTTP_200_OK)
@@ -86,8 +90,8 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                         "step": ev.get("index", 0),
                         "screenshot": f"data:image/png;base64,{b64}",
                     })
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("读取截图失败: %s (%s)", ev.get("path"), exc)
             elif t == "error":
                 error_msg = ev.get("message", "")
                 error_code = ev.get("code")
@@ -151,8 +155,7 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                         image=os.path.join(rel_dir, fname),
                     )
                 except Exception:
-                    import logging
-                    logging.getLogger("qa_center.runner").exception("保存截图失败")
+                    logger.exception("保存截图失败")
 
         return test_result
 
