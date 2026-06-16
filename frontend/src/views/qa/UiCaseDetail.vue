@@ -31,6 +31,7 @@
     <RecorderPanel
       v-if="isRecording"
       :default-url="form.url"
+      @panel-stopped="isRecording = false"
       @append-step="onAppendStep"
       @replace-step="onReplaceStep"
       @replace-all="onReplaceAllSteps"
@@ -659,36 +660,18 @@ const toggleRecording = async () => {
   isRecording.value = !isRecording.value;
 };
 
-// 共用：根据录制事件构造 step（保留去重键）
+// 共用：根据录制事件构造 step
 const buildStepFromEvent = (eventData: any) => {
   if (!eventData) return null;
   let selectorValue = eventData.selector;
-  let selectorKey = '';
   if (eventData.selector && typeof eventData.selector === 'object') {
     selectorValue = eventData.selector.css || JSON.stringify(eventData.selector);
-    selectorKey = eventData.selector.css ||
-                 (eventData.selector.type === 'role' ? `role:${eventData.selector.role}:${eventData.selector.name}` :
-                  eventData.selector.type === 'text' ? `text:${eventData.selector.text}` :
-                  eventData.selector.type === 'testId' ? `testId:${eventData.selector.testId}` :
-                  JSON.stringify(eventData.selector));
-  } else {
-    selectorKey = String(eventData.selector);
   }
   let valueData = eventData.value;
-  let valueKey = '';
   if (eventData.action === 'drag_and_drop' && eventData.value && typeof eventData.value === 'object') {
     valueData = eventData.value.css || JSON.stringify(eventData.value);
-    valueKey = valueData;
-  } else {
-    valueKey = String(eventData.value);
   }
-  return {
-    action: eventData.action,
-    selector: selectorValue,
-    value: valueData,
-    _selectorKey: selectorKey,
-    _valueKey: valueKey,
-  };
+  return { action: eventData.action, selector: selectorValue, value: valueData };
 };
 
 // 替换/追加单个事件
@@ -698,7 +681,12 @@ const onAppendStep = (ev: any) => {
 };
 const onReplaceStep = (ev: any, index: number) => {
   const step = buildStepFromEvent(ev);
-  if (step) form.value.steps[index] = step;
+  if (!step) return;
+  if (index < 0 || index >= form.value.steps.length) {
+    ElMessage.warning('替换位置越界，请使用「追加到当前用例」或「替换当前用例步骤」');
+    return;
+  }
+  form.value.steps[index] = step;
 };
 const onAppendAllSteps = (evs: any[]) => {
   evs.forEach((ev) => {

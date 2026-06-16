@@ -35,7 +35,7 @@ import { computed, ref } from 'vue'
 import { useRecorderSocket } from '@/composables/useRecorderSocket'
 
 const props = defineProps<{ defaultUrl?: string }>()
-const emit = defineEmits(['append-step', 'replace-step', 'replace-all', 'append-all'])
+const emit = defineEmits(['append-step', 'replace-step', 'replace-all', 'append-all', 'panel-stopped'])
 
 const urlInput = ref(props.defaultUrl || '')
 const { events, status, lastError, start, stop, pause, resume } = useRecorderSocket()
@@ -58,7 +58,7 @@ const recordEvents = computed(() => events.value
 function onStart() { start(urlInput.value) }
 function onPause() { pause() }
 function onResume() { resume() }
-function onStop() { stop() }
+function onStop() { emit('panel-stopped'); stop() }
 </script>
 
 <style scoped>
