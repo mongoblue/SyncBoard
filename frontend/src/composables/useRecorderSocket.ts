@@ -12,6 +12,7 @@ export function useRecorderSocket() {
   const events = ref<RecorderEvent[]>([])
   const status = ref<'idle' | 'connecting' | 'recording' | 'paused' | 'stopped' | 'error'>('idle')
   const lastError = ref<{ code: string; message: string } | null>(null)
+  const lastStepRun = ref<RecorderEvent | null>(null)
   const ws = ref<WebSocket | null>(null)
 
   function open() {
@@ -30,6 +31,7 @@ export function useRecorderSocket() {
           case 'recording_paused': status.value = 'paused'; break
           case 'recording_resumed': status.value = 'recording'; break
           case 'recording_stopped': status.value = 'stopped'; break
+          case 'step_run_done': lastStepRun.value = ev; break
           case 'error':
             status.value = 'error'
             lastError.value = { code: ev.code || '', message: ev.message || '' }
@@ -56,5 +58,5 @@ export function useRecorderSocket() {
 
   onUnmounted(close)
 
-  return { events, status, lastError, start, stop, pause, resume, runStep, close }
+  return { events, status, lastError, lastStepRun, start, stop, pause, resume, runStep, close }
 }
