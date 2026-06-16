@@ -99,11 +99,14 @@ class RecorderConsumer(AsyncWebsocketConsumer):
         if self.session and self.session.is_alive():
             self.session.stop()
 
-        main_loop = asyncio.get_event_loop()
+        main_loop = asyncio.get_running_loop()
 
         def on_event(ev):
+            mapped = self._map_event(ev)
+            if mapped is None:
+                return
             asyncio.run_coroutine_threadsafe(
-                self.send(text_data=json.dumps(self._map_event(ev))),
+                self.send(text_data=json.dumps(mapped)),
                 main_loop,
             )
 
@@ -154,6 +157,8 @@ class RecorderConsumer(AsyncWebsocketConsumer):
                 "code": ev.get("code"),
                 "message": ev.get("message"),
             }
+        if t == "ready" and "phase" in ev:
+            return None
         return ev
 
 
