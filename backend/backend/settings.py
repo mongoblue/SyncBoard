@@ -207,3 +207,25 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 CSRF_COOKIE_HTTPONLY = False  # Frontend needs to read the cookie to send X-CSRFToken header
 SESSION_COOKIE_SAMESITE = 'Lax'
 
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+    },
+    'loggers': {
+        'qa_center.runner': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'qa_center.recorder': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+    },
+}
+

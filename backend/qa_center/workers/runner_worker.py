@@ -53,6 +53,10 @@ def setup_temp_dir() -> str:
 
 def cleanup_temp_dir(td: str) -> None:
     import shutil
+    # DEBUG 模式下保留 temp_dir 方便事后取证
+    if os.environ.get("UI_TEST_DEBUG"):
+        logger.info("UI_TEST_DEBUG 开启，保留 temp_dir=%s", td)
+        return
     if td and os.path.exists(td):
         shutil.rmtree(td, ignore_errors=True)
 

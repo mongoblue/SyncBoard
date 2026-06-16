@@ -10,6 +10,8 @@ import logging
 import uuid as _uuid
 from typing import Callable
 
+from django.conf import settings
+
 logger = logging.getLogger("qa_center.runner")
 
 
@@ -42,6 +44,17 @@ def execute_ui_case(case_data: dict,
     )
 
     task_id = _uuid.uuid4().hex
+
+    # DEBUG 模式：把所有事件额外落盘到 .playwright-temp/io_<task_id>.log
+    DEBUG = os.environ.get("UI_TEST_DEBUG", "").lower() in ("1", "true", "yes")
+    io_log = None
+    if DEBUG:
+        debug_dir = os.path.join(settings.BASE_DIR, ".playwright-temp")
+        os.makedirs(debug_dir, exist_ok=True)
+        log_path = os.path.join(debug_dir, f"io_{task_id}.log")
+        io_log = open(log_path, "w", encoding="utf-8")
+        logger.info("UI_TEST_DEBUG 开启，事件流写入 %s", log_path)
+
     try:
         on_event({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
     except Exception:
@@ -96,12 +109,23 @@ def execute_ui_case(case_data: dict,
                     on_event(event)
                 except Exception:
                     logger.exception("on_event 回调异常")
+                if io_log is not None:
+                    try:
+                        io_log.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+                        io_log.flush()
+                    except Exception:
+                        logger.exception("写入 io_log 失败")
                 if event.get("type") == "finished":
                     final_result = event
         except Exception:
             logger.exception("读 worker stdout 异常")
     finally:
         watchdog.cancel()
+        if io_log is not None:
+            try:
+                io_log.close()
+            except Exception:
+                pass
 
     try:
         proc.wait(timeout=10)
