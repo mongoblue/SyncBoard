@@ -124,7 +124,13 @@ function confirmAssert() {
   const ev: any = {
     action: p.action,
     selector: p.selector,
-    value: p.action === 'assert_attribute' ? p.attribute : p.expected_value,
+    value: '',
+  }
+  if (p.action === 'assert_attribute') {
+    ev.attribute = p.attribute || ''
+    ev.value = p.expected_value || ''
+  } else if (p.action !== 'assert_visible') {
+    ev.value = p.expected_value || ''
   }
   injectedEvents.value.push(ev)
   assertDialogVisible.value = false

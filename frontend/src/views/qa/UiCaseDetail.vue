@@ -671,7 +671,10 @@ const buildStepFromEvent = (eventData: any) => {
   if (eventData.action === 'drag_and_drop' && eventData.value && typeof eventData.value === 'object') {
     valueData = eventData.value.css || JSON.stringify(eventData.value);
   }
-  return { action: eventData.action, selector: selectorValue, value: valueData };
+  const step: any = { action: eventData.action, selector: selectorValue, value: valueData };
+  if (eventData.attribute) step.attribute = eventData.attribute;
+  if (eventData.expected_value) step.expected_value = eventData.expected_value;
+  return step;
 };
 
 // 替换/追加单个事件
