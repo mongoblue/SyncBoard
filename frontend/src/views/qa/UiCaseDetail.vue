@@ -9,10 +9,9 @@
         <h2>{{ isEdit ? '编辑 UI 测试用例' : '新建 UI 测试用例' }}</h2>
       </div>
       <div class="header-actions">
-        <el-button 
-          :type="isRecording ? 'danger' : 'warning'" 
-          @click="toggleRecording" 
-          :loading="recordingLoading"
+        <el-button
+          :type="isRecording ? 'danger' : 'warning'"
+          @click="toggleRecording"
           :disabled="!form.url"
         >
           <el-icon><CirclePlus v-if="!isRecording" /><CircleClose v-else /></el-icon>
@@ -28,6 +27,15 @@
         </el-button>
       </div>
     </div>
+
+    <RecorderPanel
+      v-if="isRecording"
+      :default-url="form.url"
+      @append-step="onAppendStep"
+      @replace-step="onReplaceStep"
+      @replace-all="onReplaceAllSteps"
+      @append-all="onAppendAllSteps"
+    />
 
     <div class="content-wrapper">
       <!-- 左侧：配置区 -->
@@ -307,7 +315,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import {
@@ -327,6 +335,7 @@ import {
   Connection
 } from '@element-plus/icons-vue';
 import service from '@/utils/request';
+import RecorderPanel from './components/RecorderPanel.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -349,8 +358,6 @@ const testResult = ref<any>(null);
 
 // 录制相关状态
 const isRecording = ref(false);
-const recordingLoading = ref(false);
-const wsRecorder = ref<WebSocket | null>(null);
 
 const rules = {
   name: [{ required: true, message: '请输入用例名称', trigger: 'blur' }],
@@ -643,135 +650,23 @@ onMounted(() => {
   loadCaseDetail();
 });
 
-// 组件卸载时清理 WebSocket
-onUnmounted(() => {
-  stopRecording();
-});
-
-// 切换录制状态
+// 切换录制面板显示（实际的 WebSocket 由 RecorderPanel 内部管理）
 const toggleRecording = async () => {
-  if (isRecording.value) {
-    await stopRecording();
-  } else {
-    await startRecording();
-  }
-};
-
-// 开始录制
-const startRecording = async () => {
   if (!form.value.url) {
     ElMessage.warning('请先输入起始 URL');
     return;
   }
-
-  recordingLoading.value = true;
-
-  try {
-    // 建立 WebSocket 连接 - 使用 window.location 动态构建 URL
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws/qa/recorder/`;
-    console.log('[Recorder] 连接 WebSocket:', wsUrl);
-    wsRecorder.value = new WebSocket(wsUrl);
-
-    wsRecorder.value.onopen = () => {
-      console.log('[Recorder] WebSocket 已连接');
-      // 发送开始录制命令
-      wsRecorder.value?.send(JSON.stringify({
-        command: 'start_recording',
-        url: form.value.url
-      }));
-    };
-
-    wsRecorder.value.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      handleRecorderMessage(data);
-    };
-
-    wsRecorder.value.onerror = (error) => {
-      console.error('[Recorder] WebSocket 错误:', error);
-      console.error('[Recorder] WebSocket readyState:', wsRecorder.value?.readyState);
-      console.error('[Recorder] WebSocket URL:', wsUrl);
-      ElMessage.error('录制器连接失败，请检查后端服务是否运行');
-      resetRecordingState();
-    };
-
-    wsRecorder.value.onclose = () => {
-      console.log('[Recorder] WebSocket 已关闭');
-      resetRecordingState();
-    };
-
-  } catch (error) {
-    console.error('[Recorder] 启动录制失败:', error);
-    ElMessage.error('启动录制失败');
-    resetRecordingState();
-  }
+  isRecording.value = !isRecording.value;
 };
 
-// 处理录制器消息
-const handleRecorderMessage = (data: any) => {
-  console.log('[Recorder] 收到消息:', data);
-  switch (data.type) {
-    case 'connected':
-      console.log('[Recorder]', data.message);
-      break;
-
-    case 'info':
-      ElMessage.info(data.message);
-      break;
-
-    case 'recording_started':
-      isRecording.value = true;
-      recordingLoading.value = false;
-      ElMessage.success(data.message);
-      break;
-
-    case 'record_event':
-      handleRecordEvent(data.data);
-      break;
-
-    case 'recording_stopped':
-      resetRecordingState();
-      ElMessage.success(data.message);
-      break;
-
-    case 'error':
-      console.error('[Recorder] 错误:', data.message);
-      ElMessage.error(data.message);
-      if (!isRecording.value) {
-        resetRecordingState();
-      }
-      break;
-
-    default:
-      console.log('[Recorder] 未知消息类型:', data);
-  }
-};
-
-// 处理录制事件
-const handleRecordEvent = (eventData: any) => {
-  if (!eventData || !eventData.action) {
-    console.warn('[Recorder] 录制事件数据不完整:', eventData);
-    return;
-  }
-
-  // 处理断言事件
-  if (eventData.action === 'assert') {
-    handleAssertEvent(eventData);
-    return;
-  }
-
-  const steps = form.value.steps;
-  const lastStep = steps.length > 0 ? steps[steps.length - 1] : null;
-
-  // 处理选择器格式 - 支持新的多策略选择器
+// 共用：根据录制事件构造 step（保留去重键）
+const buildStepFromEvent = (eventData: any) => {
+  if (!eventData) return null;
   let selectorValue = eventData.selector;
   let selectorKey = '';
   if (eventData.selector && typeof eventData.selector === 'object') {
-    // 使用 CSS 选择器作为主要选择器
     selectorValue = eventData.selector.css || JSON.stringify(eventData.selector);
-    // 生成用于比较的唯一键
-    selectorKey = eventData.selector.css || 
+    selectorKey = eventData.selector.css ||
                  (eventData.selector.type === 'role' ? `role:${eventData.selector.role}:${eventData.selector.name}` :
                   eventData.selector.type === 'text' ? `text:${eventData.selector.text}` :
                   eventData.selector.type === 'testId' ? `testId:${eventData.selector.testId}` :
@@ -779,121 +674,40 @@ const handleRecordEvent = (eventData: any) => {
   } else {
     selectorKey = String(eventData.selector);
   }
-
-  // 处理 value 格式 - 拖拽操作的目标选择器
   let valueData = eventData.value;
   let valueKey = '';
   if (eventData.action === 'drag_and_drop' && eventData.value && typeof eventData.value === 'object') {
     valueData = eventData.value.css || JSON.stringify(eventData.value);
-    valueKey = eventData.value.css || JSON.stringify(eventData.value);
+    valueKey = valueData;
   } else {
     valueKey = String(eventData.value);
   }
-
-  // 策略1: 完全重复去重（使用处理后的键进行比较）
-  if (lastStep &&
-      lastStep.action === eventData.action &&
-      lastStep._selectorKey === selectorKey &&
-      lastStep._valueKey === valueKey) {
-      console.log('[Recorder] 前端去重：完全重复的事件');
-      return;
-  }
-
-  // 策略2: "点击+输入" 合并优化
-  // 如果当前是 fill，且上一步是同一个元素的 click，说明那个 click 是多余的
-  if (eventData.action === 'fill' &&
-      lastStep &&
-      lastStep.action === 'click' &&
-      lastStep._selectorKey === selectorKey) {
-      // 移除上一步 click
-      steps.pop();
-      console.log('[Recorder] 前端优化：移除多余的 click 步骤');
-  }
-
-  // 策略2.5: 连续的 fill 操作合并
-  // 如果当前是 fill，且上一步也是同一个元素的 fill，直接更新值而不是添加新步骤
-  if (eventData.action === 'fill' &&
-      lastStep &&
-      lastStep.action === 'fill' &&
-      lastStep._selectorKey === selectorKey) {
-      // 更新上一步的值
-      lastStep.value = valueData;
-      lastStep._valueKey = valueKey;
-      console.log('[Recorder] 前端优化：更新 fill 值而不是添加新步骤');
-      return;
-  }
-
-  // 策略3: 拖拽事件去重
-  // 如果当前和上一步都是 drag_and_drop，且源和目标相同，则跳过
-  if (eventData.action === 'drag_and_drop' &&
-      lastStep &&
-      lastStep.action === 'drag_and_drop' &&
-      lastStep._selectorKey === selectorKey &&
-      lastStep._valueKey === valueKey) {
-      console.log('[Recorder] 前端去重：重复的拖拽事件');
-      return;
-  }
-
-  // 添加新步骤（包含用于比较的键）
-  steps.push({
+  return {
     action: eventData.action,
     selector: selectorValue,
     value: valueData,
-    _selectorKey: selectorKey,  // 内部使用，用于去重比较
-    _valueKey: valueKey         // 内部使用，用于去重比较
+    _selectorKey: selectorKey,
+    _valueKey: valueKey,
+  };
+};
+
+// 替换/追加单个事件
+const onAppendStep = (ev: any) => {
+  const step = buildStepFromEvent(ev);
+  if (step) form.value.steps.push(step);
+};
+const onReplaceStep = (ev: any, index: number) => {
+  const step = buildStepFromEvent(ev);
+  if (step) form.value.steps[index] = step;
+};
+const onAppendAllSteps = (evs: any[]) => {
+  evs.forEach((ev) => {
+    const step = buildStepFromEvent(ev);
+    if (step) form.value.steps.push(step);
   });
-  console.log('[Recorder] 步骤已添加，当前步骤数:', steps.length);
-  ElMessage.success(`已捕获: ${eventData.action}`);
 };
-
-// 处理断言事件
-const handleAssertEvent = (eventData: any) => {
-  const selector = eventData.selector;
-  const expectedText = eventData.expectedText;
-  const assertCode = eventData.assertCode;
-  
-  console.log('[Recorder] 断言事件:', { selector, expectedText, assertCode });
-  
-  // 根据是否有文本选择合适的断言类型
-  let action = 'assert_text';
-  let value = expectedText || '';
-  
-  if (!expectedText || expectedText.length === 0) {
-    // 没有文本，生成 toBeVisible 断言
-    action = 'assert_visible';
-    value = '';
-  }
-  
-  // 添加断言步骤
-  form.value.steps.push({
-    action: action,
-    selector: selector,
-    value: value,
-    _selectorKey: selector,
-    _valueKey: value,
-    _assertCode: assertCode
-  });
-  
-  console.log('[Recorder] 断言步骤已添加，当前步骤数:', form.value.steps.length);
-  ElMessage.success(`已捕获断言: ${assertCode}`);
-};
-
-// 停止录制
-const stopRecording = async () => {
-  if (wsRecorder.value && wsRecorder.value.readyState === WebSocket.OPEN) {
-    wsRecorder.value.send(JSON.stringify({
-      command: 'stop_recording'
-    }));
-    wsRecorder.value.close();
-  }
-  resetRecordingState();
-};
-
-// 重置录制状态
-const resetRecordingState = () => {
-  isRecording.value = false;
-  recordingLoading.value = false;
-  wsRecorder.value = null;
+const onReplaceAllSteps = (evs: any[]) => {
+  form.value.steps = evs.map(buildStepFromEvent).filter((s: any) => s != null);
 };
 </script>
 
@@ -980,7 +794,7 @@ const resetRecordingState = () => {
 .step-number {
   width: 28px;
   height: 28px;
-  background: linear-gradient(135deg, var(--color-primary-light) 0%, var(--color-primary-light) 100%);
+  background: var(--color-primary);
   color: white;
   border-radius: 50%;
   display: flex;
@@ -1159,10 +973,12 @@ const resetRecordingState = () => {
 }
 
 .logs-content {
-  background: var(--color-text);
-  border-radius: 8px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
+  border-radius: var(--radius-md);
   padding: 12px;
-  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   max-height: 300px;
@@ -1170,14 +986,14 @@ const resetRecordingState = () => {
 }
 
 .log-line {
-  color: var(--color-border);
+  color: var(--color-text);
   padding: 2px 0;
   white-space: pre-wrap;
   word-break: break-all;
 }
 
 .log-success {
-  color: var(--color-primary-light);
+  color: var(--color-success);
 }
 
 .log-error {
@@ -1189,7 +1005,7 @@ const resetRecordingState = () => {
 }
 
 .log-info {
-  color: #3B82F6;
+  color: var(--color-info);
 }
 
 /* 空状态 */
