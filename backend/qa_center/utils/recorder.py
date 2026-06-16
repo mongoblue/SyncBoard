@@ -20,17 +20,10 @@ logger = logging.getLogger('django')
 
 
 def _setup_playwright_env():
-    """设置 Playwright 环境变量，确保使用项目目录作为临时目录"""
-    base_dir = Path(__file__).resolve().parent.parent.parent
-    
-    temp_dir = base_dir / '.playwright-temp'
-    temp_dir.mkdir(exist_ok=True)
-    
-    os.environ['PLAYWRIGHT_TEMP_DIR'] = str(temp_dir)
-    os.environ['TEMP'] = str(temp_dir)
-    os.environ['TMP'] = str(temp_dir)
-    
-    logger.info(f"[Recorder] Playwright 临时目录已设置: {temp_dir}")
+    """[DEPRECATED] No-op. Per-worker temp dirs are now managed by recorder_supervisor.
+    Kept for backward-compat with any code that may still import this symbol.
+    """
+    return None
 
 
 class PlaywrightRecorder:

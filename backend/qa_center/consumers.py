@@ -1,11 +1,9 @@
 import json
-import uuid
 import re
 import asyncio
-import threading
 import logging
 from channels.generic.websocket import AsyncWebsocketConsumer
-from .utils.recorder import create_recorder, get_recorder, remove_recorder
+from .workers.recorder_supervisor import RecorderSession
 
 logger = logging.getLogger('django')
 
@@ -40,31 +38,30 @@ class QAConsumer(AsyncWebsocketConsumer):
 
 
 class RecorderConsumer(AsyncWebsocketConsumer):
-    """UI 测试录制器 WebSocket Consumer"""
-    
+    """UI 测试录制器 WebSocket Consumer（委托给 RecorderSession 子进程）"""
+
     async def connect(self):
         # 生成简单的组名（channel_name 可能包含特殊字符）
         safe_name = re.sub(r'[^a-zA-Z0-9\-_]', '', self.channel_name[:50])
         self.group_name = f"recorder_{safe_name}"
-        self.recorder = None
-        
+        self.session: RecorderSession = None
+
         await self.channel_layer.group_add(
             self.group_name,
             self.channel_name
         )
         await self.accept()
-        
+
         await self.send(text_data=json.dumps({
             'type': 'connected',
             'message': '录制器 WebSocket 已连接'
         }))
 
     async def disconnect(self, close_code):
-        # 断开连接时停止录制并清理资源
-        if self.recorder:
-            self.recorder.stop_recording()
-            remove_recorder(self.group_name)
-        
+        if self.session:
+            self.session.stop()
+            self.session = None
+
         await self.channel_layer.group_discard(
             self.group_name,
             self.channel_name
@@ -74,111 +71,90 @@ class RecorderConsumer(AsyncWebsocketConsumer):
         """接收前端消息"""
         try:
             data = json.loads(text_data)
-            command = data.get('command')
-            
-            if command == 'start_recording':
-                await self.handle_start_recording(data)
-            elif command == 'stop_recording':
-                await self.handle_stop_recording()
-            else:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'message': f'未知命令: {command}'
-                }))
-        except json.JSONDecodeError:
+        except Exception:
             await self.send(text_data=json.dumps({
                 'type': 'error',
-                'message': '无效的 JSON 数据'
-            }))
-        except Exception as e:
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'message': f'处理命令失败: {str(e)}'
-            }))
-
-    async def handle_start_recording(self, data):
-        """处理开始录制命令"""
-        url = data.get('url')
-        
-        if not url:
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'message': '缺少 URL 参数'
+                'message': '无效 JSON'
             }))
             return
-        
-        # 如果已有录制器在运行，先停止它
-        if self.recorder:
-            self.recorder.stop_recording()
-        
-        # 创建新的录制器实例
-        self.recorder = create_recorder(self.group_name)
-        
-        # 获取当前 event loop（必须在主线程中获取）
+
+        cmd = data.get("command")
+        if cmd == "start_recording":
+            await self.start(data.get("url", ""), data.get("viewport"))
+        elif cmd == "stop_recording":
+            await self.stop()
+        elif cmd == "pause_recording":
+            self.session and self.session.send({"cmd": "pause"})
+        elif cmd == "resume_recording":
+            self.session and self.session.send({"cmd": "resume"})
+        elif cmd == "run_step":
+            self.session and self.session.send({"cmd": "run_step", "step": data.get("step") or {}})
+        else:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': f'未知命令: {cmd}'
+            }))
+
+    async def start(self, url, viewport):
+        if self.session and self.session.is_alive():
+            self.session.stop()
+
         main_loop = asyncio.get_event_loop()
-        
-        # 定义事件回调函数 - 接收录制数据并发送到 WebSocket
-        def on_event(event_data):
-            logger.info(f"[Consumer] on_event callback called with: {event_data}")
-            asyncio.run_coroutine_threadsafe(
-                self.send(text_data=json.dumps({
-                    'type': 'record_event',
-                    'data': event_data
-                })),
-                main_loop
-            )
-        
-        # 定义就绪回调函数 - 接收浏览器就绪状态
-        def on_ready(result):
-            logger.info(f"[Consumer] on_ready callback called with: {result}")
-            asyncio.run_coroutine_threadsafe(
-                self.send(text_data=json.dumps({
-                    'type': 'recording_started' if result.get('success') else 'error',
-                    'message': result.get('message', '')
-                })),
-                main_loop
-            )
-        
-        # 启动录制（在新线程中运行阻塞式的录制循环）
-        def run_recording():
-            try:
-                self.recorder.run_recording_loop(url, on_ready, on_event)
-            except Exception as e:
-                logger.error(f"[Consumer] Recording thread error: {e}")
-                asyncio.run_coroutine_threadsafe(
-                    self.send(text_data=json.dumps({
-                        'type': 'error',
-                        'message': f'录制线程错误: {str(e)}'
-                    })),
-                    main_loop
-                )
-        
-        thread = threading.Thread(target=run_recording)
-        thread.daemon = True
-        thread.start()
-        
-        await self.send(text_data=json.dumps({
-            'type': 'info',
-            'message': '正在启动录制...'
-        }))
 
-    async def handle_stop_recording(self):
-        """处理停止录制命令"""
-        if not self.recorder:
+        def on_event(ev):
+            asyncio.run_coroutine_threadsafe(
+                self.send(text_data=json.dumps(self._map_event(ev))),
+                main_loop,
+            )
+
+        self.session = RecorderSession(on_event=on_event)
+        self.session.start()
+        self.session.send({"cmd": "start", "url": url, "viewport": viewport})
+
+    async def stop(self):
+        if not self.session:
             await self.send(text_data=json.dumps({
                 'type': 'error',
-                'message': '录制未在进行中'
+                'message': '录制未在进行'
             }))
             return
-        
-        result = self.recorder.stop_recording()
-        remove_recorder(self.group_name)
-        self.recorder = None
-        
+        self.session.stop()
+        self.session = None
         await self.send(text_data=json.dumps({
             'type': 'recording_stopped',
-            'message': result['message']
+            'message': '录制已停止'
         }))
+
+    def _map_event(self, ev):
+        # 把 worker 事件映射回前端期望的结构（保留向后兼容）
+        t = ev.get("type")
+        if t == "ready" and ev.get("success") and "phase" not in ev:
+            return {"type": "recording_started", "message": "录制已开始"}
+        if t == "error":
+            return {
+                "type": "error",
+                "code": ev.get("code", ""),
+                "message": f"[{ev.get('code', '')}] {ev.get('message', '')}",
+                "traceback": ev.get("traceback", ""),
+            }
+        if t == "record_event":
+            return {"type": "record_event", "data": ev.get("data")}
+        if t == "record_assert_event":
+            return {"type": "record_assert_event", "data": ev.get("data")}
+        if t == "stopped":
+            return {"type": "recording_stopped", "message": "录制已停止"}
+        if t == "paused":
+            return {"type": "recording_paused"}
+        if t == "resumed":
+            return {"type": "recording_resumed"}
+        if t == "step_run_done":
+            return {
+                "type": "step_run_done",
+                "success": ev.get("success"),
+                "code": ev.get("code"),
+                "message": ev.get("message"),
+            }
+        return ev
 
 
 class PerformanceTestConsumer(AsyncWebsocketConsumer):
