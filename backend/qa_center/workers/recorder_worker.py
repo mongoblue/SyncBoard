@@ -1170,7 +1170,8 @@ def _do_stop(state):
     except Exception: pass
     try:
         if state.playwright: state.playwright.stop()
-    except Exception: pass
+    except Exception:
+        logger.exception("playwright.stop 失败（可能有 driver 进程残留）")
 
 
 def _do_run_step(state, step):
