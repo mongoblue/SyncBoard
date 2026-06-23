@@ -1,9 +1,12 @@
 <template>
   <div class="quality-report">
-    <div class="page-header">
-      <h2>项目质量报告</h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">项目质量报告</h1>
+        <p class="page-subtitle">基于任务、Bug、部署与性能数据的综合评分</p>
+      </div>
       <el-button @click="fetchReport" :loading="loading" size="small"><el-icon><Refresh /></el-icon>刷新</el-button>
-    </div>
+    </header>
 
     <el-row :gutter="20" v-loading="loading">
       <!-- 总分 -->
@@ -124,9 +127,9 @@ const renderCharts = () => {
       series: [{
         type: 'radar',
         data: [{ value: dims.map((d: any) => d.score), name: '当前' }],
-        areaStyle: { color: 'rgba(64,158,255,0.2)' },
-        lineStyle: { color: 'var(--color-primary-light)', width: 2 },
-        itemStyle: { color: 'var(--color-primary-light)' },
+        areaStyle: { color: 'rgba(15,118,110,0.15)' },
+        lineStyle: { color: '#0F766E', width: 2 },
+        itemStyle: { color: '#0F766E' },
       }],
     });
     window.addEventListener('resize', () => chart.resize());
@@ -142,8 +145,8 @@ const renderCharts = () => {
       yAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
       series: [{
         name: '通过率', type: 'line', data: trend.map((t: any) => t.rate),
-        smooth: true, lineStyle: { color: 'var(--color-success)' }, itemStyle: { color: 'var(--color-success)' },
-        areaStyle: { color: 'rgba(103,194,58,0.1)' },
+        smooth: true, lineStyle: { color: '#1A7F37' }, itemStyle: { color: '#1A7F37' },
+        areaStyle: { color: 'rgba(26,127,55,0.10)' },
       }],
       grid: { left: 30, right: 20, top: 10, bottom: 40 },
     });
@@ -155,15 +158,13 @@ onMounted(fetchReport);
 </script>
 
 <style scoped>
-.quality-report { max-width: 1100px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.page-header h2 { margin: 0; font-size: 20px; }
+.quality-report { padding: 0; }
 .score-card { text-align: center; }
-.total-score { font-size: 48px; font-weight: 700; color: var(--color-text); }
-.score-label { color: var(--color-text-tertiary); font-size: 14px; margin: 8px 0 12px; }
+.total-score { font-family: var(--font-heading); font-size: 40px; font-weight: 600; color: var(--color-text); line-height: 1.1; }
+.score-label { color: var(--color-text-secondary); font-size: 13px; margin: 6px 0 12px; }
 .summary-item { text-align: center; padding: 8px; }
-.summary-value { font-size: 22px; font-weight: 600; color: var(--color-text); }
-.summary-label { font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px; }
+.summary-value { font-family: var(--font-heading); font-size: 20px; font-weight: 600; color: var(--color-text); }
+.summary-label { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; }
 .chart-container { height: 320px; }
 .dimension-item { margin-bottom: 16px; }
 .dim-header { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }

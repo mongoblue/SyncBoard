@@ -209,12 +209,19 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
             # 判断测试是否通过(extractions 块不参与 passed 计算,放到后面追加)
             all_assertions_passed = all(r['passed'] for r in assertion_results) if assertion_results else True
 
-            # 检查状态码
-            expected_status = test_case.expected_status
-            if expected_status is not None and expected_status > 0:
-                status_passed = (status_code == expected_status)
+            # 检查状态码：如果 assertions 中已有 status_code 断言，则信任断言结果
+            has_status_code_assertion = any(
+                isinstance(a, dict) and (a.get('assertion_type') or a.get('type')) == 'status_code'
+                for a in assertions
+            )
+            if not has_status_code_assertion:
+                expected_status = test_case.expected_status
+                if expected_status is not None and expected_status > 0:
+                    status_passed = (status_code == expected_status)
+                else:
+                    status_passed = (200 <= status_code < 300)
             else:
-                status_passed = (200 <= status_code < 300)
+                status_passed = True
 
             passed = all_assertions_passed and status_passed
 
@@ -593,8 +600,15 @@ def execute_single_api_case(case, parent_run, sequence, triggered_user):
         )
         assertion_results = ua.run_assertions(assertions, ctx)
 
-        expected_status = case.expected_status
-        status_passed = (status_code == expected_status) if expected_status else (200 <= status_code < 300)
+        has_status_code_assertion = any(
+            isinstance(a, dict) and (a.get('assertion_type') or a.get('type')) == 'status_code'
+            for a in assertions
+        )
+        if has_status_code_assertion:
+            status_passed = True
+        else:
+            expected_status = case.expected_status
+            status_passed = (status_code == expected_status) if expected_status else (200 <= status_code < 300)
         all_passed = all(r.get('passed', False) for r in assertion_results if isinstance(r, dict)) if assertion_results else True
         passed = status_passed and all_passed
 

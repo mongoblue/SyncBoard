@@ -192,11 +192,11 @@ const scrollToBottom = () => {
 const formatLog = (line: string) => {
   if (!line) return '';
   let colored = line
-    .replace(/PASSED/g, '<span style="color:var(--color-success); font-weight:bold">PASSED</span>')
-    .replace(/FAILED/g, '<span style="color:var(--color-danger); font-weight:bold">FAILED</span>')
-    .replace(/ERROR/g, '<span style="color:var(--color-danger); font-weight:bold">ERROR</span>')
+    .replace(/PASSED/g, '<span style="color:var(--color-success); font-weight:600">PASSED</span>')
+    .replace(/FAILED/g, '<span style="color:var(--color-danger); font-weight:600">FAILED</span>')
+    .replace(/ERROR/g, '<span style="color:var(--color-danger); font-weight:600">ERROR</span>')
     .replace(/SKIPPED/g, '<span style="color:var(--color-warning)">SKIPPED</span>')
-    .replace(/collecting .../g, '<span style="color:var(--color-primary-light)">collecting ...</span>');
+    .replace(/collecting .../g, '<span style="color:var(--color-primary)">collecting ...</span>');
   return colored;
 };
 
@@ -209,21 +209,22 @@ defineExpose({ open });
 
 <style scoped>
 .qa-dialog :deep(.el-dialog__body) {
-  padding: 10px 20px;
-  background-color: var(--color-bg);
+  padding: 16px 24px;
+  background-color: var(--color-surface);
 }
 
 .dashboard-header {
   display: flex;
-  gap: 15px;
-  margin-bottom: 15px;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .status-card {
-  background: white;
-  padding: 10px 15px;
-  border-radius: 6px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 10px 16px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -235,33 +236,33 @@ defineExpose({ open });
 
 .label {
   font-size: 12px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 
 .value {
+  font-family: var(--font-heading);
   font-size: 16px;
   font-weight: 600;
 }
 
-.text-blue { color: var(--color-primary-light); }
+.text-blue { color: var(--color-primary); }
 .text-green { color: var(--color-success); }
 .text-red { color: var(--color-danger); }
 .text-gray { color: var(--color-text-tertiary); }
 
 /* 终端样式 */
 .terminal-window {
-  background-color: #1E293B; /* VS Code 默认背景色 */
-  border-radius: 6px;
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
   height: 450px;
   overflow-y: auto;
-  padding: 12px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-border);
-  border: 1px solid #333;
-  box-shadow: inset 0 0 8px rgba(0,0,0,0.2);
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text);
 }
 
 .terminal-placeholder {
@@ -270,8 +271,8 @@ defineExpose({ open });
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-secondary);
-  opacity: 0.8;
+  color: var(--color-text-tertiary);
+  gap: 8px;
 }
 
 .log-line {
@@ -280,7 +281,7 @@ defineExpose({ open });
 }
 
 .line-num {
-  color: #4b5563;
+  color: var(--color-text-tertiary);
   width: 30px;
   flex-shrink: 0;
   text-align: right;
@@ -289,12 +290,11 @@ defineExpose({ open });
 }
 
 .line-content {
-  white-space: pre-wrap; /* 保留空格 */
+  white-space: pre-wrap;
 }
 
 .dialog-footer {
   display: flex;
   justify-content: space-between;
-  padding-top: 10px;
 }
 </style>

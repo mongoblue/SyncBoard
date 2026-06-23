@@ -1,3 +1,12 @@
+"""
+Celery 任务定义。
+
+当前仅用于全文搜索索引的异步更新：
+  - update_search_index:    模型保存后更新 ES 索引
+  - remove_from_search_index: 模型删除后从索引移除
+
+信号触发：room/models.py（Task/Project）中通过 post_save/post_delete 信号调用。
+"""
 from celery import shared_task
 from django.apps import apps
 from haystack import connections

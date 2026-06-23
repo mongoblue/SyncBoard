@@ -1,11 +1,11 @@
 <template>
   <div class="my-bugs">
-    <div class="page-header">
+    <header class="page-header">
       <div>
-        <h2>我的 Bug</h2>
-        <p class="subtitle">查看与我相关的所有 Bug</p>
+        <h1 class="page-title">我的 Bug</h1>
+        <p class="page-subtitle">查看与我相关的所有 Bug</p>
       </div>
-    </div>
+    </header>
 
     <el-tabs v-model="activeRole" @tab-change="loadList">
       <el-tab-pane label="指派给我" name="assignee">
@@ -185,12 +185,17 @@ onMounted(loadList);
 </script>
 
 <style scoped>
-.my-bugs { padding: 20px; }
-.page-header { margin-bottom: 16px; }
-.subtitle { color: var(--el-text-color-secondary); font-size: 14px; margin-top: 4px; }
-.tab-hint { color: var(--el-text-color-secondary); font-size: 13px; margin-bottom: 8px; }
+.my-bugs { padding: 0; }
+.tab-hint {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
 .clickable-row { cursor: pointer; }
 .pagination { margin-top: 16px; justify-content: flex-end; display: flex; }
-.linked-task-chip { font-family: monospace; color: var(--el-text-color-secondary); }
-.muted { color: var(--el-text-color-placeholder); }
+.linked-task-chip {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+.muted { color: var(--color-text-tertiary); }
 </style>

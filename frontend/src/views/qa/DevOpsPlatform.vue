@@ -1,9 +1,9 @@
 <template>
   <div class="devops-platform">
-    <div class="page-header">
-      <div class="header-left">
+    <header class="page-header">
+      <div>
         <h1 class="page-title">DevOps 测试平台</h1>
-        <p class="page-desc">内置测试平台，支持持续集成和自动化测试</p>
+        <p class="page-subtitle">内置测试平台，支持持续集成和自动化测试</p>
       </div>
       <div class="header-actions">
         <el-button type="primary" @click="showBatchRunDialog = true">
@@ -19,7 +19,7 @@
           刷新
         </el-button>
       </div>
-    </div>
+    </header>
 
     <div class="platform-content">
       <!-- 功能卡片区域 -->
@@ -570,48 +570,24 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.devops-platform {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-
-.header-left {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: #1E293B;
-  margin: 0;
-}
-
-.page-desc {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  margin: 0;
-}
+.devops-platform { padding: 0; }
 
 .header-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .feature-card {
   height: 100%;
-  transition: all 0.3s;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .feature-card:hover {
-  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .card-header {
@@ -619,11 +595,14 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-weight: 600;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  color: var(--color-text);
 }
 
 .card-header .el-icon {
   font-size: 18px;
-  color: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
 .card-body p {
@@ -631,6 +610,7 @@ onMounted(() => {
   margin: 0 0 12px 0;
   line-height: 1.6;
   min-height: 44px;
+  font-size: 13px;
 }
 
 .integration-status,
@@ -658,26 +638,19 @@ onMounted(() => {
 }
 
 .stat-value {
-  font-size: 32px;
-  font-weight: 700;
-  color: var(--color-primary-light);
-  margin-bottom: 8px;
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 4px;
 }
 
-.stat-value.text-success {
-  color: var(--color-success);
-}
-
-.stat-value.text-warning {
-  color: var(--color-warning);
-}
-
-.stat-value.text-danger {
-  color: var(--color-danger);
-}
+.stat-value.text-success { color: var(--color-success); }
+.stat-value.text-warning { color: var(--color-warning); }
+.stat-value.text-danger { color: var(--color-danger); }
 
 .stat-label {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
 }
 
@@ -690,6 +663,7 @@ onMounted(() => {
   justify-content: space-between;
   padding: 8px 0;
   border-bottom: 1px solid var(--color-border-light);
+  font-size: 13px;
 }
 
 .detail-row:last-child {
@@ -706,11 +680,11 @@ onMounted(() => {
 }
 
 :deep(.el-card__header) {
-  padding: 15px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--color-border-light);
 }
 
 :deep(.el-card__body) {
-  padding: 20px;
+  padding: 16px;
 }
 </style>

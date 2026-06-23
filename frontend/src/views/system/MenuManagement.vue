@@ -1,15 +1,15 @@
 <template>
   <div class="menu-management">
-    <div class="page-header">
-      <h2 class="page-title">
-        <el-icon><Menu /></el-icon>
-        菜单管理
-      </h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">菜单管理</h1>
+        <p class="page-subtitle">维护系统菜单与权限节点</p>
+      </div>
       <el-button type="primary" @click="handleAdd" v-permission="'sys:menu:add'">
-        <el-icon><Plus /></el-icon>
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         新增菜单
       </el-button>
-    </div>
+    </header>
 
     <el-card class="menu-card">
       <el-table
@@ -158,7 +158,6 @@ import type { FormInstance, FormRules } from 'element-plus';
 import service from '@/utils/request';
 import {
   Plus,
-  Menu,
   Grid,
   User,
   Collection,
@@ -401,34 +400,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.menu-management {
-  padding: 20px;
-}
+.menu-management { padding: 0; }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.menu-card {
-  min-height: 500px;
-}
+.menu-card { min-height: 500px; }
 
 .form-tip {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
   margin-top: 4px;
 }
 </style>

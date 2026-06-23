@@ -1,3 +1,17 @@
+"""
+看板 BoardConsumer —— 项目看板的实时协作层。
+
+连接时鉴权（is_project_member），加入 group board_{project_id}。
+接收前端消息（拖拽、列变更、任务增减）后广播给同项目其他成员。
+
+广播事件格式：
+  {action: "refresh", data: ...}    列表刷新
+  {action: "column_created", ...}   新列
+  {action: "task_moved", ...}       拖拽
+  {action: "user_joined/left", ...} 用户进出通知
+
+注意：具体业务数据通过 REST API 写入，WS 仅传递事件通知，客户端收到后调 API 拉最新数据。
+"""
 # backend/room/consumers.py
 import json
 import html

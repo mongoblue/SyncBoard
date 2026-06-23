@@ -78,71 +78,7 @@ watch(() => authStore.user, (newUser) => {
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-:root {
-  --color-primary: #0F766E;
-  --color-primary-light: #14B8A6;
-  --color-primary-dark: #0D9488;
-  --color-primary-bg: #F0FDFA;
-  --color-primary-border: #99F6E4;
-  --color-accent: #FF4F00;
-  --color-accent-bg: #FFF3EC;
-  --color-bg: #F7F7F8;
-  --color-surface: #FFFFFF;
-  --color-surface-sunken: #FAFAFA;
-  --color-text: #0A0A0A;
-  --color-text-secondary: #5C5C5C;
-  --color-text-tertiary: #9A9A9A;
-  --color-border: #E5E5E5;
-  --color-border-strong: #1A1A1A;
-  --color-border-light: #F0F0F0;
-  --color-danger: #EF4444;
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-accent-bar-0: #0F766E;
-  --color-accent-bar-1: #FF4F00;
-  --color-accent-bar-2: #5C5C5C;
-  --color-accent-bar-3: #14B8A6;
-  --shadow-sm: none;
-  --shadow-md: 0 8px 24px rgba(10, 10, 10, 0.08);
-  --shadow-lg: 0 16px 40px rgba(10, 10, 10, 0.12);
-  --radius-sm: 2px;
-  --radius-md: 2px;
-  --radius-lg: 4px;
-  --font-heading: 'Inter', 'Helvetica Neue', Helvetica, system-ui, -apple-system, sans-serif;
-  --font-body: 'Inter', 'Helvetica Neue', Helvetica, system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
-  --transition-fast: 120ms ease;
-  --transition-normal: 200ms ease;
-}
-
-[data-theme="dark"] {
-  --color-primary: #14B8A6;
-  --color-primary-light: #2DD4BF;
-  --color-primary-dark: #0D9488;
-  --color-primary-bg: #0F2F2B;
-  --color-primary-border: #134E4A;
-  --color-accent: #FF6B2C;
-  --color-accent-bg: #2A1810;
-  --color-bg: #0A0A0A;
-  --color-surface: #141414;
-  --color-surface-sunken: #0F0F0F;
-  --color-text: #F5F5F5;
-  --color-text-secondary: #A8A8A8;
-  --color-text-tertiary: #6B6B6B;
-  --color-border: #2A2A2A;
-  --color-border-strong: #F5F5F5;
-  --color-border-light: #1F1F1F;
-  --color-danger: #F87171;
-  --color-success: #34D399;
-  --color-warning: #FBBF24;
-  --color-accent-bar-0: #14B8A6;
-  --color-accent-bar-1: #FF6B2C;
-  --color-accent-bar-2: #A8A8A8;
-  --color-accent-bar-3: #2DD4BF;
-  --shadow-sm: none;
-  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-}
+/* Theme tokens defined in src/styles/variables.css (single source of truth) */
 
 body {
   font-family: var(--font-body);

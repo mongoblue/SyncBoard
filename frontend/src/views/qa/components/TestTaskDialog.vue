@@ -594,7 +594,7 @@ onMounted(() => {
 
 .test-cases-selector {
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   padding: 16px;
 }
 

@@ -107,10 +107,10 @@ onMounted(fetchRuns);
 <style scoped>
 .pipeline-timeline { }
 .timeline-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.timeline-header h4 { margin: 0; font-size: 14px; color: var(--color-text); }
+.timeline-header h4 { margin: 0; font-family: var(--font-heading); font-size: 14px; font-weight: 600; color: var(--color-text); }
 .timeline-list { max-height: 400px; overflow-y: auto; padding-left: 8px; }
 .timeline-item { display: flex; gap: 12px; padding: 8px 0; padding-left: 16px; border-left: 2px solid var(--color-border); cursor: pointer; position: relative; }
-.timeline-item:hover { background: var(--color-bg); }
+.timeline-item:hover { background: var(--color-surface-hover); }
 .timeline-item.status-passed { border-left-color: var(--color-success); }
 .timeline-item.status-failed { border-left-color: var(--color-danger); }
 .timeline-item.status-running { border-left-color: var(--color-warning); }
@@ -121,10 +121,10 @@ onMounted(fetchRuns);
 .timeline-content { flex: 1; min-width: 0; }
 .run-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .run-name { font-weight: 500; font-size: 13px; }
-.run-branch { font-size: 12px; color: var(--color-text-tertiary); background: var(--color-border-light); padding: 0 6px; border-radius: 3px; }
+.run-branch { font-size: 12px; color: var(--color-text-secondary); background: var(--color-surface-sunken); padding: 1px 6px; border-radius: var(--radius-sm); }
 .run-meta { font-size: 12px; color: var(--color-text-tertiary); display: flex; gap: 12px; }
 .test-summary { margin-top: 16px; }
-.test-summary h4, .log-section h4 { font-size: 13px; color: var(--color-text-secondary); margin: 12px 0 8px; }
+.test-summary h4, .log-section h4 { font-size: 13px; color: var(--color-text-secondary); margin: 12px 0 8px; font-family: var(--font-heading); font-weight: 600; }
 .test-detail { display: flex; gap: 8px; margin-top: 8px; }
-.log-output { background: #1E293B; color: var(--color-border); padding: 12px; border-radius: 6px; font-size: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
+.log-output { background: var(--color-surface-sunken); border: 1px solid var(--color-border-light); color: var(--color-text); padding: 12px; border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 12px; max-height: 300px; overflow-y: auto; white-space: pre-wrap; }
 </style>

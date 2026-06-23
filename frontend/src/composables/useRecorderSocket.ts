@@ -1,4 +1,16 @@
+/**
+ * UI 录制器 WebSocket 状态机。
+ *
+ * 状态：idle → connecting → recording | paused | stopped | error
+ *
+ * 连接 ws/qa/recorder/，双向通信：
+ *  上游指令：start_recording / stop_recording / pause_recording / resume_recording / run_step
+ *  下游事件：recording_started / recording_stopped / step_recorded / step_run_done / error
+ *
+ * 被 UiCaseDetail.vue 中的 RecorderPanel.vue 使用。
+ */
 import { ref, onUnmounted } from 'vue'
+import { getWsHost } from './wsHost'
 
 export interface RecorderEvent {
   type: string
@@ -18,7 +30,7 @@ export function useRecorderSocket() {
   function open() {
     if (ws.value) return
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${window.location.host}/ws/qa/recorder/`
+    const url = `${proto}://${getWsHost()}/ws/qa/recorder/`
     const sock = new WebSocket(url)
     ws.value = sock
     status.value = 'connecting'
@@ -54,7 +66,11 @@ export function useRecorderSocket() {
   function pause() { send({ command: 'pause_recording' }) }
   function resume() { send({ command: 'resume_recording' }) }
   function runStep(step: any) { send({ command: 'run_step', step }) }
-  function close() { ws.value?.close(); ws.value = null }
+  function close() {
+    try { send({ command: 'stop_recording' }) } catch { /* ignore */ }
+    ws.value?.close()
+    ws.value = null
+  }
 
   onUnmounted(close)
 

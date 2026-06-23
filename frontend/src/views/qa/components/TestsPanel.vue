@@ -101,26 +101,54 @@ function formatValue(v: any): string {
 
 <style scoped>
 .tests-panel { padding: 16px; }
-.tests-summary { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #ebeef5; }
-.tests-count { font-weight: 600; }
-.tests-rate.pass { color: #67c23a; }
-.tests-rate.fail { color: #f56c6c; }
+.tests-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.tests-count {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  color: var(--color-text);
+}
+.tests-rate.pass { color: var(--color-success); }
+.tests-rate.fail { color: var(--color-danger); }
 .tests-list { list-style: none; padding: 0; margin: 0; }
-.test-item { padding: 8px 12px; border-radius: 4px; margin-bottom: 4px; }
-.test-item.pass { background: #f0f9eb; }
-.test-item.fail { background: #fef0f0; }
+.test-item {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  background: var(--color-surface);
+}
+.test-item.pass { background: var(--color-success-bg); border-color: transparent; }
+.test-item.fail { background: var(--color-danger-bg); border-color: transparent; }
 .test-row { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.test-icon { font-weight: bold; width: 20px; }
-.test-item.pass .test-icon { color: #67c23a; }
-.test-item.fail .test-icon { color: #f56c6c; }
-.test-desc { flex: 1; font-family: 'Menlo', monospace; font-size: 13px; }
-.test-detail { margin-top: 8px; padding: 12px; background: #fff; border-radius: 4px; }
-.detail-row { display: flex; gap: 8px; padding: 4px 0; font-size: 13px; }
-.detail-row .label { color: #909399; min-width: 60px; }
-.detail-row code { font-family: 'Menlo', monospace; }
-.detail-row.error { color: #f56c6c; }
-.extractions { margin-top: 24px; padding-top: 16px; border-top: 1px solid #ebeef5; }
-.extractions h4 { margin: 0 0 8px 0; }
+.test-icon { font-weight: 600; width: 20px; }
+.test-item.pass .test-icon { color: var(--color-success); }
+.test-item.fail .test-icon { color: var(--color-danger); }
+.test-desc { flex: 1; font-family: var(--font-mono); font-size: 12px; color: var(--color-text); }
+.test-detail {
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+}
+.detail-row { display: flex; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--color-text); }
+.detail-row .label { color: var(--color-text-secondary); min-width: 60px; }
+.detail-row code { font-family: var(--font-mono); font-size: 12px; }
+.detail-row.error { color: var(--color-danger); }
+.extractions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--color-border-light); }
+.extractions h4 {
+  margin: 0 0 8px 0;
+  font: 600 14px/1.3 var(--font-heading);
+  color: var(--color-text);
+}
 .extractions ul { list-style: none; padding: 0; }
-.extractions li { padding: 4px 0; font-size: 13px; }
+.extractions li { padding: 4px 0; font-size: 13px; color: var(--color-text); }
+.extractions code { font-family: var(--font-mono); }
 </style>

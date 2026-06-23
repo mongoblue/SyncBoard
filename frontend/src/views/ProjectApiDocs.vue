@@ -1,41 +1,44 @@
 <template>
   <div class="api-docs-page">
-    <div class="page-header">
-      <h2>API 文档</h2>
-      <p class="subtitle">上传项目的 API 文档，AI 助手可自动解析并生成测试用例</p>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">API 文档</h1>
+        <p class="page-subtitle">上传项目的 API 文档，AI 助手可自动解析并生成测试用例</p>
+      </div>
       <el-button type="primary" @click="showForm = true">
-        <el-icon><Plus /></el-icon> 上传文档
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
+        上传文档
       </el-button>
-    </div>
+    </header>
 
-    <el-row :gutter="20" v-loading="loading">
+    <el-row :gutter="16" v-loading="loading">
       <el-col :span="16">
-        <el-card v-if="docs.length" class="doc-list-card">
+        <el-card v-if="docs.length" class="doc-list-card" shadow="never">
           <div v-for="doc in docs" :key="doc.id" class="doc-item">
             <div class="doc-header">
               <span class="doc-name">{{ doc.name }}</span>
               <el-tag size="small" :type="formatTag(doc.format)">{{ doc.format_label }}</el-tag>
             </div>
             <div class="doc-meta">
-              <span>上传者: {{ doc.uploaded_by_name }}</span>
+              <span>上传者：{{ doc.uploaded_by_name }}</span>
               <span>{{ formatDate(doc.created_at) }}</span>
             </div>
             <div class="doc-actions">
               <el-button size="small" @click="viewDoc(doc)">查看</el-button>
-              <el-button size="small" type="danger" @click="deleteDoc(doc)">删除</el-button>
+              <el-button size="small" type="danger" plain @click="deleteDoc(doc)">删除</el-button>
             </div>
           </div>
         </el-card>
-        <el-empty v-else description="暂无 API 文档，点击上方按钮上传">
-          <template #image><el-icon :size="60"><Document /></el-icon></template>
+        <el-empty v-else description="暂无 API 文档，点击右上角上传">
+          <template #image><el-icon :size="48" color="var(--color-text-tertiary)"><Document /></el-icon></template>
         </el-empty>
       </el-col>
 
       <el-col :span="8">
-        <el-card class="tips-card">
+        <el-card class="tips-card" shadow="never">
           <template #header><span>AI 生成提示</span></template>
-          <p>上传文档后，在 AI 助手中说：</p>
-          <el-alert type="info" :closable="false" style="margin-top:8px">
+          <p>上传文档后，在 AI 助手中输入：</p>
+          <el-alert type="info" :closable="false" style="margin-top: 8px">
             "根据项目的 API 文档生成测试用例"
           </el-alert>
           <el-divider />
@@ -51,20 +54,23 @@
 
     <el-dialog v-model="showForm" title="上传 API 文档" width="700px" destroy-on-close>
       <el-form :model="form" label-position="top">
-        <el-form-item label="文档名称" required>
+        <div class="form-field">
+          <label class="form-label">文档名称</label>
           <el-input v-model="form.name" placeholder="如：用户模块 API 文档" />
-        </el-form-item>
-        <el-form-item label="文档格式" required>
-          <el-select v-model="form.format">
+        </div>
+        <div class="form-field">
+          <label class="form-label">文档格式</label>
+          <el-select v-model="form.format" style="width: 100%">
             <el-option label="Markdown" value="markdown" />
             <el-option label="OpenAPI JSON" value="openapi_json" />
             <el-option label="纯文本" value="text" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="文档内容" required>
+        </div>
+        <div class="form-field">
+          <label class="form-label">文档内容</label>
           <el-input v-model="form.content" type="textarea" :rows="16"
-            placeholder="粘贴 API 文档内容...&#10;&#10;Markdown 格式示例：&#10;## 登录接口&#10;- POST /api/auth/login/&#10;- Body: {username, password}&#10;- 返回: {access, user}&#10;&#10;## 任务列表&#10;- GET /api/tasks/?project={id}&#10;- 返回: {count, results}" />
-        </el-form-item>
+            placeholder="粘贴 API 文档内容..." />
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="showForm = false">取消</el-button>
@@ -143,10 +149,7 @@ onMounted(loadDocs);
 </script>
 
 <style scoped>
-.api-docs-page { max-width: 1000px; margin: 0 auto; padding: 20px; }
-.page-header { margin-bottom: 24px; }
-.page-header h2 { margin: 0 0 4px; }
-.subtitle { color: var(--color-text-tertiary); font-size: 13px; margin: 0 0 12px; }
+.api-docs-page { padding: 0; }
 .doc-list-card { margin-bottom: 20px; }
 .doc-item { padding: 12px 0; border-bottom: 1px solid var(--color-border-light); display: flex; align-items: center; gap: 16px; }
 .doc-item:last-child { border-bottom: none; }

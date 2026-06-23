@@ -1,9 +1,9 @@
 <template>
   <div class="test-result-list">
-    <div class="page-header">
-      <div class="header-left">
-        <h2>测试结果管理</h2>
-        <p class="subtitle">查看和管理所有测试执行结果</p>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">测试结果管理</h1>
+        <p class="page-subtitle">查看和管理所有测试执行结果</p>
       </div>
       <div class="header-actions">
         <el-button @click="loadStatistics">
@@ -15,7 +15,7 @@
           刷新
         </el-button>
       </div>
-    </div>
+    </header>
 
     <!-- 统计卡片 -->
     <div class="statistics-cards" v-if="statistics">
@@ -463,71 +463,42 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.test-result-list {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.header-left h2 {
-  margin: 0 0 5px 0;
-}
-
-.subtitle {
-  color: var(--color-text-secondary);
-  font-size: 14px;
-  margin: 0;
-}
+.test-result-list { padding: 0; }
 
 .header-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 /* 统计卡片 */
 .statistics-cards {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 15px;
+  gap: 12px;
   margin-bottom: 20px;
 }
 
 .stat-card {
   text-align: center;
-  padding: 15px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
-.stat-card :deep(.el-card__body) {
-  padding: 15px;
-}
+.stat-card :deep(.el-card__body) { padding: 16px; }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--color-primary-light);
-  margin-bottom: 5px;
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-primary);
+  margin-bottom: 4px;
 }
 
-.stat-card.success .stat-value {
-  color: var(--color-success);
-}
-
-.stat-card.danger .stat-value {
-  color: var(--color-danger);
-}
-
-.stat-card.warning .stat-value {
-  color: var(--color-warning);
-}
-
-.stat-card.info .stat-value {
-  color: var(--color-text-tertiary);
-}
+.stat-card.success .stat-value { color: var(--color-success); }
+.stat-card.danger .stat-value { color: var(--color-danger); }
+.stat-card.warning .stat-value { color: var(--color-warning); }
+.stat-card.info .stat-value { color: var(--color-info); }
 
 .stat-label {
   font-size: 13px;
@@ -537,8 +508,8 @@ onMounted(() => {
 /* 筛选栏 */
 .filter-bar {
   display: flex;
-  gap: 15px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 16px;
   align-items: center;
   flex-wrap: wrap;
 }
@@ -552,29 +523,20 @@ onMounted(() => {
 
 /* 统计弹窗 */
 .statistics-detail h4 {
-  margin: 0 0 15px 0;
+  margin: 0 0 12px 0;
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
 }
 
-/* 响应式 */
 @media (max-width: 1200px) {
-  .statistics-cards {
-    grid-template-columns: repeat(3, 1fr);
-  }
+  .statistics-cards { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 768px) {
-  .statistics-cards {
-    grid-template-columns: repeat(2, 1fr);
-  }
-
-  .filter-bar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .filter-bar > * {
-    width: 100% !important;
-  }
+  .statistics-cards { grid-template-columns: repeat(2, 1fr); }
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-bar > * { width: 100% !important; }
 }
 </style>

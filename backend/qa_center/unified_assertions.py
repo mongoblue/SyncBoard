@@ -1,36 +1,17 @@
 """统一的 API 断言引擎 —— M3.1。
 
-历史上 SyncBoard 存在两套断言实现，schema 不一致：
+新旧两套共用此模块。输入格式：
+  1. 旧版 dict：{type, operator, value, expression, header_name}
+  2. 新版 Assertion 模型实例：assertion_type, comparison_operator, expected_value, json_path
 
-  1. ``assertion_engine.AssertionEngine`` (legacy)
-     存于 ``ApiTestCase.expected_response.assertions`` JSON。
-     单条形如::
+归一化后支持的断言类型（10 种）：
+  status_code / response_time / json_equals / json_exists / json_contains /
+  header_equals / header_exists / body_size / regex_match / type_check /
+  schema_validate
 
-         {"type": "status_code|jsonpath|header",
-          "operator": "==|!=|>|<|>=|<=|contains|exists",
-          "value": ..., "expression": "$.foo", "header_name": "X-Foo"}
-
-  2. ``api_auto_executor.AssertionExecutor``
-     来自 ``ApiAutoTestAssertion`` 模型。单条形如::
-
-         {"assertion_type": "status_code|json_equals|json_exists|json_contains|response_time",
-          "comparison_operator": "eq|ne|gt|gte|lt|lte|contains|not_contains",
-          "json_path": "$.foo", "expected_value": "..."}
-
-本模块统一这两路输入到一个 ``Assertion`` dataclass，并扩展支持：
-
-  * ``status_code`` / ``response_time``
-  * ``json_equals`` / ``json_exists`` / ``json_contains``
-  * ``header_equals`` / ``header_exists``
-  * ``body_size``      —— 响应体字节数
-  * ``regex_match``    —— 正则匹配字段值或整个响应体
-  * ``type_check``     —— 字段类型断言 (int/str/list/dict/bool/null/number)
-  * ``schema_validate``—— jsonschema 校验整个响应
-
-迁移策略：不强制改库——执行器在拿到断言列表时调用 ``normalize_one`` 把
-任意 schema 收敛到内部 ``Assertion``，再交给 ``run_assertions`` 评估。
-执行结果使用与现有 ``AssertionExecutor`` 一致的字段，最大限度兼容前端。
+核心入口：run_assertions(raw_list, ctx) → list[dict{passed, assertion_type, ...}]
 """
+
 from __future__ import annotations
 
 import json

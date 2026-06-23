@@ -437,20 +437,32 @@ onMounted(reload);
 </script>
 
 <style scoped>
-.auto-result-detail { padding: 20px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.auto-result-detail { padding: 0; }
+.page-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-border-light);
+}
 .header-left { display: flex; align-items: center; gap: 12px; }
-.header-left h2 { margin: 0; font-size: 18px; }
+.header-left h2 {
+  margin: 0;
+  font: 600 20px/1.3 var(--font-heading);
+  color: var(--color-text);
+}
 .header-actions { display: flex; gap: 8px; }
 
 .overview-card { margin-bottom: 16px; }
 .overview-row { display: flex; gap: 32px; flex-wrap: wrap; }
 .overview-item { display: flex; flex-direction: column; gap: 4px; min-width: 80px; }
-.overview-label { color: var(--el-text-color-secondary); font-size: 12px; }
-.overview-value { font-size: 22px; font-weight: 600; }
-.text-success { color: var(--el-color-success); }
-.text-danger { color: var(--el-color-danger); }
-.text-warning { color: var(--el-color-warning); }
+.overview-label { color: var(--color-text-secondary); font-size: 12px; font-weight: 500; }
+.overview-value {
+  font: 600 22px/1.2 var(--font-heading);
+  color: var(--color-text);
+}
+.text-success { color: var(--color-success); }
+.text-danger { color: var(--color-danger); }
+.text-warning { color: var(--color-warning); }
 
 .cases-card { margin-bottom: 16px; }
 .cases-toolbar { display: flex; justify-content: space-between; align-items: center; }
@@ -458,44 +470,77 @@ onMounted(reload);
 .clickable-row { cursor: pointer; }
 .pagination { margin-top: 12px; justify-content: flex-end; display: flex; }
 
-.method-tag { font-weight: 600; font-size: 11px; padding: 2px 6px; border-radius: 3px; background: var(--color-border-light); }
-.method-tag.get { background: #e0f2fe; color: #075985; }
-.method-tag.post { background: #dcfce7; color: #166534; }
-.method-tag.put { background: #fef3c7; color: #92400e; }
-.method-tag.patch { background: #ede9fe; color: #5b21b6; }
-.method-tag.delete { background: #fee2e2; color: #991b1b; }
+.method-tag {
+  font-weight: 600; font-size: 11px; padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+}
+.method-tag.get { background: var(--color-info-bg); color: var(--color-info); }
+.method-tag.post { background: var(--color-success-bg); color: var(--color-success); }
+.method-tag.put { background: var(--color-warning-bg); color: var(--color-warning); }
+.method-tag.patch { background: var(--color-primary-bg); color: var(--color-primary); }
+.method-tag.delete { background: var(--color-danger-bg); color: var(--color-danger); }
 
-.sc-2xx { color: var(--el-color-success); font-weight: 600; }
-.sc-3xx { color: var(--el-color-warning); font-weight: 600; }
-.sc-4xx { color: var(--el-color-danger); font-weight: 600; }
-.sc-5xx { color: var(--el-color-danger); font-weight: 700; }
-.error-summary { color: var(--el-color-danger); font-size: 12px; }
+.sc-2xx { color: var(--color-success); font-weight: 600; }
+.sc-3xx { color: var(--color-warning); font-weight: 600; }
+.sc-4xx { color: var(--color-danger); font-weight: 600; }
+.sc-5xx { color: var(--color-danger); font-weight: 700; }
+.error-summary { color: var(--color-danger); font-size: 12px; }
 
 .drawer-body { display: flex; flex-direction: column; height: 100%; }
-.drawer-footer { display: flex; gap: 8px; justify-content: flex-end; padding-top: 12px; border-top: 1px solid var(--el-border-color-light); margin-top: 12px; }
+.drawer-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 12px;
+}
 
-.section-title { font-weight: 600; margin: 12px 0 6px; }
+.section-title {
+  font: 600 14px/1.3 var(--font-heading);
+  color: var(--color-text);
+  margin: 16px 0 8px;
+}
 .code {
-  background: var(--el-fill-color-darker); padding: 12px; border-radius: 4px;
-  white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 12px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  white-space: pre-wrap; word-break: break-all;
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--color-text);
   max-height: 320px; overflow: auto;
 }
 
 .assertion-list { display: flex; flex-direction: column; gap: 10px; }
 .assertion-row {
-  border: 1px solid var(--el-border-color-light); border-radius: 6px; padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: var(--color-surface);
 }
-.assertion-row.failed { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
+.assertion-row.failed {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
 .assertion-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.assertion-head code { font-size: 12px; color: var(--el-text-color-secondary); }
+.assertion-head code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
 .assertion-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .diff-col { display: flex; flex-direction: column; gap: 4px; }
-.diff-label { font-size: 12px; color: var(--el-text-color-secondary); }
+.diff-label { font-size: 12px; color: var(--color-text-secondary); }
 .diff-value {
-  margin: 0; padding: 6px 8px; border-radius: 4px; font-family: monospace; font-size: 12px;
+  margin: 0; padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono); font-size: 12px;
   white-space: pre-wrap; word-break: break-all;
 }
-.diff-value.expected { background: #f0f9eb; color: var(--color-success); }
-.diff-value.actual { background: #fef0f0; color: var(--color-danger); }
-.assertion-error { color: var(--el-color-danger); font-size: 12px; margin-top: 6px; }
+.diff-value.expected { background: var(--color-success-bg); color: var(--color-success); }
+.diff-value.actual { background: var(--color-danger-bg); color: var(--color-danger); }
+.assertion-error {
+  color: var(--color-danger); font-size: 12px; margin-top: 6px;
+}
 </style>

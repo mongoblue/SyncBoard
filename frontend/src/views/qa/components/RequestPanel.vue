@@ -46,7 +46,32 @@ function formatBody(b: any): string {
 <style scoped>
 .request-panel { padding: 16px; }
 .row { margin-bottom: 16px; }
-.label { display: block; color: #909399; font-size: 12px; margin-bottom: 4px; text-transform: uppercase; }
-.url { background: #fafafa; padding: 6px 10px; border-radius: 4px; font-family: 'Menlo', monospace; font-size: 13px; display: inline-block; }
-pre { background: #fafafa; padding: 12px; border-radius: 4px; font-size: 12px; max-height: 300px; overflow: auto; }
+.label {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.url {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+  display: inline-block;
+}
+pre {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+  max-height: 300px;
+  overflow: auto;
+}
 </style>

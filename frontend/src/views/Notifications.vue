@@ -1,28 +1,23 @@
 <template>
   <div class="notifications-page">
     <header class="page-header">
-      <div class="header-left">
-        <span class="header-folio">N° 01</span>
-        <div class="header-titles">
-          <h1 class="page-title">消息通知</h1>
-          <p class="page-subtitle">
-            共 {{ total }} 条 · {{ unreadCount }} 条未读
-          </p>
-        </div>
+      <div>
+        <h1 class="page-title">消息通知</h1>
+        <p class="page-subtitle">共 {{ total }} 条 · {{ unreadCount }} 条未读</p>
       </div>
-      <button
+      <el-button
         v-if="unreadCount > 0"
-        class="primary-btn"
+        type="primary"
         @click="markAllAsRead"
       >
-        <el-icon :size="12"><Check /></el-icon>
+        <el-icon style="margin-right: 4px"><Check /></el-icon>
         全部已读
-      </button>
+      </el-button>
     </header>
 
-    <section class="notifications-block">
+    <section class="notifications-block card">
       <div v-if="notifications.length === 0" class="empty-state">
-        <span class="empty-folio">EMPTY</span>
+        <el-icon :size="32" color="var(--color-text-tertiary)"><Bell /></el-icon>
         <p class="empty-text">暂无消息通知</p>
       </div>
 
@@ -34,23 +29,20 @@
           :class="{ unread: !notification.is_read }"
           @click="handleNotificationClick(notification)"
         >
-          <div class="row-cell row-cell-type">
-            <span class="cell-folio">{{ (notification.type || 'sys').toUpperCase() }}</span>
-          </div>
-          <div class="row-cell row-cell-icon">
-            <el-icon :size="16">
+          <div class="row-icon">
+            <el-icon :size="18">
               <component :is="getIcon(notification.type)" />
             </el-icon>
           </div>
-          <div class="row-cell row-cell-content">
+          <div class="row-content">
             <div class="notification-title">{{ notification.title }}</div>
             <div class="notification-message">{{ notification.message }}</div>
           </div>
-          <div class="row-cell row-cell-time">
-            <span class="time-text">{{ formatTime(notification.created_at) }}</span>
+          <div class="row-time">
+            <span>{{ formatTime(notification.created_at) }}</span>
           </div>
-          <div class="row-cell row-cell-status">
-            <span v-if="!notification.is_read" class="unread-mark" title="未读">●</span>
+          <div class="row-status">
+            <span v-if="!notification.is_read" class="unread-dot" title="未读"></span>
           </div>
         </article>
       </div>
@@ -179,82 +171,20 @@ onMounted(() => {
 .notifications-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
 }
 
-/* ── Page header ── */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--color-border);
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.header-left {
-  display: flex;
-  align-items: flex-start;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-border-light);
   gap: 16px;
 }
 
-.header-folio {
-  font: 600 11px/1 var(--font-mono);
-  color: var(--color-accent);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  padding-top: 6px;
-}
-
-.header-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.page-title {
-  margin: 0;
-  font: 600 26px/1.2 var(--font-heading);
-  color: var(--color-text);
-  letter-spacing: -0.01em;
-}
-
-.page-subtitle {
-  margin: 0;
-  font: 500 12px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.primary-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 18px;
-  background: var(--color-text);
-  border: 1px solid var(--color-text);
-  color: var(--color-text-inverse);
-  cursor: pointer;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.primary-btn:hover {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-/* ── Notifications block ── */
 .notifications-block {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  overflow: hidden;
 }
 
 .notification-list {
@@ -264,14 +194,14 @@ onMounted(() => {
 
 .notification-row {
   display: grid;
-  grid-template-columns: 60px 32px 1fr 120px 32px;
+  grid-template-columns: 40px 1fr 100px 24px;
   align-items: center;
-  gap: 0;
-  padding: 0;
+  gap: 12px;
+  padding: 12px 20px;
   border-bottom: 1px solid var(--color-border-light);
   cursor: pointer;
   transition: background var(--transition-fast);
-  min-height: 64px;
+  position: relative;
 }
 
 .notification-row:last-child {
@@ -279,167 +209,121 @@ onMounted(() => {
 }
 
 .notification-row:hover {
-  background: var(--color-surface-sunken);
+  background: var(--color-surface-hover);
 }
 
 .notification-row.unread {
-  background: var(--color-accent-bg);
+  background: var(--color-primary-bg);
+}
+
+.notification-row.unread::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--color-primary);
 }
 
 .notification-row.unread:hover {
-  background: var(--color-accent-bg);
-  opacity: 0.92;
+  background: var(--color-primary-bg);
+  filter: brightness(0.97);
 }
 
-.row-cell {
+.row-icon {
   display: flex;
   align-items: center;
-  padding: 14px 16px;
-  min-width: 0;
-  border-right: 1px solid var(--color-border-light);
-  height: 100%;
-}
-
-.row-cell:last-child {
-  border-right: none;
-  justify-content: center;
-  padding: 14px 12px;
-}
-
-.row-cell-type {
-  justify-content: flex-start;
-}
-
-.cell-folio {
-  font: 600 9px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.row-cell-icon {
   justify-content: center;
   color: var(--color-text-secondary);
-  padding: 14px 8px;
 }
 
-.notification-row.unread .row-cell-icon {
-  color: var(--color-accent);
+.notification-row.unread .row-icon {
+  color: var(--color-primary);
 }
 
-.row-cell-content {
+.row-content {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 14px 20px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .notification-title {
-  font: 600 13px/1.3 var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 100%;
 }
 
 .notification-message {
-  font: 400 12px/1.5 var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 100%;
 }
 
-.row-cell-time {
-  justify-content: flex-end;
-  font-variant-numeric: tabular-nums;
-}
-
-.time-text {
-  font: 500 11px/1 var(--font-mono);
+.row-time {
+  font-size: 12px;
   color: var(--color-text-tertiary);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  text-align: right;
 }
 
-.unread-mark {
-  font-size: 10px;
-  color: var(--color-accent);
-  line-height: 1;
+.row-status {
+  display: flex;
+  justify-content: center;
 }
 
-/* ── Empty state ── */
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  display: inline-block;
+}
+
+/* Empty state */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 80px 20px;
+  padding: 64px 20px;
   text-align: center;
-}
-
-.empty-folio {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .empty-text {
   margin: 0;
-  font: 400 14px/1.5 var(--font-body);
+  font-size: 14px;
   color: var(--color-text-secondary);
 }
 
-/* ── Pagination ── */
 .pagination {
   display: flex;
   justify-content: center;
-  padding: 20px;
-  border-top: 1px solid var(--color-border);
+  padding: 16px;
+  border-top: 1px solid var(--color-border-light);
 }
 
-.pagination :deep(.el-pagination .btn-prev),
-.pagination :deep(.el-pagination .btn-next),
-.pagination :deep(.el-pager li) {
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: 0;
-  font: 500 12px/1 var(--font-mono);
-}
-
-.pagination :deep(.el-pager li.is-active) {
-  background: var(--color-text);
-  color: var(--color-text-inverse);
-}
-
-/* ── Responsive ── */
-@media (max-width: 1024px) {
-  .notification-row {
-    grid-template-columns: 50px 28px 1fr 100px 28px;
-  }
-}
-
+/* Responsive */
 @media (max-width: 768px) {
   .notification-row {
-    grid-template-columns: 1fr 32px;
+    grid-template-columns: 32px 1fr 16px;
     grid-template-rows: auto auto;
+    gap: 8px;
+    padding: 12px 16px;
   }
-  .row-cell-type,
-  .row-cell-icon,
-  .row-cell-time {
-    display: none;
+  .row-time {
+    grid-column: 2 / 3;
+    text-align: left;
   }
-  .row-cell-content {
-    border-right: none;
-    border-bottom: 1px solid var(--color-border-light);
-  }
-  .row-cell-status {
-    border-left: 1px solid var(--color-border-light);
+  .row-status {
+    grid-row: 1 / 3;
   }
 }
 </style>

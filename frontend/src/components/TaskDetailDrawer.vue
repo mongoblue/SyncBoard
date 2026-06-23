@@ -7,16 +7,16 @@
     class="task-drawer"
   >
     <div v-if="task" class="task-detail">
-      <!-- 自定义头部 -->
+      <!-- 头部 -->
       <div class="detail-header">
         <div class="header-top">
-          <span class="column-badge">
-            <span class="badge-dot"></span>
+          <span class="column-pill">
+            <span class="pill-dot"></span>
             {{ columnTitle }}
           </span>
           <div class="header-actions">
             <el-button v-if="!isEditing" type="primary" size="small" @click="startEdit">
-              <el-icon><Edit /></el-icon>
+              <el-icon style="margin-right: 4px"><Edit /></el-icon>
               编辑
             </el-button>
             <template v-else>
@@ -32,50 +32,49 @@
 
       <!-- 元数据区域 —— 查看模式 -->
       <div v-if="!isEditing" class="meta-panel">
-        <div class="meta-row">
-          <div class="meta-item">
-            <span class="meta-label">负责人</span>
-            <span class="meta-value" :class="{ unassigned: !task.assignee_details }">
-              <el-icon :size="14"><User /></el-icon>
-              {{ task.assignee_details?.username || '未分配' }}
-            </span>
-          </div>
-          <div class="meta-item" v-if="task.created_at">
-            <span class="meta-label">创建时间</span>
-            <span class="meta-value meta-date">
-              <el-icon :size="14"><Calendar /></el-icon>
-              {{ formatDate(task.created_at) }}
-            </span>
-          </div>
+        <div class="meta-line">
+          <span class="meta-label">负责人</span>
+          <span class="meta-value" :class="{ unassigned: !task.assignee_details }">
+            <el-icon :size="14"><User /></el-icon>
+            {{ task.assignee_details?.username || '未分配' }}
+          </span>
         </div>
-        <div class="meta-row" v-if="task.tags_details?.length">
-          <div class="meta-item full-width">
-            <span class="meta-label">标签</span>
-            <div class="tags-row">
-              <span
-                v-for="tag in task.tags_details"
-                :key="tag.id"
-                class="tag-chip"
-                :style="{ background: tag.color + '18', color: tag.color, borderColor: tag.color + '40' }"
-              >
-                {{ tag.name }}
-              </span>
-            </div>
+        <div class="meta-line" v-if="task.created_at">
+          <span class="meta-label">创建时间</span>
+          <span class="meta-value">
+            <el-icon :size="14"><Calendar /></el-icon>
+            {{ formatDate(task.created_at) }}
+          </span>
+        </div>
+        <div class="meta-line" v-if="task.tags_details?.length">
+          <span class="meta-label">标签</span>
+          <div class="tags-row">
+            <span
+              v-for="tag in task.tags_details"
+              :key="tag.id"
+              class="tag-chip"
+              :style="{ background: tag.color + '14', color: tag.color, borderColor: tag.color + '40' }"
+            >
+              {{ tag.name }}
+            </span>
           </div>
         </div>
       </div>
 
       <!-- 编辑模式 -->
       <el-form v-else :model="editForm" label-position="top" size="default" class="edit-form">
-        <el-form-item label="标题">
+        <div class="form-field">
+          <label class="form-label">标题</label>
           <el-input v-model="editForm.title" />
-        </el-form-item>
-        <el-form-item label="负责人">
+        </div>
+        <div class="form-field">
+          <label class="form-label">负责人</label>
           <el-select v-model="editForm.assignee" placeholder="选择负责人" clearable style="width:100%">
             <el-option v-for="u in boardStore.Users" :key="u.id" :label="u.username" :value="u.id" />
           </el-select>
-        </el-form-item>
-        <el-form-item label="标签">
+        </div>
+        <div class="form-field">
+          <label class="form-label">标签</label>
           <el-select v-model="editForm.tags" multiple placeholder="选择标签" collapse-tags style="width:100%">
             <el-option
               v-for="tag in boardStore.currentProject?.available_tags || []"
@@ -83,13 +82,14 @@
               :label="tag.name"
               :value="tag.id"
             >
-              <span :style="{ color: tag.color }">{{ tag.name }}</span>
+              <span :style="{ color: tag.color }">● {{ tag.name }}</span>
             </el-option>
           </el-select>
-        </el-form-item>
-        <el-form-item label="内容">
+        </div>
+        <div class="form-field">
+          <label class="form-label">内容</label>
           <el-input v-model="editForm.content" type="textarea" :rows="5" />
-        </el-form-item>
+        </div>
       </el-form>
 
       <!-- 任务描述 -->
@@ -103,10 +103,10 @@
       <!-- 关联测试 -->
       <div class="section">
         <div class="section-header">
-          <h4>关联测试</h4>
+          <h3 class="section-title">关联测试</h3>
           <span class="section-count">{{ linkedTests.length }}</span>
           <el-button type="primary" link size="small" @click="openLinkDialog">
-            <el-icon><Plus /></el-icon>
+            <el-icon style="margin-right: 4px"><Plus /></el-icon>
             关联
           </el-button>
         </div>
@@ -125,7 +125,7 @@
       <!-- 附件 -->
       <div class="section">
         <div class="section-header">
-          <h4>附件</h4>
+          <h3 class="section-title">附件</h3>
           <span class="section-count">{{ attachments.length }}</span>
         </div>
         <div v-if="attachments.length" class="attachment-list">
@@ -147,8 +147,8 @@
           accept="*"
           style="margin-top:10px"
         >
-          <el-button size="small" text>
-            <el-icon><Upload /></el-icon>
+          <el-button size="small">
+            <el-icon style="margin-right: 4px"><Upload /></el-icon>
             上传附件
           </el-button>
         </el-upload>
@@ -157,7 +157,7 @@
       <!-- 变更记录 -->
       <div class="section">
         <div class="section-header">
-          <h4>变更记录</h4>
+          <h3 class="section-title">变更记录</h3>
           <span class="section-count">{{ activities.length }}</span>
         </div>
         <div v-if="activities.length" class="activity-list">
@@ -175,7 +175,7 @@
       <!-- 评论区 -->
       <div class="section">
         <div class="section-header">
-          <h4>评论</h4>
+          <h3 class="section-title">评论</h3>
           <span class="section-count">{{ comments.length }}</span>
         </div>
         <div v-if="comments.length" class="comment-list">
@@ -512,185 +512,124 @@ watch(() => props.visible, (v) => {
   padding: 0;
 }
 
-/* ── Custom header ── */
+/* ── Header ── */
 .detail-header {
-  padding: 0 0 20px;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  margin-bottom: 20px;
 }
 
 .header-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
-.column-badge {
+.column-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font: 500 10px/1 var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--color-text-secondary);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding: 4px 0;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
 }
 
-.badge-dot {
+.pill-dot {
   width: 6px;
   height: 6px;
-  background: var(--color-accent);
+  border-radius: 50%;
+  background: var(--color-primary);
 }
 
 .header-actions {
   display: flex;
-  gap: 4px;
-}
-
-.header-actions :deep(.el-button) {
-  border-radius: 0;
-  height: 28px;
-  padding: 0 12px;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.header-actions :deep(.el-button--primary) {
-  background: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-text-inverse);
-}
-
-.header-actions :deep(.el-button--primary:hover) {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
+  gap: 6px;
 }
 
 .task-title {
-  font: 600 22px/1.25 var(--font-heading);
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
   color: var(--color-text);
-  letter-spacing: -0.01em;
   margin: 0;
 }
 
 /* ── Meta panel ── */
 .meta-panel {
-  margin-bottom: 24px;
-}
-
-.meta-row {
-  display: flex;
-  gap: 32px;
-  padding: 10px 0;
-}
-
-.meta-row + .meta-row {
-  border-top: 1px solid var(--color-border-light);
-}
-
-.meta-item {
+  margin-bottom: 20px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
-.meta-item.full-width {
-  flex: 1;
+.meta-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
 }
 
 .meta-label {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  min-width: 72px;
+  flex-shrink: 0;
 }
 
 .meta-value {
-  font: 500 13px/1.4 var(--font-heading);
-  color: var(--color-text);
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-size: 13px;
+  color: var(--color-text);
 }
 
 .meta-value.unassigned {
   color: var(--color-text-tertiary);
 }
 
-.meta-date {
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-}
-
 .tags-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-top: 2px;
 }
 
 .tag-chip {
   display: inline-block;
   padding: 2px 8px;
-  font: 500 10px/1.4 var(--font-mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
   border: 1px solid;
 }
 
-/* ── Edit form — Swiss bottom-line inputs ── */
+/* ── Edit form ── */
 .edit-form {
-  margin-bottom: 24px;
-}
-
-.edit-form :deep(.el-form-item) {
   margin-bottom: 20px;
-}
-
-.edit-form :deep(.el-form-item__label) {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  padding-bottom: 8px;
-}
-
-.edit-form :deep(.el-input__wrapper),
-.edit-form :deep(.el-textarea__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 1px 0 0 var(--color-border);
-  background: transparent;
-  padding-left: 0;
-  padding-right: 0;
-  transition: box-shadow var(--transition-fast);
-}
-
-.edit-form :deep(.el-input__wrapper:hover),
-.edit-form :deep(.el-textarea__wrapper:hover) {
-  box-shadow: 0 1px 0 0 var(--color-text-tertiary);
-}
-
-.edit-form :deep(.el-input__wrapper.is-focus),
-.edit-form :deep(.el-textarea__wrapper.is-focus) {
-  box-shadow: 0 1px 0 0 var(--color-text);
-}
-
-.edit-form :deep(.el-input__inner),
-.edit-form :deep(.el-textarea__inner) {
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── Content body ── */
 .content-body {
-  padding: 16px 0;
-  font: 400 14px/1.7 var(--font-body);
+  padding: 12px 16px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.6;
   color: var(--color-text);
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+.content-body p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .content-body.empty {
@@ -700,9 +639,9 @@ watch(() => props.visible, (v) => {
 
 /* ── Section (Related / Comments / Activities / Attachments) ── */
 .section {
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid var(--color-border);
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-light);
 }
 
 .section:first-of-type {
@@ -718,37 +657,34 @@ watch(() => props.visible, (v) => {
   margin-bottom: 12px;
 }
 
-.section-header h4 {
+.section-title {
   margin: 0;
-  font: 600 11px/1 var(--font-heading);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 .section-count {
-  font: 500 10px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-  padding: 3px 6px;
-  border: 1px solid var(--color-border);
-  min-width: 22px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  min-width: 24px;
   text-align: center;
 }
 
 .section-header .el-button {
   margin-left: auto;
-  font: 500 10px/1 var(--font-heading);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .empty-hint {
-  font: 400 12px/1.5 var(--font-body);
+  font-size: 13px;
   color: var(--color-text-tertiary);
   padding: 12px 0;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
 
 /* ── Linked tests ── */
@@ -756,64 +692,134 @@ watch(() => props.visible, (v) => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 8px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--color-border-light);
 }
 .linked-row:last-child { border-bottom: none; }
 
 .linked-type {
-  font: 600 9px/1 var(--font-mono);
-  padding: 3px 6px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
 }
-.linked-type.type-api   { background: transparent; color: var(--color-primary); border: 1px solid var(--color-primary); }
-.linked-type.type-ui    { background: transparent; color: var(--color-accent); border: 1px solid var(--color-accent); }
-.linked-type.type-perf  { background: transparent; color: var(--color-warning); border: 1px solid var(--color-warning); }
+.linked-type.type-api  { color: var(--color-primary); border-color: var(--color-primary); background: var(--color-primary-bg); }
+.linked-type.type-ui   { color: var(--color-info); border-color: var(--color-info); background: var(--color-info-bg); }
+.linked-type.type-perf { color: var(--color-warning); border-color: var(--color-warning); background: var(--color-warning-bg); }
 
-.linked-name { flex: 1; font-size: 13px; justify-content: flex-start; }
+.linked-name { flex: 1; font-size: 13px; justify-content: flex-start; color: var(--color-text); }
+.linked-name:hover { color: var(--color-primary); }
 
 /* ── Attachments ── */
 .attachment-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 0;
+  padding: 8px 0;
   font-size: 13px;
   border-bottom: 1px solid var(--color-border-light);
 }
 .attachment-row:last-child { border-bottom: none; }
-.att-name { color: var(--color-text); text-decoration: none; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-bottom: 1px solid var(--color-border-light); padding-bottom: 2px; transition: border-color var(--transition-fast); }
-.att-name:hover { color: var(--color-primary); border-bottom-color: var(--color-primary); }
-.att-size { color: var(--color-text-tertiary); font: 500 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.att-name {
+  color: var(--color-text);
+  text-decoration: none;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+.att-name:hover { color: var(--color-primary); text-decoration: underline; }
+.att-size {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
 
 /* ── Activity log ── */
-.activity-list { max-height: 240px; overflow-y: auto; font-size: 12px; }
-.activity-item { padding: 8px 0; border-bottom: 1px solid var(--color-border-light); line-height: 1.6; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.activity-list {
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+.activity-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-light);
+  line-height: 1.6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
 .activity-item:last-child { border-bottom: none; }
 .activity-user { color: var(--color-text); font-weight: 600; font-size: 12px; }
 .activity-action { color: var(--color-text-secondary); }
-.activity-field { color: var(--color-text); font-weight: 500; font: 500 11px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; }
-.activity-change { color: var(--color-accent); font: 500 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-.activity-time { margin-left: auto; color: var(--color-text-tertiary); font: 500 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.activity-field {
+  color: var(--color-text);
+  font-weight: 500;
+  font-size: 12px;
+}
+.activity-change {
+  color: var(--color-primary);
+  font-size: 12px;
+}
+.activity-time {
+  margin-left: auto;
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
 
 /* ── Comments ── */
 .comment-list { max-height: 360px; overflow-y: auto; }
-.comment-item { padding: 14px 0; border-bottom: 1px solid var(--color-border-light); }
+.comment-item {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-border-light);
+}
 .comment-item:last-child { border-bottom: none; }
-.comment-header { margin-bottom: 6px; display: flex; justify-content: space-between; align-items: baseline; }
-.comment-header strong { font: 600 12px/1 var(--font-heading); color: var(--color-text); text-transform: uppercase; letter-spacing: 0.04em; }
-.comment-time { color: var(--color-text-tertiary); font: 500 10px/1 var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
-.comment-content { font: 400 14px/1.6 var(--font-body); color: var(--color-text); }
-.comment-replies { margin: 10px 0 0 16px; padding: 8px 12px; background: transparent; font-size: 13px; border-left: 2px solid var(--color-border); }
+.comment-header {
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.comment-header strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.comment-time {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+.comment-content {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text);
+  white-space: pre-wrap;
+}
+.comment-replies {
+  margin: 10px 0 0 16px;
+  padding: 8px 12px;
+  background: var(--color-surface-sunken);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  border-left: 2px solid var(--color-border);
+}
 .reply-item { padding: 4px 0; color: var(--color-text-secondary); }
-.reply-item strong { color: var(--color-text); margin-right: 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
-.comment-input { display: flex; gap: 8px; margin-top: 16px; align-items: flex-start; padding-top: 16px; border-top: 1px solid var(--color-border); }
+.reply-item strong {
+  color: var(--color-text);
+  margin-right: 6px;
+  font-size: 12px;
+}
+
+.comment-input {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: flex-start;
+}
 .comment-input :deep(.el-textarea) { flex: 1; }
-.comment-input :deep(.el-textarea__wrapper) { border-radius: 0; box-shadow: 0 1px 0 0 var(--color-border); background: transparent; }
-.comment-input :deep(.el-textarea__wrapper.is-focus) { box-shadow: 0 1px 0 0 var(--color-text); }
-.comment-input :deep(.el-button) { height: auto; padding: 8px 16px; border-radius: 0; background: var(--color-text); border-color: var(--color-text); color: var(--color-text-inverse); font: 500 11px/1 var(--font-heading); letter-spacing: 0.08em; text-transform: uppercase; }
-.comment-input :deep(.el-button:hover) { background: var(--color-primary); border-color: var(--color-primary); }
 </style>

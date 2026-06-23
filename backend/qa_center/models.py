@@ -1,9 +1,22 @@
 """
-QA Center models.
+QA Center 模型 —— 测试中心全部 21 个模型。
 
-Reverse-engineered from migrations 0001-0014. Do not hand-edit field
-options; any schema change should be made as a new migration and
-reflected back here so the two stay in sync.
+按业务分组：
+  接口测试（旧）：ApiTestCase, ApiTestResult
+  接口测试（新）：ApiAutoTestSuite, ApiAutoTestCase, ApiAutoTestAssertion, ApiAutoTestExtractor,
+                    ApiAutoTestResult, ApiAutoTestCaseResult
+  UI 测试：       UiTestCase, TestScreenshot
+  性能测试：      PerformanceTestCase, PerformanceTestResult
+  编排与执行：    TestRunPlan, TestRun, TestRunCaseResult, TestEnvironment, TestGlobalVar
+  DevOps：        CiCdConfig, PipelineRun, TestTask
+
+新旧两套并存的注意点：
+  - ApiTestCase（旧）外键到 Project 和 Task（ManyToMany related_tasks）
+  - ApiAutoTestCase（新）外键到 ApiAutoTestSuite，无直接 Project FK（通过 suite 间接）
+  - TestRun 和 TestRunCaseResult（批次执行记录）关联的是旧 ApiTestCase
+  - ApiAutoTestResult（新版执行记录）关联的是新 ApiAutoTestCase
+  - 两套共用 TestEnvironment 和 TestGlobalVar
+
 """
 from django.conf import settings
 from django.db import models

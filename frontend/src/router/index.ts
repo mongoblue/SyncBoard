@@ -1,3 +1,21 @@
+/**
+ * 路由配置 + 权限守卫。
+ *
+ * 路由结构：
+ *  /login                 独立页
+ *  /                      重定向 → /projects
+ *  /projects              项目列表
+ *  /projects/:id/board    看板（默认首页）
+ *  /projects/:id/qa/*     QA 测试中心（17 个子页面）
+ *  /projects/:id/bugs/*   Bug 跟踪（3 个子页面）
+ *  /projects/:id/*        其他功能页
+ *
+ * beforeEach 守卫：
+ *  1. 检查 authStore.user，不存在则调 checkAuth()
+ *  2. 未登录 → /login（requiresAuth 路由）
+ *  3. 已登录访问 /login → /projects
+ *  4. meta.permission 检查 → 无权则重定向到看板
+ */
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/Auth'
 

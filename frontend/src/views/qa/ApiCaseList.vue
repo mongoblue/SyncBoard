@@ -1,12 +1,15 @@
 <template>
   <div class="api-case-list">
-    <div class="page-header">
-      <h2>API 测试用例</h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">API 测试用例</h1>
+        <p class="page-subtitle">维护接口测试用例与断言规则</p>
+      </div>
       <el-button type="primary" @click="handleCreate">
-        <el-icon><Plus /></el-icon>
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         新建测试用例
       </el-button>
-    </div>
+    </header>
 
     <!-- 筛选栏 -->
     <div class="filter-bar">
@@ -22,7 +25,7 @@
         v-model="searchKeyword"
         placeholder="搜索测试用例"
         clearable
-        style="width: 300px; margin-left: 10px"
+        style="width: 300px"
         @keyup.enter="loadCases"
       >
         <template #append>
@@ -220,29 +223,17 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.api-case-list {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-header h2 {
-  margin: 0;
-}
+.api-case-list { padding: 0; }
 
 .filter-bar {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
+  gap: 8px;
 }
 
 .pagination {
-  margin-top: 20px;
+  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
 }

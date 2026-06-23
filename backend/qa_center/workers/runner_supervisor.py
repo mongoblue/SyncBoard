@@ -1,5 +1,11 @@
 """
 Runner Supervisor — 在 Django 进程中启动 runner_worker 子进程并流式读事件。
+
+全局注册表 _RUNNERS（task_id → subprocess.Popen），用于 abort 端点终结子进程。
+_EVENTS 注册表用于前端 WS 连上时回放历史事件（保留 60 秒）。
+
+开发者注意：shlex.join 在 Python 3.8+ 可用；3.11 之后 shlex.quote 行为有变。
+协议定义见 protocols.py。
 """
 import subprocess
 import sys
@@ -8,6 +14,81 @@ import json
 import threading
 import logging
 import uuid as _uuid
+from typing import Optional
+
+# task_id → subprocess.Popen 的注册表，用于 abort 端点
+_RUNNERS: dict[str, "subprocess.Popen"] = {}
+_RUNNERS_LOCK = threading.Lock()
+
+# task_id → 已发出事件列表，用于前端 WS 连上时回放历史
+_EVENTS: dict[str, list[dict]] = {}
+_EVENTS_LOCK = threading.Lock()
+
+# 历史事件保留时间（秒）：超过这个时间没被读取就清理
+_EVENTS_TTL = 60.0
+
+
+def register_runner(task_id: str, proc: "subprocess.Popen") -> None:
+    with _RUNNERS_LOCK:
+        _RUNNERS[task_id] = proc
+
+
+def unregister_runner(task_id: str) -> None:
+    with _RUNNERS_LOCK:
+        _RUNNERS.pop(task_id, None)
+
+
+def abort_runner(task_id: str) -> bool:
+    """终止指定 task_id 的 worker 子进程。返回是否成功找到并发送了 terminate。"""
+    with _RUNNERS_LOCK:
+        proc: Optional[subprocess.Popen] = _RUNNERS.get(task_id)
+    if proc is None:
+        return False
+    try:
+        if proc.poll() is None:
+            proc.terminate()
+        return True
+    except Exception:
+        logger.exception("abort_runner 失败: %s", task_id)
+        return False
+
+
+def is_runner_alive(task_id: str) -> bool:
+    with _RUNNERS_LOCK:
+        proc: Optional[subprocess.Popen] = _RUNNERS.get(task_id)
+    if proc is None:
+        return False
+    return proc.poll() is None
+
+
+def record_event(task_id: str, event: dict) -> None:
+    """记录一条事件到缓存，供前端 WS 连上后回放。"""
+    with _EVENTS_LOCK:
+        bucket = _EVENTS.setdefault(task_id, [])
+        bucket.append(event)
+
+
+def get_events(task_id: str) -> list[dict]:
+    """读取并清空 task_id 的事件缓存。一次性消费，避免重复回放。"""
+    with _EVENTS_LOCK:
+        return _EVENTS.pop(task_id, [])
+
+
+def peek_events(task_id: str) -> list[dict]:
+    """只读不消费。用于调试/扩展。"""
+    with _EVENTS_LOCK:
+        return list(_EVENTS.get(task_id, []))
+
+
+def cleanup_expired_events(now: float | None = None) -> int:
+    """清理超过 TTL 的历史事件缓存。返回清理条数。"""
+    import time as _time
+    now = now if now is not None else _time.time()
+    with _EVENTS_LOCK:
+        expired = [tid for tid, evs in _EVENTS.items() if not evs or (now - evs[-1].get("_ts", now)) > _EVENTS_TTL]
+        for tid in expired:
+            _EVENTS.pop(tid, None)
+        return len(expired)
 from typing import Callable
 
 from django.conf import settings
@@ -22,11 +103,13 @@ def _worker_entry() -> list:
 
 def execute_ui_case(case_data: dict,
                     on_event: Callable[[dict], None],
-                    timeout_seconds: int = 300) -> dict:
+                    timeout_seconds: int = 300,
+                    task_id: str | None = None) -> dict:
     """
     阻塞执行单个 UI 用例。
     case_data: {"case_id": int|None, "url": "...", "steps": [...]}
     on_event: 每收到一行事件就调用一次。
+    task_id: 可选；如传入则使用调用方提供的 id（用于 abort 端点路由），否则内部生成。
     返回最终 finished 事件 dict。
     """
     backend_dir = os.path.abspath(os.path.join(
@@ -43,7 +126,10 @@ def execute_ui_case(case_data: dict,
         bufsize=1,
     )
 
-    task_id = _uuid.uuid4().hex
+    if task_id is None:
+        task_id = _uuid.uuid4().hex
+
+    register_runner(task_id, proc)
 
     # DEBUG 模式：把所有事件额外落盘到 .playwright-temp/io_<task_id>.log
     DEBUG = os.environ.get("UI_TEST_DEBUG", "").lower() in ("1", "true", "yes")
@@ -55,115 +141,118 @@ def execute_ui_case(case_data: dict,
         io_log = open(log_path, "w", encoding="utf-8")
         logger.info("UI_TEST_DEBUG 开启，事件流写入 %s", log_path)
 
-    try:
-        on_event({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
-    except Exception:
-        logger.exception("emit supervisor_meta 失败")
-
     final_result = {"type": "finished", "success": False,
                     "summary": {"passed": 0, "failed": 0, "total": 0}}
 
     try:
-        proc.stdin.write(json.dumps(case_data, ensure_ascii=False, default=str) + "\n")
-        proc.stdin.flush()
-        proc.stdin.close()
-    except Exception:
-        logger.exception("写入 worker stdin 失败")
-
-    stderr_buf: list = []
-
-    def _drain_stderr():
-        for line in proc.stderr:
-            stderr_buf.append(line)
-            logger.info("[worker:%s] %s", proc.pid, line.rstrip())
-
-    t = threading.Thread(target=_drain_stderr, daemon=True)
-    t.start()
-
-    timed_out = {"flag": False}
-
-    def _on_timeout():
-        timed_out["flag"] = True
-        logger.warning("worker 运行超时 (%ss)，触发 terminate", timeout_seconds)
         try:
-            proc.terminate()
+            on_event({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
         except Exception:
-            logger.exception("terminate worker 失败")
+            logger.exception("emit supervisor_meta 失败")
 
-    watchdog = threading.Timer(timeout_seconds, _on_timeout)
-    watchdog.daemon = True
-    watchdog.start()
-
-    try:
         try:
-            for line in proc.stdout:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    logger.warning("非 JSON 输出: %s", line)
-                    continue
-                try:
-                    on_event(event)
-                except Exception:
-                    logger.exception("on_event 回调异常")
-                if io_log is not None:
-                    try:
-                        io_log.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
-                        io_log.flush()
-                    except Exception:
-                        logger.exception("写入 io_log 失败")
-                if event.get("type") == "finished":
-                    final_result = event
+            proc.stdin.write(json.dumps(case_data, ensure_ascii=False, default=str) + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
         except Exception:
-            logger.exception("读 worker stdout 异常")
-    finally:
-        watchdog.cancel()
-        if io_log is not None:
+            logger.exception("写入 worker stdin 失败")
+
+        stderr_buf: list = []
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                stderr_buf.append(line)
+                logger.info("[worker:%s] %s", proc.pid, line.rstrip())
+
+        t = threading.Thread(target=_drain_stderr, daemon=True)
+        t.start()
+
+        timed_out = {"flag": False}
+
+        def _on_timeout():
+            timed_out["flag"] = True
+            logger.warning("worker 运行超时 (%ss)，触发 terminate", timeout_seconds)
             try:
-                io_log.close()
+                proc.terminate()
             except Exception:
-                pass
+                logger.exception("terminate worker 失败")
 
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
+        watchdog = threading.Timer(timeout_seconds, _on_timeout)
+        watchdog.daemon = True
+        watchdog.start()
+
         try:
-            proc.terminate()
-        except Exception:
-            logger.exception("terminate worker 失败")
+            try:
+                for line in proc.stdout:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning("非 JSON 输出: %s", line)
+                        continue
+                    try:
+                        on_event(event)
+                    except Exception:
+                        logger.exception("on_event 回调异常")
+                    if io_log is not None:
+                        try:
+                            io_log.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+                            io_log.flush()
+                        except Exception:
+                            logger.exception("写入 io_log 失败")
+                    if event.get("type") == "finished":
+                        final_result = event
+            except Exception:
+                logger.exception("读 worker stdout 异常")
+        finally:
+            watchdog.cancel()
+            if io_log is not None:
+                try:
+                    io_log.close()
+                except Exception:
+                    pass
+
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             try:
-                proc.kill()
+                proc.terminate()
             except Exception:
-                logger.exception("kill worker 失败")
+                logger.exception("terminate worker 失败")
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                logger.error("worker 在 kill 后仍未退出")
+                try:
+                    proc.kill()
+                except Exception:
+                    logger.exception("kill worker 失败")
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    logger.error("worker 在 kill 后仍未退出")
 
-    t.join(timeout=5)
+        t.join(timeout=5)
 
-    if timed_out["flag"]:
-        on_event({
-            "type": "error",
-            "code": "STEP_TIMEOUT",
-            "message": f"运行超时 ({timeout_seconds}s)，已强制终止 worker",
-        })
+        if timed_out["flag"]:
+            on_event({
+                "type": "error",
+                "code": "STEP_TIMEOUT",
+                "message": f"运行超时 ({timeout_seconds}s)，已强制终止 worker",
+            })
 
-    if (proc.returncode not in (0, None)
-            and final_result.get("type") != "finished"
-            and not timed_out["flag"]):
-        crash_msg = "".join(stderr_buf[-20:])
-        on_event({
-            "type": "error",
-            "code": "WORKER_CRASHED",
-            "message": f"worker 退出码 {proc.returncode}",
-            "traceback": crash_msg,
-        })
+        if (proc.returncode not in (0, None)
+                and final_result.get("type") != "finished"
+                and not timed_out["flag"]):
+            crash_msg = "".join(stderr_buf[-20:])
+            on_event({
+                "type": "error",
+                "code": "WORKER_CRASHED",
+                "message": f"worker 退出码 {proc.returncode}",
+                "traceback": crash_msg,
+            })
+    finally:
+        unregister_runner(task_id)
 
     return final_result

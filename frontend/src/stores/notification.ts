@@ -1,3 +1,11 @@
+/**
+ * 全局通知 Store。
+ *
+ * 连接 /ws/global/ WebSocket，接收 global_notification 类型消息。
+ * 通过 ElNotification 展示桌面通知，同时维护未读计数和通知列表。
+ *
+ * 重连策略：非主动关闭时（authStore.user 仍在），5 秒后自动重连。
+ */
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { ElNotification } from "element-plus";

@@ -1,20 +1,30 @@
+<!--
+看板主视图 —— 项目内默认首页。
+
+功能：
+  - 多列 Kanban 布局，任务卡片在列内/跨列拖拽
+  - 搜索 + 负责人/标签筛选
+  - 批量选择/删除/移动
+  - 点击任务卡片打开 TaskDetailDrawer
+  - 实时同步：拖拽/增删通过 boardStore → REST API → WebSocket 广播
+
+路由：/projects/:projectId/board
+-->
 <template>
   <div class="board-wrapper">
     <!-- 工具栏 -->
-    <div class="toolbar">
+    <div class="board-toolbar">
       <div class="toolbar-left">
-        <div class="search-box">
-          <el-input
-            v-model="searchQuery"
-            placeholder="搜索任务..."
-            clearable
-            class="search-input"
-          >
-            <template #prefix>
-              <el-icon :size="14"><Search /></el-icon>
-            </template>
-          </el-input>
-        </div>
+        <el-input
+          v-model="searchQuery"
+          placeholder="搜索任务..."
+          clearable
+          class="search-input"
+        >
+          <template #prefix>
+            <el-icon :size="14"><Search /></el-icon>
+          </template>
+        </el-input>
 
         <el-select
           v-model="filterAssignee"
@@ -44,40 +54,44 @@
             :label="tag.name"
             :value="tag.id"
           >
-            <span :style="{ color: tag.color, fontWeight: 600 }">● {{ tag.name }}</span>
+            <span class="tag-option">
+              <span class="color-dot" :style="{ background: tag.color }"></span>
+              {{ tag.name }}
+            </span>
           </el-option>
         </el-select>
 
-        <button
-          v-if="hasActiveFilters"
-          class="text-btn"
-          @click="clearFilters"
-        >
-          <el-icon :size="12"><CircleClose /></el-icon>
+        <el-button v-if="hasActiveFilters" link @click="clearFilters">
+          <el-icon style="margin-right: 4px"><CircleClose /></el-icon>
           清除筛选
-        </button>
+        </el-button>
       </div>
 
       <div class="toolbar-right">
-        <div v-if="isBatchMode || selectedTasks.length > 0" class="batch-toolbar">
-          <span v-if="selectedTasks.length > 0" class="batch-count">{{ selectedTasks.length }} 已选</span>
-          <button v-if="selectedTasks.length > 0" class="ghost-btn ghost-btn-danger" @click="handleBatchDelete">
-            <el-icon :size="12"><Delete /></el-icon>
+        <template v-if="isBatchMode || selectedTasks.length > 0">
+          <span v-if="selectedTasks.length > 0" class="batch-count">已选 {{ selectedTasks.length }}</span>
+          <el-button
+            v-if="selectedTasks.length > 0"
+            size="small"
+            type="danger"
+            plain
+            @click="handleBatchDelete"
+          >
+            <el-icon style="margin-right: 4px"><Delete /></el-icon>
             删除
-          </button>
-          <button class="ghost-btn" @click="toggleBatchMode">
-            <el-icon :size="12"><Check /></el-icon>
-            {{ isBatchMode ? '退出' : '选择' }}
-          </button>
-        </div>
-        <button v-else class="ghost-btn" @click="toggleBatchMode">
-          <el-icon :size="12"><Check /></el-icon>
+          </el-button>
+          <el-button size="small" @click="toggleBatchMode">
+            {{ isBatchMode ? '退出选择' : '选择' }}
+          </el-button>
+        </template>
+        <el-button v-else size="small" @click="toggleBatchMode">
+          <el-icon style="margin-right: 4px"><Check /></el-icon>
           批量选择
-        </button>
+        </el-button>
 
         <div class="status-indicator">
           <span class="status-dot" :class="{ online: boardStore.isConnected }"></span>
-          <span class="status-text">{{ boardStore.isConnected ? '已连接' : '断开' }}</span>
+          <span class="status-text">{{ boardStore.isConnected ? '已连接' : '已断开' }}</span>
         </div>
       </div>
     </div>
@@ -93,25 +107,23 @@
         @end="onColumnDragEnd"
         class="columns-wrapper"
       >
-        <template #item="{ element: col, index }">
-          <div class="board-column" :class="'col-index-' + (index % 4)">
-            <div class="column-accent-bar"></div>
+        <template #item="{ element: col }">
+          <div class="board-column">
             <div class="column-header">
               <div class="header-text">
-                <span class="col-folio">N° {{ String(index + 1).padStart(2, '0') }}</span>
                 <h3 class="col-title">{{ col.title }}</h3>
+                <span class="col-count">{{ getVisibleTasks(col).length }}</span>
               </div>
               <div class="header-right">
-                <span class="col-count">{{ String(getVisibleTasks(col).length).padStart(2, '0') }}</span>
-                <button class="col-icon-btn" @click="handleAddTask(col.id)" title="新增任务">
+                <el-button link size="small" @click="handleAddTask(col.id)" title="新增任务">
                   <el-icon :size="16"><Plus /></el-icon>
-                </button>
-                <button class="col-icon-btn" @click="openRenameColumnDialog(col)" title="重命名">
+                </el-button>
+                <el-button link size="small" @click="openRenameColumnDialog(col)" title="重命名">
                   <el-icon :size="14"><Edit /></el-icon>
-                </button>
-                <button class="col-icon-btn col-icon-btn-danger" @click="handleDeleteColumn(col.id)" title="删除列">
+                </el-button>
+                <el-button link size="small" type="danger" @click="handleDeleteColumn(col.id)" title="删除列">
                   <el-icon :size="14"><Delete /></el-icon>
-                </button>
+                </el-button>
               </div>
             </div>
 
@@ -132,15 +144,6 @@
                   :class="{ 'selected': selectedTasks.includes(element.id) }"
                   @click="openTaskDetail(element)"
                 >
-                  <div class="card-meta">
-                    <span class="task-folio">T-{{ String(element.id).slice(-3).padStart(3, '0') }}</span>
-                    <div v-if="isBatchMode || selectedTasks.includes(element.id)" class="checkbox-wrap">
-                      <el-checkbox v-model="selectedTasks" :label="element.id" @click.stop size="large" />
-                    </div>
-                    <button class="task-delete-btn" @click.stop="handleDeleteTask(element.id)" title="删除任务">
-                      <el-icon :size="14"><Delete /></el-icon>
-                    </button>
-                  </div>
                   <div class="task-title" v-html="highlightText(element.title, searchQuery)"></div>
                   <div v-if="element.content" class="task-content" v-html="highlightText(element.content, searchQuery)"></div>
                   <div class="tags-container" v-if="element.tags_details?.length">
@@ -148,12 +151,33 @@
                       v-for="tag in element.tags_details"
                       :key="tag.id"
                       class="task-tag"
-                      :style="{ background: tag.color + '14', color: tag.color }"
+                      :style="{ background: tag.color + '14', color: tag.color, borderColor: tag.color + '40' }"
                     >{{ tag.name }}</span>
                   </div>
-                  <div class="card-footer" v-if="element.assignee_details">
-                    <span class="assignee-avatar">{{ element.assignee_details.username?.charAt(0).toUpperCase() }}</span>
-                    <span class="assignee-name">{{ element.assignee_details.username }}</span>
+                  <div class="card-footer">
+                    <div v-if="element.assignee_details" class="assignee">
+                      <span class="assignee-avatar">{{ element.assignee_details.username?.charAt(0).toUpperCase() }}</span>
+                      <span class="assignee-name">{{ element.assignee_details.username }}</span>
+                    </div>
+                    <div v-else class="assignee-placeholder"></div>
+                    <div class="card-actions">
+                      <el-checkbox
+                        v-if="isBatchMode || selectedTasks.includes(element.id)"
+                        v-model="selectedTasks"
+                        :value="element.id"
+                        @click.stop
+                      />
+                      <el-button
+                        link
+                        size="small"
+                        type="danger"
+                        class="task-delete-btn"
+                        @click.stop="handleDeleteTask(element.id)"
+                        title="删除任务"
+                      >
+                        <el-icon :size="14"><Delete /></el-icon>
+                      </el-button>
+                    </div>
                   </div>
                 </div>
               </template>
@@ -164,27 +188,21 @@
 
       <!-- 添加列按钮 -->
       <div class="add-column-card" @click="addColumnDialogVisible = true">
-        <span class="add-folio">N° +</span>
+        <el-icon :size="20"><Plus /></el-icon>
         <span class="add-label">添加新列</span>
       </div>
     </div>
 
     <!-- 任务详情弹窗 -->
-    <el-dialog v-model="dialogVisible" width="50%" class="app-dialog" :show-close="false">
-      <template #header>
-        <div class="dialog-header">
-          <span class="dialog-folio">EDIT</span>
-          <span class="dialog-title">任务详情</span>
-        </div>
-      </template>
+    <el-dialog v-model="dialogVisible" title="任务详情" width="50%">
       <el-form :model="editingTask" label-position="top">
-        <el-form-item required>
-          <template #label><span class="form-label">标题</span></template>
-          <el-input v-model="editingTask.title" placeholder="输入标题" />
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">执行人</span></template>
-          <el-select v-model="editingTask.assignee" placeholder="选择负责人" clearable>
+        <div class="form-field">
+          <label class="form-label">标题</label>
+          <el-input v-model="editingTask.title" placeholder="输入任务标题" />
+        </div>
+        <div class="form-field">
+          <label class="form-label">执行人</label>
+          <el-select v-model="editingTask.assignee" placeholder="选择负责人" clearable style="width: 100%">
             <el-option
               v-for="user in projectMembers"
               :key="user.id"
@@ -192,79 +210,69 @@
               :value="user.id"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">标签</span></template>
-          <el-select v-model="editingTask.tags" multiple placeholder="选择标签" collapse-tags>
+        </div>
+        <div class="form-field">
+          <label class="form-label">标签</label>
+          <el-select v-model="editingTask.tags" multiple placeholder="选择标签" collapse-tags style="width: 100%">
             <el-option
               v-for="tag in boardStore.currentProject?.available_tags || []"
               :key="tag.id"
               :label="tag.name"
               :value="tag.id"
             >
-              <span :style="{ color: tag.color, fontWeight: 600 }">● {{ tag.name }}</span>
+              <span class="tag-option">
+                <span class="color-dot" :style="{ background: tag.color }"></span>
+                {{ tag.name }}
+              </span>
             </el-option>
           </el-select>
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">详细信息</span></template>
+        </div>
+        <div class="form-field">
+          <label class="form-label">详细信息</label>
           <el-input
             v-model="editingTask.content"
             type="textarea"
             :rows="6"
-            placeholder="支持Markdown纯文本描述"
+            placeholder="支持 Markdown 纯文本描述"
           />
-        </el-form-item>
+        </div>
       </el-form>
       <template #footer>
-        <div class="dialog-footer">
-          <button class="text-btn" @click="dialogVisible = false">取消</button>
-          <button class="primary-btn" @click="saveTaskDetail">保存修改</button>
-        </div>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveTaskDetail">保存修改</el-button>
       </template>
     </el-dialog>
 
     <!-- 添加列弹窗 -->
-    <el-dialog v-model="addColumnDialogVisible" width="30%" class="app-dialog" :show-close="false">
-      <template #header>
-        <div class="dialog-header">
-          <span class="dialog-folio">NEW</span>
-          <span class="dialog-title">添加新列</span>
-        </div>
-      </template>
-      <el-input v-model="newColumnTitle" placeholder="请输入列标题" />
+    <el-dialog v-model="addColumnDialogVisible" title="添加新列" width="420px">
+      <div class="form-field">
+        <label class="form-label">列标题</label>
+        <el-input v-model="newColumnTitle" placeholder="请输入列标题" />
+      </div>
       <template #footer>
-        <div class="dialog-footer">
-          <button class="text-btn" @click="addColumnDialogVisible = false">取消</button>
-          <button class="primary-btn" @click="handleAddColumn">确认添加</button>
-        </div>
+        <el-button @click="addColumnDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleAddColumn">确认添加</el-button>
       </template>
     </el-dialog>
 
     <!-- 新建任务弹窗 -->
-    <el-dialog v-model="addTaskDialogVisible" width="500px" class="app-dialog" :show-close="false">
-      <template #header>
-        <div class="dialog-header">
-          <span class="dialog-folio">NEW</span>
-          <span class="dialog-title">新建任务</span>
-        </div>
-      </template>
+    <el-dialog v-model="addTaskDialogVisible" title="新建任务" width="500px">
       <el-form :model="newTaskForm" label-position="top">
-        <el-form-item required>
-          <template #label><span class="form-label">标题</span></template>
+        <div class="form-field">
+          <label class="form-label">标题</label>
           <el-input v-model="newTaskForm.title" placeholder="输入任务标题" />
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">描述</span></template>
+        </div>
+        <div class="form-field">
+          <label class="form-label">描述</label>
           <el-input
             v-model="newTaskForm.content"
             type="textarea"
             :rows="3"
             placeholder="输入任务描述（可选）"
           />
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">负责人</span></template>
+        </div>
+        <div class="form-field">
+          <label class="form-label">负责人</label>
           <el-select v-model="newTaskForm.assignee" placeholder="选择负责人（可选）" clearable style="width: 100%">
             <el-option
               v-for="user in projectMembers"
@@ -273,9 +281,9 @@
               :value="user.id"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item>
-          <template #label><span class="form-label">标签</span></template>
+        </div>
+        <div class="form-field">
+          <label class="form-label">标签</label>
           <el-select v-model="newTaskForm.tags" multiple placeholder="选择标签（可选）" collapse-tags style="width: 100%">
             <el-option
               v-for="tag in boardStore.currentProject?.available_tags || []"
@@ -283,33 +291,29 @@
               :label="tag.name"
               :value="tag.id"
             >
-              <span :style="{ color: tag.color, fontWeight: 600 }">● {{ tag.name }}</span>
+              <span class="tag-option">
+                <span class="color-dot" :style="{ background: tag.color }"></span>
+                {{ tag.name }}
+              </span>
             </el-option>
           </el-select>
-        </el-form-item>
+        </div>
       </el-form>
       <template #footer>
-        <div class="dialog-footer">
-          <button class="text-btn" @click="addTaskDialogVisible = false">取消</button>
-          <button class="primary-btn" @click="confirmAddTask">创建任务</button>
-        </div>
+        <el-button @click="addTaskDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAddTask">创建任务</el-button>
       </template>
     </el-dialog>
 
     <!-- 重命名列弹窗 -->
-    <el-dialog v-model="renameColumnDialogVisible" width="30%" class="app-dialog" :show-close="false">
-      <template #header>
-        <div class="dialog-header">
-          <span class="dialog-folio">EDIT</span>
-          <span class="dialog-title">重命名列</span>
-        </div>
-      </template>
-      <el-input v-model="renameColumnTitle" placeholder="请输入新标题" />
+    <el-dialog v-model="renameColumnDialogVisible" title="重命名列" width="420px">
+      <div class="form-field">
+        <label class="form-label">新标题</label>
+        <el-input v-model="renameColumnTitle" placeholder="请输入新标题" />
+      </div>
       <template #footer>
-        <div class="dialog-footer">
-          <button class="text-btn" @click="renameColumnDialogVisible = false">取消</button>
-          <button class="primary-btn" @click="handleRenameColumn">确认修改</button>
-        </div>
+        <el-button @click="renameColumnDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleRenameColumn">确认修改</el-button>
       </template>
     </el-dialog>
 
@@ -319,11 +323,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useBoardStore } from '@/stores/board';
 import { DEFAULT_POSITION } from '@/types/kanban';
-import { highlightText, sanitizeText } from '@/utils/sanitize';
+import { highlightText } from '@/utils/sanitize';
 import TaskDetailDrawer from '@/components/TaskDetailDrawer.vue';
 import draggable from 'vuedraggable';
 import { ElMessageBox, ElMessage } from 'element-plus';
@@ -346,7 +350,6 @@ const selectedTasks = ref<string[]>([]);
 const isBatchMode = ref(false);
 const currentColumnId = ref('');
 
-// 新建任务表单
 const newTaskForm = ref({
   title: '',
   content: '',
@@ -354,12 +357,10 @@ const newTaskForm = ref({
   tags: [] as number[],
 });
 
-// 搜索和筛选
 const searchQuery = ref('');
 const filterAssignee = ref<number | null>(null);
 const filterTags = ref<number[]>([]);
 
-// 编辑任务
 const editingTask = ref({
   id: '',
   title: '',
@@ -369,12 +370,10 @@ const editingTask = ref({
   tags: [] as number[],
 });
 
-// ============ 计算属性 ============
 const hasActiveFilters = computed(() => {
   return filterAssignee.value !== null || filterTags.value.length > 0 || searchQuery.value.trim() !== '';
 });
 
-// 项目成员（owner + members，去重）
 const projectMembers = computed(() => {
   const owner = boardStore.currentProject?.owner_details;
   const members = (boardStore.currentProject?.members_details || []).map((u: any) => ({
@@ -387,7 +386,6 @@ const projectMembers = computed(() => {
   return all.filter((u: any) => u && u.id != null && !seen.has(u.id) && seen.add(u.id));
 });
 
-// ============ 方法 ============
 const getVisibleTasks = (col: any) => {
   if (!col.tasks) return [];
   if (!hasActiveFilters.value) return col.tasks;
@@ -395,25 +393,19 @@ const getVisibleTasks = (col: any) => {
 };
 
 const isTaskVisible = (task: any) => {
-  // 搜索筛选
   if (searchQuery.value.trim()) {
     const query = searchQuery.value.toLowerCase();
     const titleMatch = task.title?.toLowerCase().includes(query);
     const contentMatch = task.content?.toLowerCase().includes(query);
     if (!titleMatch && !contentMatch) return false;
   }
-
-  // 负责人筛选
   if (filterAssignee.value !== null && task.assignee !== filterAssignee.value) {
     return false;
   }
-
-  // 标签筛选
   if (filterTags.value.length > 0) {
     const hasMatchingTag = filterTags.value.some((tagId) => task.tags?.includes(tagId));
     if (!hasMatchingTag) return false;
   }
-
   return true;
 };
 
@@ -421,10 +413,6 @@ const clearFilters = () => {
   searchQuery.value = '';
   filterAssignee.value = null;
   filterTags.value = [];
-};
-
-const clearSelection = () => {
-  selectedTasks.value = [];
 };
 
 const toggleBatchMode = () => {
@@ -535,7 +523,6 @@ const openTaskDetail = (task: any) => {
 const onTaskUpdated = async () => {
   if (projectId.value) {
     await boardStore.fetchColumns(projectId.value);
-    // Sync detailTask with fresh data after save
     if (detailTask.value) {
       for (const col of boardStore.Columns) {
         const found = col.tasks?.find((t: any) => t.id === detailTask.value.id);
@@ -614,7 +601,6 @@ const onColumnDragEnd = async (event: any) => {
   }
 };
 
-// ============ 生命周期 ============
 onMounted(() => {
   if (projectId.value) {
     boardStore.currentProjectId = projectId.value;
@@ -632,147 +618,56 @@ onMounted(() => {
   height: calc(100vh - 144px);
 }
 
-/* ============ Toolbar — hairline bottom, no card ============ */
-.toolbar {
+/* ── Toolbar ── */
+.board-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0 16px;
-  background: transparent;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 24px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-light);
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .toolbar-left {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.search-box {
-  display: flex;
-  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .search-input {
   width: 240px;
 }
 
-.search-input :deep(.el-input__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 0 0 1px var(--color-border);
-  background: transparent;
-  transition: box-shadow var(--transition-fast);
-}
-
-.search-input :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--color-text-tertiary);
-}
-
-.search-input :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--color-text);
-}
-
-.search-input :deep(.el-input__inner) {
-  font-variant-numeric: tabular-nums;
-}
-
 .filter-select {
   width: 160px;
 }
 
-.filter-select :deep(.el-input__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 0 0 1px var(--color-border);
-  background: transparent;
-}
-
-.filter-select :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--color-text-tertiary);
-}
-
-.filter-select :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--color-text);
-}
-
-.text-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px 0;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-secondary);
-  transition: color var(--transition-fast);
-}
-
-.text-btn:hover {
-  color: var(--color-text);
-}
-
 .toolbar-right {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.batch-toolbar {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
 .batch-count {
-  font: 500 11px/1 var(--font-mono);
-  color: var(--color-accent);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.ghost-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 12px;
-  background: transparent;
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 13px;
   color: var(--color-text-secondary);
-  transition: all var(--transition-fast);
-}
-
-.ghost-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-text);
-}
-
-.ghost-btn.ghost-btn-danger:hover {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
+  font-weight: 500;
 }
 
 .status-indicator {
   display: flex;
   align-items: center;
   gap: 6px;
-  font: 500 11px/1 var(--font-mono);
+  font-size: 12px;
   color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 .status-dot {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background-color: var(--color-text-tertiary);
 }
@@ -781,13 +676,27 @@ onMounted(() => {
   background-color: var(--color-success);
 }
 
-/* ============ Board container ============ */
+.tag-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* ── Board container ── */
 .board-container {
   display: flex;
   gap: 16px;
   overflow-x: auto;
   flex: 1;
-  padding: 0 0 24px;
+  padding-bottom: 16px;
 }
 
 .columns-wrapper {
@@ -795,34 +704,24 @@ onMounted(() => {
   gap: 16px;
 }
 
-/* ============ Column ============ */
+/* ── Column ── */
 .board-column {
   min-width: 320px;
   max-width: 320px;
-  background: var(--color-surface);
+  background: var(--color-surface-sunken);
   display: flex;
   flex-direction: column;
   max-height: 100%;
-  border: 1px solid var(--color-border);
-  position: relative;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
-
-.column-accent-bar {
-  height: 2px;
-  flex-shrink: 0;
-  background: var(--color-border);
-}
-
-.col-index-0 .column-accent-bar { background: var(--color-accent-bar-0); }
-.col-index-1 .column-accent-bar { background: var(--color-accent-bar-1); }
-.col-index-2 .column-accent-bar { background: var(--color-accent-bar-2); }
-.col-index-3 .column-accent-bar { background: var(--color-accent-bar-3); }
 
 .column-header {
-  padding: 16px 14px 12px;
+  padding: 12px 14px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   cursor: grab;
   border-bottom: 1px solid var(--color-border-light);
   background: var(--color-surface);
@@ -834,93 +733,60 @@ onMounted(() => {
 
 .header-text {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
 
-.col-folio {
-  font: 600 10px/1 var(--font-mono);
-  letter-spacing: 0.12em;
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-  text-transform: uppercase;
-}
-
 .col-title {
   margin: 0;
-  font: 600 14px/1.2 var(--font-heading);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
 .col-count {
-  font: 500 11px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-  padding: 4px 6px;
-  border: 1px solid var(--color-border);
-  margin-right: 6px;
-  min-width: 28px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  min-width: 24px;
   text-align: center;
 }
 
-.col-icon-btn {
-  width: 24px;
-  height: 24px;
+.header-right {
   display: flex;
   align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  transition: all var(--transition-fast);
-  border-radius: 0;
-  padding: 0;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
-.col-icon-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border);
-}
-
-.col-icon-btn.col-icon-btn-danger:hover {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-/* ============ Task list ============ */
+/* ── Task list ── */
 .task-list {
   flex: 1;
   overflow-y: auto;
   padding: 12px;
   min-height: 50px;
-  background: var(--color-surface-sunken);
 }
 
-/* ============ Task card ============ */
+/* ── Task card ── */
 .task-card {
   margin-bottom: 8px;
   cursor: pointer;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   padding: 12px 14px;
-  transition: border-color var(--transition-fast);
-  position: relative;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .task-card:last-child {
@@ -928,63 +794,21 @@ onMounted(() => {
 }
 
 .task-card:hover {
-  border-color: var(--color-text);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .task-card.selected {
-  border-color: var(--color-accent);
-}
-
-.card-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  min-height: 16px;
-  gap: 8px;
-}
-
-.task-folio {
-  font: 500 10px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.08em;
-  font-variant-numeric: tabular-nums;
-  text-transform: uppercase;
-}
-
-.checkbox-wrap {
-  margin-left: auto;
-}
-
-.task-delete-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  padding: 2px;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: all var(--transition-fast);
-}
-
-.checkbox-wrap + .task-delete-btn {
-  margin-left: 0;
-}
-
-.task-card:hover .task-delete-btn {
-  opacity: 1;
-}
-
-.task-delete-btn:hover {
-  color: var(--color-danger);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
 }
 
 .task-title {
-  font: 600 13px/1.5 var(--font-heading);
+  font-family: var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
+  line-height: 1.4;
   margin-bottom: 6px;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -1011,27 +835,43 @@ onMounted(() => {
 
 .task-tag {
   display: inline-block;
-  padding: 2px 6px;
-  font: 500 10px/1.4 var(--font-mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  border: 1px solid;
 }
 
 .card-footer {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--color-border-light);
+  min-height: 24px;
+}
+
+.assignee {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.assignee-placeholder {
+  flex: 1;
 }
 
 .assignee-avatar {
-  width: 20px;
-  height: 20px;
-  background: var(--color-text);
-  color: var(--color-text-inverse);
-  font: 600 10px/1 var(--font-mono);
+  width: 22px;
+  height: 22px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1039,195 +879,66 @@ onMounted(() => {
 }
 
 .assignee-name {
-  font: 500 11px/1 var(--font-body);
+  font-size: 12px;
   color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* ============ Add column ============ */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.task-delete-btn {
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.task-card:hover .task-delete-btn {
+  opacity: 1;
+}
+
+/* ── Add column ── */
 .add-column-card {
-  min-width: 320px;
-  height: 88px;
+  min-width: 280px;
+  height: 100px;
   background: transparent;
   border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
   gap: 8px;
+  color: var(--color-text-tertiary);
 }
 
 .add-column-card:hover {
-  border-color: var(--color-text);
-}
-
-.add-column-card:hover .add-folio,
-.add-column-card:hover .add-label {
-  color: var(--color-text);
-}
-
-.add-folio {
-  font: 600 11px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.12em;
-  font-variant-numeric: tabular-nums;
-  text-transform: uppercase;
-  transition: color var(--transition-fast);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
 }
 
 .add-label {
-  font: 500 12px/1 var(--font-heading);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  transition: color var(--transition-fast);
+  font-size: 13px;
+  font-weight: 500;
 }
 
-/* ============ Drag states ============ */
+/* ── Drag states ── */
 .ghost {
   opacity: 0.4;
-  background: var(--color-bg);
-  border: 1px dashed var(--color-text-tertiary);
+  background: var(--color-primary-bg);
+  border: 1px dashed var(--color-primary);
 }
 
 .column-ghost {
   opacity: 0.4;
-  background: var(--color-bg);
-  border: 1px dashed var(--color-text-tertiary);
-}
-
-/* ============ App Dialog — Swiss form ============ */
-.app-dialog {
-  --el-dialog-bg-color: var(--color-surface);
-  --el-dialog-padding-primary: 0;
-}
-
-.app-dialog :deep(.el-dialog) {
-  border-radius: 0;
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-md);
-}
-
-.app-dialog :deep(.el-dialog__header) {
-  padding: 18px 24px;
-  margin: 0;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.app-dialog :deep(.el-dialog__title) {
-  display: none;
-}
-
-.app-dialog :deep(.el-dialog__headerbtn) {
-  display: none;
-}
-
-.app-dialog :deep(.el-dialog__body) {
-  padding: 24px;
-}
-
-.app-dialog :deep(.el-dialog__footer) {
-  padding: 16px 24px;
-  border-top: 1px solid var(--color-border);
-  margin: 0;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.dialog-folio {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.dialog-title {
-  font: 600 15px/1 var(--font-heading);
-  color: var(--color-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.form-label {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.app-dialog :deep(.el-form-item__label) {
-  padding-bottom: 8px;
-  line-height: 1;
-  font-weight: normal;
-}
-
-.app-dialog :deep(.el-form-item) {
-  margin-bottom: 20px;
-}
-
-.app-dialog :deep(.el-input__wrapper),
-.app-dialog :deep(.el-textarea__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 1px 0 0 var(--color-border);
-  background: transparent;
-  padding-left: 0;
-  padding-right: 0;
-  transition: box-shadow var(--transition-fast);
-}
-
-.app-dialog :deep(.el-input__wrapper:hover),
-.app-dialog :deep(.el-textarea__wrapper:hover) {
-  box-shadow: 0 1px 0 0 var(--color-text-tertiary);
-}
-
-.app-dialog :deep(.el-input__wrapper.is-focus),
-.app-dialog :deep(.el-textarea__wrapper.is-focus) {
-  box-shadow: 0 1px 0 0 var(--color-text);
-}
-
-.app-dialog :deep(.el-input__inner),
-.app-dialog :deep(.el-textarea__inner) {
-  font-variant-numeric: tabular-nums;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 16px;
-  align-items: center;
-}
-
-.primary-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 20px;
-  background: var(--color-text);
-  border: 1px solid var(--color-text);
-  color: var(--color-text-inverse);
-  cursor: pointer;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.primary-btn:hover {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.dialog-footer .text-btn {
-  font-size: 11px;
+  background: var(--color-primary-bg);
+  border: 1px dashed var(--color-primary);
 }
 </style>

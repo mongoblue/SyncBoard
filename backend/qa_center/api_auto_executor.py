@@ -1,3 +1,22 @@
+"""
+新版自动化套件执行器。
+
+使用 requests 库发送真实 HTTP 请求（可打外部接口），写 ApiAutoTestResult。
+
+流程：
+  1. template_engine 渲染 URL/Headers/Body 中的变量
+  2. request_builder 构造最终请求
+  3. requests.request() 发送
+  4. unified_assertions.run_assertions() 断言
+  5. extractors 提取变量（上游提取可注入下游，链式传递）
+  6. 写 ApiAutoTestCaseResult
+
+注意：
+  - 此处写死了 timeout=30（忽略 case.timeout_seconds，run_plan_executor 那边使用了该字段）
+  - 与 run_plan_executor 的冗余关系：本 executor 绑定 suite 概念，run_plan_executor 聚合 plan+suit+case
+  - headers 直接从 case.headers 引用而不是拷贝，可能有 mutate 风险
+
+"""
 import json
 import time
 import logging
@@ -311,7 +330,10 @@ class ApiAutoTestExecutor:
             assertion_details = ua.run_assertions(active_assertions, ctx)
             all_passed = all(r.get('passed') for r in assertion_details) if assertion_details else True
 
-            if case.expected_status and status_code != case.expected_status:
+            has_status_code_assertion = any(
+                getattr(a, 'assertion_type', None) == 'status_code' for a in active_assertions
+            )
+            if not has_status_code_assertion and case.expected_status and status_code != case.expected_status:
                 all_passed = False
                 assertion_details.insert(0, {
                     'assertion_type': 'status_code',

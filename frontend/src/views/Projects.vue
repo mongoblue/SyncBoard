@@ -1,34 +1,28 @@
 <template>
   <div class="projects-page">
     <!-- 页面头部 -->
-    <div class="page-header">
-      <div class="header-content">
-        <div class="title-section">
-          <div class="icon-wrapper">
-            <el-icon :size="28" color="#14B8A6"><FolderOpened /></el-icon>
-          </div>
-          <div class="title-text">
-            <h1>我的项目</h1>
-            <p class="subtitle">{{ projects.length }} 个项目</p>
-          </div>
+    <div class="page-header projects-header">
+      <div class="title-section">
+        <div class="title-text">
+          <h1 class="page-title">我的项目</h1>
+          <p class="page-subtitle">{{ projects.length }} 个项目</p>
         </div>
-        <el-button
-          type="primary"
-          size="large"
-          class="create-btn"
-          @click="createProject"
-        >
-          <el-icon :size="18"><Plus /></el-icon>
-          创建新项目
-        </el-button>
       </div>
+      <el-button
+        type="primary"
+        size="default"
+        @click="createProject"
+      >
+        <el-icon :size="16" style="margin-right: 6px"><Plus /></el-icon>
+        创建新项目
+      </el-button>
     </div>
 
     <!-- 项目网格 -->
     <div class="projects-container">
       <div v-if="projects.length === 0" class="empty-state">
         <div class="empty-icon">
-          <el-icon :size="64" color="var(--color-text-tertiary)"><Folder /></el-icon>
+          <el-icon :size="48" color="var(--color-text-tertiary)"><Folder /></el-icon>
         </div>
         <h3>还没有项目</h3>
         <p>创建您的第一个项目开始协作</p>
@@ -39,61 +33,50 @@
       </div>
 
       <div v-else class="project-grid">
-        <el-card
-          v-for="(p, index) in projects"
+        <div
+          v-for="p in projects"
           :key="p.id"
           class="project-card"
-          :class="'card-accent-' + (index % 4)"
-          shadow="hover"
           @click="goToBoard(p.id)"
         >
           <div class="card-actions">
-            <el-button 
-              type="danger" 
+            <el-button
+              type="danger"
               link
               size="small"
               class="delete-btn"
-              @click.stop="handleDeleteProject(p.id)" 
+              @click.stop="handleDeleteProject(p.id)"
             >
               <el-icon :size="16"><Delete /></el-icon>
             </el-button>
           </div>
-          
+
           <div class="card-content">
             <div class="project-icon">
-              <el-icon :size="28"><Folder /></el-icon>
+              <el-icon :size="20"><Folder /></el-icon>
             </div>
             <h3 class="project-name">{{ p.name }}</h3>
             <div class="project-meta">
-              <div class="owner-badge">
+              <span class="meta-item">
                 <el-icon :size="14"><User /></el-icon>
-                <span>{{ p.owner_details?.username || '未知' }}</span>
-              </div>
-              <div class="project-stats">
-                <span class="stat-item">
-                  <el-icon :size="14"><Calendar /></el-icon>
-                  {{ formatDate(p.created_at) }}
-                </span>
-              </div>
+                {{ p.owner_details?.username || '未知' }}
+              </span>
+              <span class="meta-item">
+                <el-icon :size="14"><Calendar /></el-icon>
+                {{ formatDate(p.created_at) }}
+              </span>
             </div>
           </div>
-          
+
           <div class="card-footer">
-            <div class="member-avatars">
-              <div class="avatar-placeholder">
-                <el-icon :size="14"><User /></el-icon>
-              </div>
-              <span class="member-text">项目负责人</span>
-            </div>
-            <el-icon class="enter-icon" :size="20"><ArrowRight /></el-icon>
+            <span class="footer-text">点击进入看板</span>
+            <el-icon class="enter-icon" :size="16"><ArrowRight /></el-icon>
           </div>
-        </el-card>
+        </div>
 
         <!-- 添加项目卡片 -->
         <div class="add-project-card" @click="createProject">
-          <div class="add-icon-wrapper">
-            <el-icon :size="28"><Plus /></el-icon>
-          </div>
+          <el-icon :size="24"><Plus /></el-icon>
           <span class="add-text">创建新项目</span>
         </div>
       </div>
@@ -106,7 +89,7 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import service from '@/utils/request';
 import { ElMessageBox, ElMessage } from 'element-plus';
-import { Folder, FolderOpened, Plus, Delete, User, Calendar, ArrowRight } from '@element-plus/icons-vue';
+import { Folder, Plus, Delete, User, Calendar, ArrowRight } from '@element-plus/icons-vue';
 
 const router = useRouter();
 const projects = ref<any[]>([]);
@@ -120,19 +103,16 @@ const fetchProjects = async () => {
   }
 };
 
-// 格式化日期
 const formatDate = (dateString: string) => {
   if (!dateString) return '-';
   const date = new Date(dateString);
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
 };
 
-// 跳转到看板
 const goToBoard = (id: string) => {
   router.push(`/projects/${id}/board`);
 };
 
-// 创建项目
 const createProject = async () => {
   try {
     const { value } = await ElMessageBox.prompt('请输入项目名称', '创建项目', {
@@ -146,7 +126,7 @@ const createProject = async () => {
         return true;
       }
     });
-    
+
     if (value) {
       await service.post('/projects/', { name: value.trim() });
       ElMessage.success('项目创建成功');
@@ -182,98 +162,45 @@ onMounted(() => {
 .projects-page {
   min-height: calc(100vh - 56px);
   background: var(--color-bg);
+  padding: 24px 32px;
 }
 
-/* ── Header ── */
-.page-header {
-  background: var(--color-text);
-  padding: 36px 0;
-  margin-bottom: 32px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.header-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 40px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.projects-header {
+  margin-bottom: 24px;
 }
 
 .title-section {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
 }
 
-.icon-wrapper {
-  width: 56px;
-  height: 56px;
-  background: transparent;
-  border-radius: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--color-border-strong);
-  color: var(--color-text-inverse);
+.title-text .page-title {
+  font-size: 24px;
 }
 
-.title-text h1 {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--color-text-inverse);
+.title-text .page-subtitle {
+  margin-top: 4px;
 }
 
-.subtitle {
-  margin: 4px 0 0 0;
-  font-size: 14px;
-  color: var(--color-text-tertiary);
-}
-
-.create-btn {
-  background: var(--color-text-inverse);
-  color: var(--color-text);
-  border: 1px solid var(--color-text-inverse);
-  font-weight: 600;
-  padding: 11px 22px;
-  border-radius: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transition: background 0.2s, color 0.2s;
-}
-
-.create-btn:hover {
-  background: var(--color-accent);
-  color: var(--color-text-inverse);
-  border-color: var(--color-accent);
-}
-
-/* ── 项目网格 ── */
 .projects-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 0 40px 48px;
+  width: 100%;
 }
 
 .empty-state {
   text-align: center;
-  padding: 80px 20px;
+  padding: 64px 20px;
   background: var(--color-surface);
-  border-radius: 0;
-  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
 }
 
-.empty-icon {
-  margin-bottom: 20px;
-}
+.empty-icon { margin-bottom: 16px; }
 
 .empty-state h3 {
   font-family: var(--font-heading);
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
   color: var(--color-text);
   margin-bottom: 8px;
@@ -281,53 +208,41 @@ onMounted(() => {
 
 .empty-state p {
   color: var(--color-text-secondary);
-  margin-bottom: 24px;
+  margin-bottom: 20px;
+  font-size: 14px;
 }
 
 .project-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
 }
 
 /* ── Project card ── */
 .project-card {
   cursor: pointer;
-  border: 1px solid var(--color-border) !important;
-  border-radius: 0;
-  overflow: hidden;
-  position: relative;
   background: var(--color-surface);
-  transition: border-color 0.2s, transform 0.2s;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  display: flex;
+  flex-direction: column;
 }
 
 .project-card:hover {
-  border-color: var(--color-primary-border) !important;
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
-
-/* 顶部强调色条 */
-.project-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 4px;
-  z-index: 1;
-}
-
-.card-accent-0::before { background: var(--color-accent-bar-0); }
-.card-accent-1::before { background: var(--color-accent-bar-1); }
-.card-accent-2::before { background: var(--color-accent-bar-2); }
-.card-accent-3::before { background: var(--color-accent-bar-3); }
 
 .card-actions {
   position: absolute;
-  top: 16px;
+  top: 12px;
   right: 12px;
-  z-index: 10;
+  z-index: 2;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-fast);
 }
 
 .project-card:hover .card-actions {
@@ -336,50 +251,50 @@ onMounted(() => {
 
 .delete-btn {
   color: var(--color-text-tertiary);
-  padding: 6px;
-  border-radius: 6px;
+  padding: 4px;
 }
 
 .delete-btn:hover {
   color: var(--color-danger);
-  background: rgba(239, 68, 68, 0.08);
 }
 
 .card-content {
-  padding: 28px 22px 18px;
+  padding: 20px 20px 16px;
+  flex: 1;
 }
 
 .project-icon {
-  width: 46px;
-  height: 46px;
-  background: transparent;
-  color: var(--color-text);
-  border-radius: 0;
-  border: 1px solid var(--color-border);
+  width: 36px;
+  height: 36px;
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .project-name {
-  margin: 0 0 14px 0;
+  margin: 0 0 12px 0;
   font-family: var(--font-heading);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.3;
 }
 
 .project-meta {
   display: flex;
   align-items: center;
   gap: 14px;
+  flex-wrap: wrap;
 }
 
-.owner-badge {
+.meta-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -387,96 +302,49 @@ onMounted(() => {
   color: var(--color-text-secondary);
 }
 
-.project-stats {
-  display: flex;
-}
-
-.stat-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-}
-
 .card-footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 22px;
-  background: var(--color-bg);
+  padding: 10px 20px;
   border-top: 1px solid var(--color-border-light);
-}
-
-.member-avatars {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.avatar-placeholder {
-  width: 26px;
-  height: 26px;
-  background: var(--color-border);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--color-text-tertiary);
-}
-
-.member-text {
   font-size: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-text-tertiary);
 }
 
 .enter-icon {
-  color: var(--color-text-tertiary);
-  transition: color 0.2s, transform 0.2s;
+  transition: transform var(--transition-fast), color var(--transition-fast);
 }
 
 .project-card:hover .enter-icon {
   color: var(--color-primary);
-  transform: translateX(3px);
+  transform: translateX(2px);
 }
 
 /* ── Add project card ── */
 .add-project-card {
-  min-height: 100%;
   background: transparent;
   border: 1px dashed var(--color-border);
-  border-radius: 0;
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
-  gap: 14px;
-  padding: 48px 20px;
+  transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  gap: 10px;
+  min-height: 180px;
   color: var(--color-text-tertiary);
 }
 
 .add-project-card:hover {
-  border-color: var(--color-text);
-  color: var(--color-text);
-}
-
-.add-icon-wrapper {
-  width: 52px;
-  height: 52px;
-  background: transparent;
-  color: var(--color-text);
-  border-radius: 0;
-  border: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-primary-bg);
 }
 
 .add-text {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
 }
 </style>

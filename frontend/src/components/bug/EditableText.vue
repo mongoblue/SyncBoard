@@ -73,15 +73,16 @@ const onKeydown = (e: KeyboardEvent) => {
   font-family: inherit;
   margin: 0;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   min-height: 24px;
+  color: var(--color-text);
 }
 .editable-text__display:hover {
-  background: var(--el-fill-color-lighter);
+  background: var(--color-surface-hover);
 }
 .editable-text__display.is-empty {
-  color: var(--el-text-color-placeholder);
+  color: var(--color-text-tertiary);
   font-style: italic;
 }
 .editable-text__input {
@@ -89,8 +90,16 @@ const onKeydown = (e: KeyboardEvent) => {
   font-family: inherit;
   font-size: inherit;
   padding: 6px 8px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   resize: vertical;
+  background: var(--color-surface);
+  color: var(--color-text);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+.editable-text__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
 }
 </style>

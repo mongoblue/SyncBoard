@@ -44,10 +44,21 @@ const durationText = computed(() => {
 </script>
 
 <style scoped>
-.run-progress { padding: 12px 16px; background: #fafafa; border-radius: 6px; }
-.progress-text { display: flex; gap: 16px; margin-bottom: 8px; font-size: 13px; }
-.pass { color: #67c23a; }
-.fail { color: #f56c6c; }
-.err { color: #e6a23c; }
-.time { color: #909399; margin-left: auto; }
+.run-progress {
+  padding: 12px 16px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+}
+.progress-text {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.pass { color: var(--color-success); }
+.fail { color: var(--color-danger); }
+.err { color: var(--color-warning); }
+.time { color: var(--color-text-tertiary); margin-left: auto; }
 </style>

@@ -1,7 +1,10 @@
 <template>
   <div class="qa-page">
-    <div class="page-header">
-      <h2>质量中心</h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">质量中心</h1>
+        <p class="page-subtitle">测试用例、自动化执行与质量指标的统一入口</p>
+      </div>
       <div class="header-actions">
         <el-button type="warning" @click="showDataFactoryDialog = true">
           <el-icon><MagicStick /></el-icon>
@@ -24,7 +27,7 @@
           </template>
         </el-dropdown>
       </div>
-    </div>
+    </header>
 
     <!-- 状态卡片 -->
     <div class="status-cards">
@@ -46,37 +49,37 @@
     <!-- 功能入口卡片 -->
     <div class="feature-cards">
       <el-card class="feature-card" shadow="hover" @click="goToApiCases">
-        <div class="feature-icon" style="background: #3B82F618; color: #3B82F6;"><el-icon :size="28"><Connection /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-info-bg); color: var(--color-info);"><el-icon :size="28"><Connection /></el-icon></div>
         <div class="feature-title">API 测试用例</div>
         <div class="feature-desc">创建和管理 API 接口测试用例</div>
       </el-card>
 
       <el-card class="feature-card" shadow="hover" @click="goToUiCases">
-        <div class="feature-icon" style="background: #22C55E18; color: #22C55E;"><el-icon :size="28"><Monitor /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-success-bg); color: var(--color-success);"><el-icon :size="28"><Monitor /></el-icon></div>
         <div class="feature-title">UI 测试用例</div>
         <div class="feature-desc">基于 Playwright 的 E2E 自动化测试</div>
       </el-card>
 
       <el-card class="feature-card" shadow="hover" @click="goToPerformanceCases">
-        <div class="feature-icon" style="background: #F59E0B18; color: #F59E0B;"><el-icon :size="28"><Odometer /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-warning-bg); color: var(--color-warning);"><el-icon :size="28"><Odometer /></el-icon></div>
         <div class="feature-title">性能测试</div>
         <div class="feature-desc">并发压测和性能指标分析</div>
       </el-card>
 
       <el-card class="feature-card" shadow="hover" @click="goToTestResults">
-        <div class="feature-icon" style="background: #8B5CF618; color: #8B5CF6;"><el-icon :size="28"><DataAnalysis /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-primary-bg); color: var(--color-primary);"><el-icon :size="28"><DataAnalysis /></el-icon></div>
         <div class="feature-title">测试结果</div>
         <div class="feature-desc">查看和管理测试执行历史</div>
       </el-card>
 
       <el-card class="feature-card" shadow="hover" @click="showDataFactoryDialog = true">
-        <div class="feature-icon" style="background: #EC489918; color: #EC4899;"><el-icon :size="28"><MagicStick /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-danger-bg); color: var(--color-danger);"><el-icon :size="28"><MagicStick /></el-icon></div>
         <div class="feature-title">数据工厂</div>
         <div class="feature-desc">快速生成测试数据</div>
       </el-card>
 
       <el-card class="feature-card" shadow="hover" @click="startTest('regression')">
-        <div class="feature-icon" style="background: #14B8A618; color: #14B8A6;"><el-icon :size="28"><VideoPlay /></el-icon></div>
+        <div class="feature-icon" style="background: var(--color-primary-bg); color: var(--color-primary);"><el-icon :size="28"><VideoPlay /></el-icon></div>
         <div class="feature-title">回归测试</div>
         <div class="feature-desc">运行完整的测试套件</div>
       </el-card>
@@ -360,11 +363,11 @@ const scrollToBottom = () => {
 const formatLog = (line: string) => {
   if (!line) return '';
   let colored = line
-    .replace(/PASSED/g, '<span style="color:var(--color-success); font-weight:bold">PASSED</span>')
-    .replace(/FAILED/g, '<span style="color:var(--color-danger); font-weight:bold">FAILED</span>')
-    .replace(/ERROR/g, '<span style="color:var(--color-danger); font-weight:bold">ERROR</span>')
+    .replace(/PASSED/g, '<span style="color:var(--color-success); font-weight:600">PASSED</span>')
+    .replace(/FAILED/g, '<span style="color:var(--color-danger); font-weight:600">FAILED</span>')
+    .replace(/ERROR/g, '<span style="color:var(--color-danger); font-weight:600">ERROR</span>')
     .replace(/SKIPPED/g, '<span style="color:var(--color-warning)">SKIPPED</span>')
-    .replace(/collecting .../g, '<span style="color:var(--color-primary-light)">collecting ...</span>');
+    .replace(/collecting .../g, '<span style="color:var(--color-primary)">collecting ...</span>');
   return colored;
 };
 
@@ -383,71 +386,44 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.qa-page {
-  max-width: 1200px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 25px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-family: var(--font-heading);
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--color-text);
-}
+.qa-page { padding: 0; }
 
 .header-actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .status-cards {
   display: grid;
   grid-template-columns: 200px 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .status-card {
-  padding: 15px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
-.status-card :deep(.el-card__body) {
-  padding: 15px;
-}
+.status-card :deep(.el-card__body) { padding: 16px 20px; }
 
 .status-label {
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
 }
 
 .status-value {
-  font-size: 20px;
+  font-family: var(--font-heading);
+  font-size: 18px;
   font-weight: 600;
 }
 
-.text-blue {
-  color: var(--color-primary-light);
-}
-
-.text-green {
-  color: var(--color-success);
-}
-
-.text-red {
-  color: var(--color-danger);
-}
-
-.text-gray {
-  color: var(--color-text-tertiary);
-}
+.text-blue { color: var(--color-primary); }
+.text-green { color: var(--color-success); }
+.text-red { color: var(--color-danger); }
+.text-gray { color: var(--color-text-tertiary); }
 
 .progress-card {
   display: flex;
@@ -458,42 +434,53 @@ onUnmounted(() => {
 /* 功能入口卡片 */
 .feature-cards {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
   margin-bottom: 20px;
 }
 
 .feature-card {
   cursor: pointer;
-  transition: all 0.3s;
   text-align: center;
-  padding: 20px;
+  padding: 20px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .feature-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .feature-icon {
-  font-size: 36px;
-  margin-bottom: 10px;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .feature-title {
-  font-size: 16px;
+  font-family: var(--font-heading);
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 5px;
+  margin-bottom: 4px;
 }
 
 .feature-desc {
-  font-size: 13px;
-  color: var(--color-text-tertiary);
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 .terminal-card {
   margin-bottom: 20px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .terminal-header {
@@ -503,15 +490,16 @@ onUnmounted(() => {
 }
 
 .terminal-window {
-  background-color: #1E293B;
-  border-radius: 6px;
-  height: 500px;
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  height: 480px;
   overflow-y: auto;
-  padding: 15px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 13px;
+  padding: 12px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
   line-height: 1.6;
-  color: var(--color-border);
+  color: var(--color-text);
 }
 
 .terminal-placeholder {
@@ -520,9 +508,8 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-secondary);
-  opacity: 0.8;
-  gap: 15px;
+  color: var(--color-text-tertiary);
+  gap: 12px;
 }
 
 .log-line {
@@ -532,11 +519,11 @@ onUnmounted(() => {
 }
 
 .line-num {
-  color: #4b5563;
-  width: 40px;
+  color: var(--color-text-tertiary);
+  width: 36px;
   flex-shrink: 0;
   text-align: right;
-  margin-right: 15px;
+  margin-right: 12px;
   user-select: none;
 }
 

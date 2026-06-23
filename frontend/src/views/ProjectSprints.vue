@@ -1,9 +1,14 @@
 <template>
   <div class="sprints-page">
-    <div class="page-header">
-      <h2>迭代管理</h2>
-      <el-button type="primary" @click="showCreate = true"><el-icon><Plus /></el-icon>新建迭代</el-button>
-    </div>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">迭代管理</h1>
+        <p class="page-subtitle">规划项目迭代周期与任务交付节奏</p>
+      </div>
+      <el-button type="primary" @click="showCreate = true">
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>新建迭代
+      </el-button>
+    </header>
 
     <el-row :gutter="20" v-loading="loading">
       <el-col :span="8" v-for="s in sprints" :key="s.id">
@@ -85,14 +90,38 @@ onMounted(fetchSprints);
 </script>
 
 <style scoped>
-.sprints-page { max-width: 1000px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-.page-header h2 { margin: 0; font-size: 20px; }
-.sprint-card { cursor: pointer; margin-bottom: 16px; }
-.sprint-card:hover { border-color: var(--color-primary-light); }
-.sprint-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.sprints-page { padding: 0; }
+.sprint-card {
+  cursor: pointer;
+  margin-bottom: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.sprint-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
+}
+.sprint-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px;
+}
 .sprint-dates { font-size: 12px; color: var(--color-text-tertiary); }
-.sprint-card h3 { margin: 0 0 8px; font-size: 16px; }
-.sprint-goal { color: var(--color-text-secondary); font-size: 13px; margin: 0 0 12px; }
-.sprint-meta { font-size: 12px; color: var(--color-text-tertiary); margin-top: 8px; text-align: right; }
+.sprint-card h3 {
+  margin: 0 0 8px;
+  font: 600 16px/1.3 var(--font-heading);
+  color: var(--color-text);
+}
+.sprint-goal {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.sprint-meta {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin-top: 8px;
+  text-align: right;
+}
 </style>

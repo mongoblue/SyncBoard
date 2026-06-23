@@ -1,3 +1,14 @@
+/**
+ * 认证与权限 Store。
+ *
+ * 职责：
+ *  - 用户登录态（checkAuth / login / logout）
+ *  - 菜单树（根据角色动态生成侧栏菜单）
+ *  - 权限码列表 + checkPermission(perm) 校验
+ *
+ * 菜单数据在 login 时从后端 /auth/me/ 获取，
+ * 权限检查在 router beforeEach + v-permission 指令两个地方用。
+ */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import service from '@/utils/request';

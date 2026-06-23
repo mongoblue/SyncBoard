@@ -42,8 +42,26 @@ function download() {
 </script>
 
 <style scoped>
-.curl-panel { background: #1e1e1e; border-radius: 6px; padding: 16px; }
+.curl-panel {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
 .curl-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.curl-title { color: #d4d4d4; font-weight: 600; font-size: 14px; }
-.curl-body { color: #d4d4d4; font-family: 'Menlo', 'Consolas', monospace; font-size: 13px; line-height: 1.5; margin: 0; white-space: pre-wrap; word-break: break-all; }
+.curl-title {
+  font-family: var(--font-heading);
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 13px;
+}
+.curl-body {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
 </style>

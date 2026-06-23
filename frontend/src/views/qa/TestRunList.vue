@@ -1,11 +1,14 @@
 <template>
   <div class="test-run-list" v-loading="loading">
-    <div class="header">
-      <h2>批量执行历史</h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">批量执行历史</h1>
+        <p class="page-subtitle">查看历次批量执行任务的状态、通过率与耗时</p>
+      </div>
       <el-button @click="goBack" :icon="ArrowLeft">返回</el-button>
-    </div>
+    </header>
     <div class="filters">
-      <el-select v-model="filters.status" placeholder="状态" clearable>
+      <el-select v-model="filters.status" placeholder="状态" clearable style="width: 160px">
         <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
       </el-select>
     </div>
@@ -105,9 +108,7 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.test-run-list { padding: 16px 24px; }
-.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-.header h2 { margin: 0; }
+.test-run-list { padding: 0; }
 .filters { margin-bottom: 16px; }
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
 </style>

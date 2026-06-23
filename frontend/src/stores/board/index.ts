@@ -1,7 +1,16 @@
 /**
- * 看板 Store (统一入口)
+ * 看板聚合 Store。
  *
- * 组合模块化子 Store，对外保持与旧 Board.ts 完全兼容的 API。
+ * 内部组合 4 个子 Store：
+ *  - columnStore（看板列 CRUD）
+ *  - taskStore（任务卡片 CRUD + 拖拽排序）
+ *  - tagStore（标签 CRUD）
+ *  - userStore（看板用户列表）
+ *
+ * 同时管理 WebSocket 连接（useWebSocket.ts），
+ * 收到消息后根据 action 类型分发到对应子 Store 刷新数据。
+ *
+ * 对外暴露 Columns / Users 等 computed 保持与旧版大 Store 兼容。
  */
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';

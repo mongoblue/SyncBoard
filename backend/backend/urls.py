@@ -1,3 +1,16 @@
+"""
+顶层 URL 装配。
+
+路由前缀 → App：
+  /api/        → room（看板/项目/AI/通知）
+  /api/qa/     → qa_center（测试中心）
+  /api/system/ → system（RBAC）
+  /api/        → bug_tracker（缺陷）
+  /admin/      → Django Admin
+  /media/      → 静态文件服务（解决 uvicorn 下图片加载问题）
+
+注意：/api/ 同时指向 room 和 bug_tracker，所以两者路由路径不能冲突。
+"""
 from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings

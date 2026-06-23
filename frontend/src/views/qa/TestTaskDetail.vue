@@ -659,15 +659,15 @@ onUnmounted(() => {
 }
 
 .log-time-ms {
-  color: var(--el-color-primary);
+  color: var(--color-primary);
   font-size: 12px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .log-detail {
   padding: 12px;
-  background-color: var(--color-bg);
-  border-radius: 4px;
+  background-color: var(--color-surface-sunken);
+  border-radius: var(--radius-md);
 }
 
 .detail-section {
@@ -679,17 +679,18 @@ onUnmounted(() => {
 }
 
 .section-title {
-  font-weight: bold;
+  font: 600 13px/1.3 var(--font-heading);
   margin-bottom: 8px;
-  color: var(--el-text-color-primary);
+  color: var(--color-text);
 }
 
 .code-block {
-  background-color: #1E293B;
-  color: var(--color-border);
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
   padding: 12px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
   font-size: 12px;
   overflow-x: auto;
 }
@@ -705,64 +706,46 @@ onUnmounted(() => {
 }
 
 .method {
-  font-weight: bold;
+  font-weight: 600;
   padding: 2px 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   margin-right: 8px;
-}
-
-.method.get {
-  background-color: #4ec9b0;
-  color: #000;
-}
-
-.method.post {
-  background-color: #4fc1ff;
-  color: #000;
-}
-
-.method.put {
-  background-color: #dcdcaa;
-  color: #000;
-}
-
-.method.delete {
-  background-color: #f48771;
-  color: #000;
-}
-
-.url {
-  color: var(--color-border);
-}
-
-.sub-title {
-  color: #858585;
-  margin-top: 8px;
-  margin-bottom: 4px;
   font-size: 11px;
 }
 
+.method.get { background-color: var(--color-info-bg); color: var(--color-info); }
+.method.post { background-color: var(--color-success-bg); color: var(--color-success); }
+.method.put { background-color: var(--color-warning-bg); color: var(--color-warning); }
+.method.delete { background-color: var(--color-danger-bg); color: var(--color-danger); }
+
+.url {
+  color: var(--color-text);
+}
+
+.sub-title {
+  color: var(--color-text-secondary);
+  margin-top: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 .status-code {
-  font-weight: bold;
+  font-weight: 600;
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
 }
 
-.status-code.success {
-  background-color: #4ec9b0;
-  color: #000;
-}
-
-.status-code.error {
-  background-color: #f48771;
-  color: #000;
-}
+.status-code.success { background-color: var(--color-success-bg); color: var(--color-success); }
+.status-code.error { background-color: var(--color-danger-bg); color: var(--color-danger); }
 
 .log-message-text {
   padding: 8px;
-  background-color: #fff;
-  border-radius: 4px;
-  border-left: 3px solid var(--el-color-primary);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-primary);
 }
 
 .live-logs {
@@ -770,12 +753,13 @@ onUnmounted(() => {
 }
 
 .log-console {
-  background-color: #1E293B;
-  color: var(--color-border);
+  background-color: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  color: var(--color-text);
   padding: 12px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: 12px;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -786,32 +770,21 @@ onUnmounted(() => {
 }
 
 .log-time {
-  color: #858585;
+  color: var(--color-text-tertiary);
   margin-right: 8px;
 }
 
 .log-level {
   margin-right: 8px;
-  font-weight: bold;
+  font-weight: 600;
 }
 
-.log-level.level-info {
-  color: #4fc1ff;
-}
-
-.log-level.level-success {
-  color: #4ec9b0;
-}
-
-.log-level.level-error {
-  color: #f48771;
-}
-
-.log-level.level-warning {
-  color: #dcdcaa;
-}
+.log-level.level-info { color: var(--color-info); }
+.log-level.level-success { color: var(--color-success); }
+.log-level.level-error { color: var(--color-danger); }
+.log-level.level-warning { color: var(--color-warning); }
 
 .log-message {
-  color: var(--color-border);
+  color: var(--color-text);
 }
 </style>

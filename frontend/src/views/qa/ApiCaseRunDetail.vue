@@ -89,8 +89,26 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.api-case-run-detail { padding: 16px 24px; }
-.header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.header h2 { margin: 0; font-size: 18px; }
-.header code { background: #fafafa; padding: 4px 8px; border-radius: 4px; font-size: 14px; }
+.api-case-run-detail { padding: 0; }
+.header {
+  display: flex; align-items: center; gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.header h2 {
+  margin: 0;
+  font: 600 18px/1.3 var(--font-heading);
+  color: var(--color-text);
+  display: flex; align-items: center; gap: 8px;
+}
+.header code {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
 </style>

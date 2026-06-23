@@ -11,6 +11,8 @@ import logging
 
 
 def _setup_io_logging():
+    if hasattr(sys.stdin, "reconfigure"):
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
     if hasattr(sys.stderr, "reconfigure"):
@@ -71,6 +73,20 @@ def _execute_single_step(page, step: dict, emit_fn):
     attribute = step.get("attribute", "")
     expected_value = step.get("expected_value", "")
 
+    # 兼容 el-select multiple：选中后下拉不自动关闭，会遮挡后续 click。
+    # 进入非 select 步骤前，若有可见的 .el-select-dropdown，强制关闭它。
+    if action != "select":
+        try:
+            if page.locator(".el-select-dropdown:visible").count() > 0:
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(120)
+                # Esc 偶尔被嵌套元素消化，二次兜底：触发 v-click-outside
+                if page.locator(".el-select-dropdown:visible").count() > 0:
+                    page.evaluate("document.body.click()")
+                    page.wait_for_timeout(120)
+        except Exception:
+            pass
+
     def _wait(sel, timeout=10000):
         loc = page.locator(sel)
         loc.wait_for(state="visible", timeout=timeout)
@@ -87,7 +103,22 @@ def _execute_single_step(page, step: dict, emit_fn):
     elif action == "fill":
         _wait(selector).fill(value or "")
     elif action == "select":
-        _wait(selector).select_option(value)
+        loc = _wait(selector)
+        try:
+            # 原生 <select>
+            loc.select_option(value or "")
+        except Exception:
+            # 多选连续 select：下拉可能已展开，再点 wrapper 反而会关闭。
+            # 仅在未展开时点击触发展开。
+            try:
+                already_open = page.locator(".el-select-dropdown:visible").count() > 0
+            except Exception:
+                already_open = False
+            if not already_open:
+                loc.click(timeout=10000)
+            page.locator(
+                ".el-select-dropdown__item:visible", has_text=value or ""
+            ).first.click(timeout=5000)
     elif action == "hover":
         _wait(selector).hover()
     elif action == "scroll":
@@ -116,11 +147,15 @@ def _execute_single_step(page, step: dict, emit_fn):
 def _classify_error(exc: Exception) -> str:
     msg = str(exc)
     cls = exc.__class__.__name__
-    if "executable" in msg.lower() and "doesn" in msg.lower():
+    lower = msg.lower()
+    if "executable" in lower and "doesn" in lower:
         return "BROWSER_NOT_INSTALLED"
     if cls == "TimeoutError" or "Timeout" in cls:
+        # Playwright 在元素操作前的 wait_for 超时 = 元素不存在 / 不可见
+        if "locator" in lower or "waiting for" in lower:
+            return "SELECTOR_NOT_FOUND"
         return "STEP_TIMEOUT"
-    if "找不到" in msg or "Locator" in msg:
+    if "找不到" in msg or "locator" in lower:
         return "SELECTOR_NOT_FOUND"
     if msg.startswith("UNSUPPORTED_ACTION:"):
         return "UNSUPPORTED_ACTION"
@@ -173,7 +208,11 @@ def _run_steps(case_data: dict) -> dict:
                     emit({"type": "step_log", "index": -1, "message": "页面加载完成"})
 
                     for i, step in enumerate(steps):
-                        emit({"type": "step_start", "index": i, "action": step.get("action"), "desc": f"步骤{i+1}"})
+                        emit({"type": "step_start", "index": i,
+                              "action": step.get("action"),
+                              "desc": f"步骤{i+1}",
+                              "selector": step.get("selector", ""),
+                              "value": step.get("value", "")})
                         try:
                             _execute_single_step(page, step, emit)
                             page.wait_for_timeout(500)
@@ -234,8 +273,10 @@ def main():
         emit({"type": "error", "code": "INTERNAL", "message": str(e), "traceback": traceback.format_exc()})
         emit({"type": "finished", "success": False, "summary": {"passed": 0, "failed": 1, "total": 1}})
     finally:
-        if temp_dir:
-            cleanup_temp_dir(temp_dir)
+        # 不在这里删除 temp_dir：父进程需要读取截图/视频等产物。
+        # 父进程（runner_supervisor / _save_test_result）会在读完截图后自行清理；
+        # 兜底机制：apps.py ready() 启动的定时任务每天清理 24h 前的 temp_dir。
+        pass
 
 
 if __name__ == "__main__":

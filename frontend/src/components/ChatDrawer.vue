@@ -189,24 +189,27 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* 样式部分 */
-.chat-fab { position: fixed; bottom: 20px; right: 20px; width: 50px; height: 50px; background: var(--color-primary-light); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-.chat-list-container { padding: 10px; }
-.chat-list-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; transition: background 0.2s; }
-.chat-list-item:hover { background: var(--color-bg); }
-.proj-avatar { width: 40px; height: 40px; background: var(--color-primary-light); color: white; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 10px; }
+.chat-fab { position: fixed; bottom: 24px; right: 24px; width: 48px; height: 48px; background: var(--color-primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2000; box-shadow: var(--shadow-md); transition: background var(--transition-fast); }
+.chat-fab:hover { background: var(--color-primary-hover); }
+.chat-list-container { padding: 8px; }
+.chat-list-item { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid var(--color-border-light); cursor: pointer; transition: background var(--transition-fast); border-radius: var(--radius-md); }
+.chat-list-item:hover { background: var(--color-surface-hover); }
+.proj-avatar { width: 36px; height: 36px; background: var(--color-primary-bg); color: var(--color-primary); border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; margin-right: 10px; font-family: var(--font-heading); }
 .proj-info { flex: 1; }
-.proj-name { font-size: 14px; font-weight: bold; color: #333; }
-.proj-preview { font-size: 12px; color: #999; }
+.proj-name { font-size: 14px; font-weight: 600; color: var(--color-text); }
+.proj-preview { font-size: 12px; color: var(--color-text-tertiary); margin-top: 2px; }
+.empty-tip { padding: 24px; text-align: center; color: var(--color-text-tertiary); font-size: 13px; }
 .chat-container { display: flex; flex-direction: column; height: 100%; }
-.chat-header-bar { padding: 5px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
-.messages { flex: 1; overflow-y: auto; padding: 10px; background: var(--color-bg); }
-.message-item { margin-bottom: 15px; display: flex; flex-direction: column; align-items: flex-start; }
+.chat-header-bar { padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border-light); }
+.messages { flex: 1; overflow-y: auto; padding: 12px; background: var(--color-surface-sunken); }
+.status-tip { text-align: center; color: var(--color-text-tertiary); font-size: 12px; padding: 8px 0; }
+.message-item { margin-bottom: 12px; display: flex; flex-direction: column; align-items: flex-start; }
 .my-msg { align-items: flex-end; }
-.msg-bubble { background: white; padding: 8px 12px; border-radius: 8px; max-width: 85%; box-shadow: 0 1px 2px rgba(0,0,0,0.1); word-wrap: break-word; }
-.my-msg .msg-bubble { background: #95d475; }
-.msg-user { font-size: 12px; color: #999; margin-bottom: 2px; }
-.msg-time { font-size: 10px; color: #ccc; margin-left: 5px; }
-.status-dot { width: 8px; height: 8px; background: red; border-radius: 50%; }
+.msg-bubble { background: var(--color-surface); border: 1px solid var(--color-border-light); padding: 8px 12px; border-radius: 12px; max-width: 85%; word-wrap: break-word; font-size: 13px; color: var(--color-text); line-height: 1.5; }
+.my-msg .msg-bubble { background: var(--color-primary-bg); border-color: var(--color-primary-border); }
+.msg-user { font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 2px; padding-left: 4px; }
+.msg-time { font-size: 11px; color: var(--color-text-tertiary); margin-left: 6px; }
+.status-dot { width: 8px; height: 8px; background: var(--color-danger); border-radius: 50%; }
 .status-dot.online { background: var(--color-success); }
+.input-area { padding: 12px; border-top: 1px solid var(--color-border-light); background: var(--color-surface); }
 </style>

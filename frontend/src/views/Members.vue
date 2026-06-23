@@ -1,127 +1,100 @@
 <template>
   <div class="members-page">
-    <!-- 页面头部 -->
     <header class="page-header">
-      <div class="header-left">
-        <span class="header-folio">N° 01</span>
-        <div class="header-titles">
-          <h1 class="page-title">成员管理</h1>
-          <p class="page-subtitle">{{ members.length + 1 }} 名成员 · 共 {{ projectRoles.length }} 种角色</p>
-        </div>
+      <div>
+        <h1 class="page-title">成员管理</h1>
+        <p class="page-subtitle">{{ members.length + 1 }} 名成员 · 共 {{ projectRoles.length }} 种角色</p>
       </div>
-      <button class="primary-btn" @click="inviteDialogVisible = true">
-        <el-icon :size="12"><Plus /></el-icon>
+      <el-button type="primary" @click="inviteDialogVisible = true">
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         邀请成员
-      </button>
+      </el-button>
     </header>
 
-    <!-- 负责人 —— 顶部全宽 profile 行 -->
-    <section v-if="projectOwner" class="owner-block">
-      <div class="owner-grid">
-        <div class="owner-cell owner-cell-label">
-          <span class="cell-folio">ROLE</span>
-          <span class="cell-name">项目负责人</span>
-        </div>
-        <div class="owner-cell owner-cell-id">
-          <span class="cell-folio">ID</span>
-          <span class="cell-name mono">U-{{ String(projectOwner.id).slice(-3).padStart(3, '0') }}</span>
-        </div>
-        <div class="owner-cell owner-cell-name">
-          <div class="owner-identity">
-            <div class="owner-avatar">
-              <img v-if="projectOwner.profile?.avatar" :src="projectOwner.profile.avatar" alt="负责人" />
-              <span v-else>{{ projectOwner.username?.charAt(0).toUpperCase() }}</span>
-            </div>
-            <div class="owner-text">
-              <span class="owner-name">{{ projectOwner.username }}</span>
-              <span class="owner-email" v-if="projectOwner.email">{{ projectOwner.email }}</span>
-            </div>
+    <!-- 负责人 -->
+    <section v-if="projectOwner" class="owner-card card">
+      <div class="owner-row">
+        <div class="owner-identity">
+          <div class="owner-avatar">
+            <img v-if="projectOwner.profile?.avatar" :src="projectOwner.profile.avatar" alt="负责人" />
+            <span v-else>{{ projectOwner.username?.charAt(0).toUpperCase() }}</span>
+          </div>
+          <div class="owner-text">
+            <span class="owner-name">{{ projectOwner.username }}</span>
+            <span class="owner-email" v-if="projectOwner.email">{{ projectOwner.email }}</span>
           </div>
         </div>
-        <div class="owner-cell owner-cell-role">
-          <span class="role-chip role-chip-owner">Owner</span>
-        </div>
+        <span class="pill brand">项目负责人</span>
       </div>
     </section>
 
     <!-- 成员区域 -->
     <section class="members-section">
       <div class="section-header">
-        <div class="header-left">
-          <span class="section-folio">N° 02</span>
-          <h2 class="section-title">项目成员</h2>
-        </div>
-        <span class="section-count">{{ String(members.length).padStart(2, '0') }}</span>
+        <h2 class="card-section-title">项目成员</h2>
+        <span class="section-count">{{ members.length }}</span>
       </div>
 
       <div v-if="members.length === 0" class="empty-state">
-        <span class="empty-folio">EMPTY</span>
         <p class="empty-text">暂无成员，邀请协作者加入项目</p>
-        <button class="primary-btn" @click="inviteDialogVisible = true">
-          <el-icon :size="12"><Plus /></el-icon>
+        <el-button type="primary" @click="inviteDialogVisible = true">
+          <el-icon style="margin-right: 4px"><Plus /></el-icon>
           邀请成员
-        </button>
+        </el-button>
       </div>
 
       <div v-else class="members-grid">
         <article
           v-for="member in members"
           :key="member.id"
-          class="member-card"
+          class="member-card card"
         >
-          <div class="card-cell card-cell-id">
-            <span class="cell-folio">ID</span>
-            <span class="cell-name mono">U-{{ String(member.user_detail?.id || member.user?.id).slice(-3).padStart(3, '0') }}</span>
-          </div>
-          <div class="card-cell card-cell-name">
-            <div class="member-identity">
-              <div class="member-avatar">
-                <img v-if="member.profile?.avatar" :src="member.profile.avatar" alt="成员" />
-                <span v-else>{{ getInitials(member) }}</span>
-              </div>
-              <div class="member-text">
-                <span class="member-name">{{ member.user_detail?.username || member.user?.username }}</span>
-              </div>
+          <div class="member-identity">
+            <div class="member-avatar">
+              <img v-if="member.profile?.avatar" :src="member.profile.avatar" alt="成员" />
+              <span v-else>{{ getInitials(member) }}</span>
+            </div>
+            <div class="member-text">
+              <span class="member-name">{{ member.user_detail?.username || member.user?.username }}</span>
+              <span v-if="member.user_detail?.email" class="member-email">
+                {{ member.user_detail.email }}
+              </span>
             </div>
           </div>
-          <div class="card-cell card-cell-role">
+          <div class="member-role">
             <el-select
               v-if="isOwner"
               :model-value="member.role || member.role_detail?.id"
               placeholder="角色"
-              class="role-select"
+              size="small"
               @update:model-value="(val: number) => changeRole(member, val)"
             >
               <el-option v-for="r in projectRoles" :key="r.id" :label="r.name" :value="r.id" />
             </el-select>
-            <span v-else class="role-chip" :class="'role-chip-' + (member.role_detail?.color || 'default')">
+            <span v-else class="pill">
               {{ member.role_detail?.name || '成员' }}
             </span>
           </div>
-          <div class="card-cell card-cell-actions">
-            <button
+          <div class="member-actions">
+            <el-button
               v-if="isOwner"
-              class="card-icon-btn card-icon-btn-danger"
+              link
+              size="small"
+              type="danger"
               @click="handleRemoveMember(member)"
               title="移除成员"
             >
-              <el-icon :size="14"><Delete /></el-icon>
-            </button>
+              <el-icon><Delete /></el-icon>
+            </el-button>
           </div>
         </article>
       </div>
     </section>
 
     <!-- 邀请弹窗 -->
-    <el-dialog v-model="inviteDialogVisible" width="420px" class="app-dialog" :show-close="false">
-      <template #header>
-        <div class="dialog-header">
-          <span class="dialog-folio">NEW</span>
-          <span class="dialog-title">邀请成员</span>
-        </div>
-      </template>
-      <div class="invite-body">
-        <span class="form-label">选择用户</span>
+    <el-dialog v-model="inviteDialogVisible" title="邀请成员" width="420px">
+      <div class="form-field">
+        <label class="form-label">选择用户</label>
         <el-select
           v-model="selectedUser"
           filterable
@@ -144,15 +117,11 @@
             </div>
           </el-option>
         </el-select>
-        <div v-if="availableUsers.length === 0" class="no-users-hint">
-          暂无可邀请的用户
-        </div>
+        <p v-if="availableUsers.length === 0" class="form-help">暂无可邀请的用户</p>
       </div>
       <template #footer>
-        <div class="dialog-footer">
-          <button class="text-btn" @click="inviteDialogVisible = false">取消</button>
-          <button class="primary-btn" @click="handleInvite">确认邀请</button>
-        </div>
+        <el-button @click="inviteDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleInvite">确认邀请</el-button>
       </template>
     </el-dialog>
   </div>
@@ -261,165 +230,52 @@ onMounted(() => {
 .members-page {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 24px;
 }
 
-/* ── Page header ── */
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--color-border);
-  gap: 24px;
-  flex-wrap: wrap;
-}
-
-.header-left {
-  display: flex;
-  align-items: flex-start;
+  padding-bottom: 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--color-border-light);
   gap: 16px;
-  min-width: 0;
 }
 
-.header-folio {
-  font: 600 11px/1 var(--font-mono);
-  color: var(--color-accent);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  padding-top: 6px;
+/* Owner card */
+.owner-card {
+  padding: 20px 24px;
+  border-left: 3px solid var(--color-primary);
 }
 
-.header-titles {
+.owner-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.page-title {
-  margin: 0;
-  font: 600 26px/1.2 var(--font-heading);
-  color: var(--color-text);
-  letter-spacing: -0.01em;
-}
-
-.page-subtitle {
-  margin: 0;
-  font: 500 12px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.primary-btn {
-  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 18px;
-  background: var(--color-text);
-  border: 1px solid var(--color-text);
-  color: var(--color-text-inverse);
-  cursor: pointer;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-  white-space: nowrap;
-}
-
-.primary-btn:hover {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-}
-
-.text-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 4px 0;
-  font: 500 11px/1 var(--font-heading);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--color-text-secondary);
-  transition: color var(--transition-fast);
-}
-
-.text-btn:hover {
-  color: var(--color-text);
-}
-
-/* ── Owner block — full width typographic row ── */
-.owner-block {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-left: 2px solid var(--color-accent);
-  overflow: hidden;
-}
-
-.owner-grid {
-  display: grid;
-  grid-template-columns: 200px 140px 1fr 140px;
-  align-items: stretch;
-  min-height: 80px;
-}
-
-.owner-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 18px 24px;
-  border-right: 1px solid var(--color-border-light);
-  min-width: 0;
-}
-
-.owner-cell:last-child {
-  border-right: none;
-}
-
-.cell-folio {
-  font: 600 9px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.cell-name {
-  font: 500 13px/1.2 var(--font-heading);
-  color: var(--color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cell-name.mono {
-  font: 500 13px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 .owner-identity {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
+  flex: 1;
 }
 
 .owner-avatar {
-  width: 40px;
-  height: 40px;
-  background: var(--color-text);
+  width: 44px;
+  height: 44px;
+  background: var(--color-primary);
   color: var(--color-text-inverse);
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 14px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -433,12 +289,14 @@ onMounted(() => {
 .owner-text {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
 .owner-name {
-  font: 600 16px/1 var(--font-heading);
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -446,130 +304,57 @@ onMounted(() => {
 }
 
 .owner-email {
-  font: 500 11px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--color-text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.owner-cell-role {
-  align-items: flex-start;
-  justify-content: center;
+/* Members section */
+.members-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-/* ── Role chip ── */
-.role-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border: 1px solid var(--color-border);
-  font: 600 10px/1 var(--font-mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-secondary);
-  background: transparent;
-}
-
-.role-chip-owner {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-bg);
-}
-
-.role-chip-default {
-  border-color: var(--color-border);
-  color: var(--color-text-secondary);
-}
-
-/* ── Section header ── */
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
-.section-header .header-left {
-  align-items: baseline;
-}
-
-.section-folio {
-  font: 600 11px/1 var(--font-mono);
-  color: var(--color-accent);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.section-title {
-  margin: 0;
-  font: 600 16px/1 var(--font-heading);
-  color: var(--color-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.section-header .card-section-title {
+  margin-bottom: 0;
 }
 
 .section-count {
-  font: 500 11px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-  padding: 4px 8px;
-  border: 1px solid var(--color-border);
-  letter-spacing: 0.04em;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
-/* ── Members grid ── */
 .members-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
 }
 
-/* ── Member card — row-style typographic block ── */
+/* Member card */
 .member-card {
   display: grid;
-  grid-template-columns: 60px 1fr 130px 40px;
+  grid-template-columns: 1fr 140px 32px;
   align-items: center;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  transition: border-color var(--transition-fast);
-  min-height: 64px;
-  overflow: hidden;
+  gap: 12px;
+  padding: 14px 16px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .member-card:hover {
-  border-color: var(--color-text);
-}
-
-.card-cell {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 10px 12px;
-  min-width: 0;
-  border-right: 1px solid var(--color-border-light);
-  height: 100%;
-}
-
-.card-cell:last-child {
-  border-right: none;
-  align-items: center;
-  padding: 10px 8px;
-}
-
-.card-cell-id .cell-folio,
-.card-cell-id .cell-name {
-  font-size: 10px;
-}
-
-.card-cell-id .cell-name {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-card);
 }
 
 .member-identity {
@@ -580,18 +365,19 @@ onMounted(() => {
 }
 
 .member-avatar {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
   color: var(--color-text);
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 11px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
   flex-shrink: 0;
   overflow: hidden;
-  border: 1px solid var(--color-border);
 }
 
 .member-avatar img {
@@ -601,134 +387,62 @@ onMounted(() => {
 }
 
 .member-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
 .member-name {
-  font: 500 13px/1.2 var(--font-heading);
+  font-size: 14px;
+  font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.card-cell-role {
-  align-items: stretch;
+.member-email {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.role-select {
-  width: 100%;
+.member-role {
+  min-width: 0;
 }
 
-.role-select :deep(.el-input__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 0 0 1px var(--color-border);
-  background: transparent;
-  padding-left: 8px;
-  padding-right: 8px;
-  min-height: 28px;
-  height: 28px;
-}
-
-.role-select :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px var(--color-text-tertiary);
-}
-
-.role-select :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 0 0 1px var(--color-text);
-}
-
-.role-select :deep(.el-input__inner) {
-  font: 500 11px/1 var(--font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.card-icon-btn {
-  width: 28px;
-  height: 28px;
+.member-actions {
   display: flex;
-  align-items: center;
   justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  transition: all var(--transition-fast);
-  border-radius: 0;
-  padding: 0;
   opacity: 0;
+  transition: opacity var(--transition-fast);
 }
 
-.member-card:hover .card-icon-btn {
+.member-card:hover .member-actions {
   opacity: 1;
 }
 
-.card-icon-btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-border);
-}
-
-.card-icon-btn.card-icon-btn-danger:hover {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-/* ── Empty state ── */
+/* Empty state */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 12px;
-  padding: 64px 20px;
+  padding: 48px 20px;
   background: var(--color-surface);
   border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
   text-align: center;
-}
-
-.empty-folio {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
 }
 
 .empty-text {
   margin: 0;
-  font: 400 14px/1.5 var(--font-body);
+  font-size: 14px;
   color: var(--color-text-secondary);
-}
-
-/* ── Invite dialog ── */
-.invite-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.form-label {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.app-dialog :deep(.el-input__wrapper) {
-  border-radius: 0;
-  box-shadow: 0 1px 0 0 var(--color-border);
-  background: transparent;
-  padding-left: 0;
-  padding-right: 0;
-  transition: box-shadow var(--transition-fast);
-}
-
-.app-dialog :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 1px 0 0 var(--color-text-tertiary);
-}
-
-.app-dialog :deep(.el-input__wrapper.is-focus) {
-  box-shadow: 0 1px 0 0 var(--color-text);
 }
 
 .user-option {
@@ -741,15 +455,16 @@ onMounted(() => {
   width: 24px;
   height: 24px;
   background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
   color: var(--color-text);
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 10px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
   flex-shrink: 0;
   overflow: hidden;
-  border: 1px solid var(--color-border);
 }
 
 .option-avatar img {
@@ -758,113 +473,27 @@ onMounted(() => {
   object-fit: cover;
 }
 
-.no-users-hint {
-  font: 500 11px/1.5 var(--font-mono);
-  color: var(--color-text-tertiary);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 12px 0;
-  text-align: center;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 16px;
-  align-items: center;
-}
-
-/* ── Dialog chrome ── */
-.app-dialog :deep(.el-dialog) {
-  border-radius: 0;
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-md);
-}
-
-.app-dialog :deep(.el-dialog__header) {
-  padding: 18px 24px;
-  margin: 0;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.app-dialog :deep(.el-dialog__title) {
-  display: none;
-}
-
-.app-dialog :deep(.el-dialog__headerbtn) {
-  display: none;
-}
-
-.app-dialog :deep(.el-dialog__body) {
-  padding: 24px;
-}
-
-.app-dialog :deep(.el-dialog__footer) {
-  padding: 16px 24px;
-  border-top: 1px solid var(--color-border);
-  margin: 0;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-
-.dialog-folio {
-  font: 600 10px/1 var(--font-mono);
-  color: var(--color-accent);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-}
-
-.dialog-title {
-  font: 600 15px/1 var(--font-heading);
-  color: var(--color-text);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* ── Responsive ── */
-@media (max-width: 1024px) {
-  .owner-grid {
-    grid-template-columns: 160px 100px 1fr 120px;
-  }
-  .members-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  }
-}
-
+/* Responsive */
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
     align-items: stretch;
   }
-  .primary-btn {
-    align-self: flex-start;
-  }
-  .owner-grid {
+  .members-grid {
     grid-template-columns: 1fr;
   }
-  .owner-cell {
-    border-right: none;
-    border-bottom: 1px solid var(--color-border-light);
-  }
-  .owner-cell:last-child {
-    border-bottom: none;
-  }
   .member-card {
-    grid-template-columns: 1fr 40px;
+    grid-template-columns: 1fr 32px;
     grid-template-rows: auto auto;
   }
-  .card-cell {
-    border-right: none;
-    border-bottom: 1px solid var(--color-border-light);
+  .member-role {
+    grid-column: 1 / 2;
+    grid-row: 2;
   }
-  .card-cell-id,
-  .card-cell-role {
-    grid-column: 1 / -1;
+  .member-actions {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    opacity: 1;
   }
 }
 </style>

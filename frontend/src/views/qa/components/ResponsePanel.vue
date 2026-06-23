@@ -61,13 +61,25 @@ const highlightedJson = computed(() => {
 <style scoped>
 .response-panel { padding: 16px; }
 .response-summary { display: flex; gap: 16px; align-items: center; margin-bottom: 16px; }
-.metric { color: #606266; font-size: 13px; }
-.body h4 { margin: 16px 0 8px 0; }
-pre { background: #fafafa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 13px; }
-pre.json code { font-family: 'Menlo', monospace; }
-:deep(.key) { color: #881391; }
-:deep(.string) { color: #c41a16; }
-:deep(.number) { color: #1c00cf; }
-:deep(.bool) { color: #0d22aa; }
+.metric { color: var(--color-text-secondary); font-size: 13px; }
+.body h4 {
+  margin: 16px 0 8px 0;
+  font: 600 14px/1.3 var(--font-heading);
+  color: var(--color-text);
+}
+pre {
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 12px;
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+}
+:deep(.key) { color: var(--color-info); }
+:deep(.string) { color: var(--color-danger); }
+:deep(.number) { color: var(--color-primary); }
+:deep(.bool) { color: var(--color-warning); }
 .headers { white-space: pre-wrap; }
 </style>

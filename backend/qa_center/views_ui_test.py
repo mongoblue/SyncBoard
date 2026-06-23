@@ -20,8 +20,9 @@ from django.conf import settings
 from django.utils import timezone
 from django.http import FileResponse, HttpResponseBadRequest, Http404
 
-from .models import UiTestCase
+from .models import UiTestCase, TestResult
 from .serializers import UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseRunSerializer
+from .workers import runner_supervisor
 from .workers.runner_supervisor import execute_ui_case
 
 
@@ -54,46 +55,15 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def run(self, request, pk=None):
-        from channels.layers import get_channel_layer
-        from asgiref.sync import async_to_sync
-        import uuid as _uuid
-
         test_case = self.get_object()
-        task_id = _uuid.uuid4().hex
         case_data = {"case_id": test_case.id, "url": test_case.url, "steps": test_case.steps or []}
-
-        channel_layer = get_channel_layer()
-        group_name = f"ui_run_{task_id}"
-
-        def push(event_data):
-            try:
-                async_to_sync(channel_layer.group_send)(group_name, {
-                    "type": "run_event",
-                    "data": event_data,
-                })
-            except Exception:
-                pass
-
         events: list = []
-
-        def collector(ev):
-            events.append(ev)
-            push(ev)
-
-        def runner_thread():
-            try:
-                result = execute_ui_case(case_data, on_event=collector)
-                push({"type": "run_finished_persisted", "task_id": task_id})
-                self._save_test_result(test_case, result, events, request, task_id=task_id)
-            except Exception:
-                logger.exception("runner_thread 失败")
-                push({"type": "error", "code": "RUNNER_ABORTED",
-                      "message": "运行线程异常中止，请查看服务端日志"})
-                push({"type": "run_finished_persisted", "task_id": task_id})
-
-        threading.Thread(target=runner_thread, daemon=True).start()
-
-        return Response({"task_id": task_id}, status=status.HTTP_202_ACCEPTED)
+        result = execute_ui_case(case_data, on_event=events.append)
+        try:
+            self._save_test_result(test_case, result, events, request)
+        except Exception:
+            logger.exception("_save_test_result 失败")
+        return Response(self._events_to_payload(events, result), status=status.HTTP_200_OK)
 
     def _events_to_payload(self, events, result):
         logs = []
@@ -109,7 +79,7 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                     with open(ev["path"], "rb") as f:
                         b64 = base64.b64encode(f.read()).decode("utf-8")
                     step_screenshots.append({
-                        "step": ev.get("index", 0),
+                        "step": ev.get("index", 0) + 1,
                         "screenshot": f"data:image/png;base64,{b64}",
                     })
                 except Exception as exc:
@@ -190,11 +160,20 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
                         f.write(image_data)
                     TestScreenshot.objects.create(
                         test_result=test_result,
-                        name=f"步骤 {idx} 截图",
+                        name=f"步骤 {idx + 1} 截图",
                         image=os.path.join(rel_dir, fname),
+                        step_index=idx,
                     )
                 except Exception:
                     logger.exception("保存截图失败")
+
+        # 截图读完后清理 worker 的 temp_dir。worker 已退出，目录所有权归父进程。
+        if temp_dir_path and os.path.isdir(temp_dir_path):
+            try:
+                import shutil
+                shutil.rmtree(temp_dir_path, ignore_errors=True)
+            except Exception:
+                logger.exception("清理 worker temp_dir 失败: %s", temp_dir_path)
 
         return test_result
 
@@ -204,6 +183,49 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         tasks = test_case.related_tasks.select_related('column', 'assignee').prefetch_related('tags')
         from room.serializers import TaskSerializer
         return Response(TaskSerializer(tasks, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path=r"runs/(?P<task_id>\w+)/abort")
+    def abort_run(self, request, task_id=None):
+        """中止一个正在运行的 UI 用例。"""
+        if not task_id:
+            return Response({"error": "task_id 必填"}, status=status.HTTP_400_BAD_REQUEST)
+
+        alive = runner_supervisor.is_runner_alive(task_id)
+        if not alive:
+            return Response(
+                {"task_id": task_id, "aborted": False, "message": "运行已结束或不存在"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        ok = runner_supervisor.abort_runner(task_id)
+        if not ok:
+            return Response(
+                {"task_id": task_id, "aborted": False, "message": "终止失败，查看服务端日志"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # 标记已存在的 TestResult（如果有）为 aborted
+        try:
+            tr = TestResult.objects.filter(task_id=task_id).order_by("-started_at").first()
+            if tr is not None and tr.status not in ("passed", "failed"):
+                tr.aborted = True
+                tr.save(update_fields=["aborted"])
+        except Exception:
+            logger.exception("标记 TestResult.aborted 失败: %s", task_id)
+
+        return Response({"task_id": task_id, "aborted": True}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path=r"runs/(?P<task_id>\w+)/events")
+    def run_events(self, request, task_id=None):
+        """返回 task 的历史事件。供前端 WS 晚于 worker 启动时回放。"""
+        if not task_id:
+            return Response({"error": "task_id 必填"}, status=status.HTTP_400_BAD_REQUEST)
+        evs = runner_supervisor.get_events(task_id)
+        return Response({
+            "task_id": task_id,
+            "events": evs,
+            "finished": any(e.get("type") in ("finished", "run_finished_persisted") for e in evs),
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["post"])
     def run_temp(self, request):
@@ -284,3 +306,61 @@ def ui_run_screenshot(request):
         raise Http404()
     with open(abs_path, "rb") as f:
         return FileResponse(f, content_type="image/png")
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def ui_run_screenshot_by_index(request, task_id: str, index: int):
+    """按 task_id + step_index 读取截图。
+
+    优先尝试最新的 TestResult 关联的 TestScreenshot（持久化副本）；
+    若运行尚未结束，回退到 worker 的 temp_dir 中实时读取。
+    """
+    # 1. 持久化副本（运行结束后父进程会清理 temp_dir）
+    try:
+        tr = TestResult.objects.filter(task_id=task_id).order_by("-started_at").first()
+        if tr is not None:
+            shot = tr.screenshots.filter(step_index=index).first()
+            if shot is None:
+                shot = tr.screenshots.filter(name=f"步骤 {index} 截图").first()
+            if shot is None:
+                shot = tr.screenshots.order_by("id").filter(name__icontains=str(index)).first()
+            if shot is not None and shot.image:
+                abs_path = os.path.join(settings.MEDIA_ROOT, shot.image.name)
+                if os.path.exists(abs_path):
+                    with open(abs_path, "rb") as f:
+                        return FileResponse(f, content_type="image/png")
+    except Exception:
+        logger.exception("读持久化截图失败: task=%s idx=%s", task_id, index)
+
+    # 2. 实时回退：temp_dir 还在
+    safe_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
+    candidates = []
+    if os.path.isdir(safe_root):
+        for name in os.listdir(safe_root):
+            full = os.path.join(safe_root, name)
+            if not os.path.isdir(full):
+                continue
+            # 通过 task_id 关联：找最新 TestResult 残留的 temp_dir
+            # 简化：尝试匹配 screenshots/step_{index}.png
+            cand = os.path.join(full, "screenshots", f"step_{index}.png")
+            if os.path.exists(cand):
+                candidates.append(cand)
+            cand_fail = os.path.join(full, "screenshots", f"step_{index}_fail.png")
+            if os.path.exists(cand_fail):
+                candidates.append(cand_fail)
+
+    for cand in candidates:
+        abs_path = os.path.abspath(cand)
+        try:
+            if os.path.commonpath([abs_path, safe_root]) != safe_root:
+                continue
+        except ValueError:
+            continue
+        try:
+            with open(abs_path, "rb") as f:
+                return FileResponse(f, content_type="image/png")
+        except OSError:
+            continue
+
+    raise Http404()

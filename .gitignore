@@ -19,3 +19,24 @@ yarn-error.log*
 # Docker (如果不希望版本控制日志)
 *.log
 redis_data/
+
+# Playwright 临时文件
+.playwright-temp/
+
+# Locust 临时文件（每次运行生成）
+.locust-temp/
+locust_run_*.py
+locust_stats_*.csv
+__pycache__/locustfile_*.pyc
+__pycache__/locust_run_*.pyc
+
+# 调试截图（开发时生成的临时文件）
+debug_*.png
+
+# Vim 临时文件
+*.swp
+*.swo
+*~
+
+# 示例数据文件（可以重新生成）
+api_test_examples*.json

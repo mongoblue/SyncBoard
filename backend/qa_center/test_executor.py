@@ -1,5 +1,17 @@
 """
-测试执行器 - 真实执行 HTTP 请求并记录详细结果
+旧版 API 用例执行器。
+
+使用 django.test.Client 发送请求（仅能打项目内部 Django URL）。
+
+此 executor 当前仍被以下路径使用：
+  - views_api_test.py:ApiTestCaseBatchRunView（批量运行旧版用例）
+  - views_devops.py:execute_api_test_cases（DevOps 自动化任务执行）
+
+与新版执行器（api_auto_executor）的差异：
+  - 此路不走 unittest.TestCase，只是工具函数
+  - 断言先检查 has_status_code_assertion，不重复追加
+  - 结果写入 ApiTestResult + TestRunCaseResult（双写）
+
 """
 import json
 import logging

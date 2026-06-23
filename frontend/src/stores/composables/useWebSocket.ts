@@ -1,3 +1,14 @@
+/**
+ * 通用 WebSocket 客户端（观察者模式 + 心跳 + 重连）。
+ *
+ * 特性：
+ *  - 心跳：每 30 秒发 {"type": "ping"} 保活
+ *  - 重连：断开 3 秒后自动重连（isExplicitlyClosed 标记用于区分主动/被动断开）
+ *  - 消息分发：messageListeners Set 存储回调，onmessage 时广播
+ *  - 去重：connect() 时若已连接则跳过
+ *
+ * 被 boardStore（看板实时同步）使用。notificationStore 和 useRecorderSocket 自己管理 WS。
+ */
 import { ref } from 'vue';
 
 const isConnected = ref(false);

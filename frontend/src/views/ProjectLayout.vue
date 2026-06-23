@@ -1,10 +1,18 @@
+<!--
+项目内通用布局壳。
+
+左侧菜单根据 authStore.menus + 当前项目 ID 动态渲染。
+右侧 <router-view> 显示当前子路由（看板/QA/设置 等 27 个页面）。
+
+菜单通过 v-permission 指令控制按钮级显隐。
+-->
 <template>
   <div class="project-layout">
     <!-- 左侧菜单 -->
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="brand">
-          <el-icon :size="24" color="#14b8a6"><Collection /></el-icon>
+          <el-icon :size="22" color="var(--color-primary)"><Collection /></el-icon>
           <span class="brand-text">FlowSpace</span>
         </div>
         <div class="project-info">
@@ -26,12 +34,9 @@
             class="menu-item"
             :class="{ active: isActive(item.path) }"
           >
-            <div class="item-icon" :style="{ background: item.color + '20', color: item.color }">
-              <el-icon :size="18" v-if="item.icon">
-                <component :is="item.icon" />
-              </el-icon>
-              <el-icon :size="18" v-else><Document /></el-icon>
-            </div>
+            <el-icon class="item-icon" :size="16">
+              <component :is="item.icon" />
+            </el-icon>
             <span class="item-text">{{ item.name }}</span>
           </router-link>
         </div>
@@ -46,12 +51,9 @@
             class="menu-item"
             :class="{ active: isActive(item.path) }"
           >
-            <div class="item-icon" :style="{ background: item.color + '20', color: item.color }">
-              <el-icon :size="18" v-if="item.icon">
-                <component :is="item.icon" />
-              </el-icon>
-              <el-icon :size="18" v-else><Document /></el-icon>
-            </div>
+            <el-icon class="item-icon" :size="16">
+              <component :is="item.icon" />
+            </el-icon>
             <span class="item-text">{{ item.name }}</span>
           </router-link>
         </div>
@@ -66,14 +68,10 @@
             class="menu-item"
             :class="{ active: isActive(item.path) }"
           >
-            <div class="item-icon" :style="{ background: item.color + '20', color: item.color }">
-              <el-icon :size="18" v-if="item.icon">
-                <component :is="item.icon" />
-              </el-icon>
-              <el-icon :size="18" v-else><Document /></el-icon>
-            </div>
+            <el-icon class="item-icon" :size="16">
+              <component :is="item.icon" />
+            </el-icon>
             <span class="item-text">{{ item.name }}</span>
-            <el-icon v-if="isActive(item.path)" class="active-indicator" :size="14"><ArrowRight /></el-icon>
           </router-link>
         </div>
 
@@ -89,12 +87,9 @@
                   :class="{ active: isDirectoryActive(item) }"
                   @click="toggleDirectory(item)"
                 >
-                  <div class="item-icon" :style="{ background: getIconColor(item) + '20', color: getIconColor(item) }">
-                    <el-icon :size="18" v-if="item.icon">
-                      <component :is="getIconComponent(item.icon)" />
-                    </el-icon>
-                    <el-icon :size="18" v-else><Document /></el-icon>
-                  </div>
+                  <el-icon class="item-icon" :size="16">
+                    <component :is="getIconComponent(item.icon)" />
+                  </el-icon>
                   <span class="item-text">{{ item.name }}</span>
                   <el-icon class="expand-icon" :class="{ expanded: expandedMenus.includes(item.id) }" :size="14">
                     <ArrowDown />
@@ -110,7 +105,6 @@
                     :class="{ active: isActive(child.path) }"
                   >
                     <span class="item-text">{{ child.name }}</span>
-                    <el-icon v-if="isActive(child.path)" class="active-indicator" :size="12"><ArrowRight /></el-icon>
                   </router-link>
                 </div>
               </div>
@@ -122,14 +116,10 @@
                 class="menu-item"
                 :class="{ active: isActive(item.path) }"
               >
-                <div class="item-icon" :style="{ background: getIconColor(item) + '20', color: getIconColor(item) }">
-                  <el-icon :size="18" v-if="item.icon">
-                    <component :is="getIconComponent(item.icon)" />
-                  </el-icon>
-                  <el-icon :size="18" v-else><Document /></el-icon>
-                </div>
+                <el-icon class="item-icon" :size="16">
+                  <component :is="getIconComponent(item.icon)" />
+                </el-icon>
                 <span class="item-text">{{ item.name }}</span>
-                <el-icon v-if="isActive(item.path)" class="active-indicator" :size="14"><ArrowRight /></el-icon>
               </router-link>
             </template>
           </div>
@@ -145,21 +135,17 @@
             class="menu-item"
             :class="{ active: isActive(item.path) }"
           >
-            <div class="item-icon" :style="{ background: item.color + '20', color: item.color }">
-              <el-icon :size="18" v-if="item.icon">
-                <component :is="item.icon" />
-              </el-icon>
-              <el-icon :size="18" v-else><Document /></el-icon>
-            </div>
+            <el-icon class="item-icon" :size="16">
+              <component :is="item.icon" />
+            </el-icon>
             <span class="item-text">{{ item.name }}</span>
-            <el-icon v-if="isActive(item.path)" class="active-indicator" :size="14"><ArrowRight /></el-icon>
           </router-link>
         </div>
       </nav>
 
       <div class="sidebar-footer">
         <router-link to="/projects" class="back-button">
-          <el-icon :size="18"><ArrowLeft /></el-icon>
+          <el-icon :size="16"><ArrowLeft /></el-icon>
           <span>返回项目列表</span>
         </router-link>
         <div class="user-mini">
@@ -174,19 +160,16 @@
       <!-- 顶部栏 -->
       <header class="top-bar">
         <div class="breadcrumb">
-          <div class="breadcrumb-item">
-            <el-icon :size="16" color="#6366f1"><FolderOpened /></el-icon>
-            <span class="project-title">{{ projectName }}</span>
-          </div>
-          <el-icon class="breadcrumb-separator" :size="14"><ArrowRight /></el-icon>
-          <span class="page-title">{{ currentPageTitle }}</span>
+          <span class="crumb-project">{{ projectName }}</span>
+          <el-icon class="breadcrumb-separator" :size="12"><ArrowRight /></el-icon>
+          <span class="crumb-page">{{ currentPageTitle }}</span>
         </div>
         <div class="top-actions">
           <div class="status-badge" :class="{ online: boardStore.isConnected }">
             <span class="status-dot"></span>
             <span class="status-text">{{ boardStore.isConnected ? '实时同步中' : '离线' }}</span>
           </div>
-          <el-button type="danger" link size="small" @click="handleLogout">
+          <el-button type="danger" link size="small" @click="handleLogout" title="退出登录">
             <el-icon><SwitchButton /></el-icon>
           </el-button>
         </div>
@@ -271,33 +254,12 @@ const iconMap: Record<string, Component> = {
   'Operation': Operation,
 };
 
-// 默认颜色映射
-const colorMap: Record<string, string> = {
-  'board': '#14b8a6',
-  'members': '#22c55e',
-  'tags': '#3B82F6',
-  'stats': '#a78bfa',
-  'chat': '#22d3ee',
-  'ai-chat': '#f472b6',
-  'qa': '#fb923c',
-  'notifications': '#f87171',
-  'settings': '#9ca3af',
-};
-
 // 获取图标组件
 const getIconComponent = (iconName?: string): Component => {
   if (iconName && iconMap[iconName]) {
     return iconMap[iconName];
   }
   return Document;
-};
-
-// 获取图标颜色
-const getIconColor = (item: MenuItem): string => {
-  // 如果有子菜单，使用第一个子菜单的路径来确定颜色
-  const path = item.path || item.children?.[0]?.path || '';
-  const key = path.replace('/', '').split('/')[0] || '';
-  return colorMap[key] || '#6366f1';
 };
 
 // 切换目录展开/收起
@@ -319,32 +281,32 @@ const isDirectoryActive = (item: MenuItem): boolean => {
 
 // 默认菜单配置（当没有动态菜单时使用）
 const mainMenuItems = [
-  { path: '/board', name: '看板', icon: markRaw(Grid), color: '#14b8a6' },
-  { path: '/members', name: '成员管理', icon: markRaw(User), color: '#22c55e' },
-  { path: '/tags', name: '标签管理', icon: markRaw(Collection), color: '#3B82F6' },
+  { path: '/board', name: '看板', icon: markRaw(Grid) },
+  { path: '/members', name: '成员管理', icon: markRaw(User) },
+  { path: '/tags', name: '标签管理', icon: markRaw(Collection) },
 ];
 
 const projectMenuItems = [
-  { path: '/sprints', name: '迭代管理', icon: markRaw(Timer), color: '#f59e0b' },
-  { path: '/quality', name: '质量报告', icon: markRaw(TrendCharts), color: '#14b8a6' },
-  { path: '/bugs', name: 'Bug 管理', icon: markRaw(Warning), color: '#ef4444' },
-  { path: '/bugs/my', name: '我的 Bug', icon: markRaw(Warning), color: '#f97316' },
-  { path: '/api-docs', name: 'API 文档', icon: markRaw(Document), color: '#6366f1' },
-  { path: '/stats', name: '统计报表', icon: markRaw(DataLine), color: '#a78bfa' },
+  { path: '/sprints', name: '迭代管理', icon: markRaw(Timer) },
+  { path: '/quality', name: '质量报告', icon: markRaw(TrendCharts) },
+  { path: '/bugs', name: 'Bug 管理', icon: markRaw(Warning) },
+  { path: '/bugs/my', name: '我的 Bug', icon: markRaw(Warning) },
+  { path: '/api-docs', name: 'API 文档', icon: markRaw(Document) },
+  { path: '/stats', name: '统计报表', icon: markRaw(DataLine) },
 ];
 
 const toolMenuItems = [
-  { path: '/chat', name: '项目聊天', icon: markRaw(ChatLineRound), color: '#22d3ee' },
-  { path: '/ai-chat', name: 'AI助手', icon: markRaw(ChatDotRound), color: '#f472b6' },
-  { path: '/notifications', name: '消息', icon: markRaw(Bell), color: '#f87171' },
-  { path: '/settings', name: '设置', icon: markRaw(Setting), color: '#9ca3af' },
+  { path: '/chat', name: '项目聊天', icon: markRaw(ChatLineRound) },
+  { path: '/ai-chat', name: 'AI助手', icon: markRaw(ChatDotRound) },
+  { path: '/notifications', name: '消息', icon: markRaw(Bell) },
+  { path: '/settings', name: '设置', icon: markRaw(Setting) },
 ];
 
 // 系统管理菜单
 const systemMenuItems = [
-  { path: '/system/menu', name: '菜单管理', icon: markRaw(Menu), color: '#6366f1' },
-  { path: '/system/role', name: '角色管理', icon: markRaw(UserFilled), color: '#8b5cf6' },
-  { path: '/system/user', name: '用户管理', icon: markRaw(User), color: '#a78bfa' },
+  { path: '/system/menu', name: '菜单管理', icon: markRaw(Menu) },
+  { path: '/system/role', name: '角色管理', icon: markRaw(UserFilled) },
+  { path: '/system/user', name: '用户管理', icon: markRaw(User) },
 ];
 
 // 菜单分区 - 只包含后端特有的动态菜单
@@ -461,11 +423,11 @@ watch(() => projectId.value, () => {
   background: var(--color-bg);
 }
 
-/* 左侧菜单 */
+/* ── Sidebar ── */
 .sidebar {
-  width: 240px;
+  width: 232px;
   background: var(--color-surface);
-  border-right: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border-light);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -473,49 +435,51 @@ watch(() => projectId.value, () => {
 }
 
 .sidebar-header {
-  padding: 24px 20px;
+  padding: 16px;
   border-bottom: 1px solid var(--color-border-light);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 0 4px;
 }
 
 .brand-text {
   font-family: var(--font-heading);
-  font-weight: 700;
-  font-size: 20px;
-  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--color-text);
+  letter-spacing: -0.01em;
 }
 
 .project-info {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px;
+  gap: 10px;
+  padding: 8px 10px;
   background: var(--color-surface-sunken);
-  border-radius: 2px;
-  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
 }
 
 .project-badge {
-  width: 32px;
-  height: 32px;
-  background: var(--color-text);
-  border-radius: 2px;
+  width: 24px;
+  height: 24px;
+  background: var(--color-primary-bg);
+  color: var(--color-primary);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--color-text-inverse);
   flex-shrink: 0;
 }
 
 .project-name {
   margin: 0;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
   overflow: hidden;
@@ -523,46 +487,48 @@ watch(() => projectId.value, () => {
   white-space: nowrap;
 }
 
+/* ── Menu ── */
 .menu {
   flex: 1;
-  padding: 16px 12px;
+  padding: 12px 8px;
   overflow-y: auto;
 }
 
 .menu-section {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .section-title {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text-tertiary);
-  letter-spacing: 0.3px;
-  padding: 0 12px;
-  margin-bottom: 8px;
+  padding: 6px 12px;
+  margin-bottom: 2px;
 }
 
 .menu-directory {
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  margin-bottom: 4px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 7px 12px;
+  margin: 1px 0;
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   text-decoration: none;
-  transition: all 0.25s ease;
+  transition: background var(--transition-fast), color var(--transition-fast);
   cursor: pointer;
   position: relative;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .menu-item:hover {
-  background: var(--color-primary-bg);
+  background: var(--color-surface-hover);
   color: var(--color-text);
 }
 
@@ -576,11 +542,11 @@ watch(() => projectId.value, () => {
   content: '';
   position: absolute;
   left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  top: 8px;
+  bottom: 8px;
   width: 2px;
-  height: 24px;
-  background: var(--color-accent);
+  background: var(--color-primary);
+  border-radius: 2px;
 }
 
 .menu-item.directory {
@@ -589,7 +555,8 @@ watch(() => projectId.value, () => {
 
 .expand-icon {
   margin-left: auto;
-  transition: transform 0.25s ease;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-fast);
 }
 
 .expand-icon.expanded {
@@ -597,14 +564,14 @@ watch(() => projectId.value, () => {
 }
 
 .submenu {
-  padding-left: 20px;
-  margin-top: 4px;
+  padding-left: 16px;
+  margin-top: 2px;
 }
 
 .submenu-item {
-  padding: 8px 12px;
-  font-size: 13px;
-  margin-bottom: 2px;
+  padding: 6px 12px;
+  font-size: 12px;
+  margin: 1px 0;
 }
 
 .submenu-item::before {
@@ -612,80 +579,62 @@ watch(() => projectId.value, () => {
 }
 
 .item-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   flex-shrink: 0;
-  transition: all 0.25s ease;
-  color: var(--color-text-tertiary);
-}
-
-.menu-item.active .item-icon,
-.menu-item:hover .item-icon {
-  color: var(--color-text);
-}
-
-.menu-item:hover .item-icon {
-  transform: scale(1.1);
+  color: inherit;
 }
 
 .item-text {
   flex: 1;
-  font-size: 14px;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.active-indicator {
-  color: var(--color-primary);
-}
-
+/* ── Sidebar footer ── */
 .sidebar-footer {
-  padding: 16px;
+  padding: 12px 8px;
   border-top: 1px solid var(--color-border-light);
-  background: var(--color-bg);
 }
 
 .back-button {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  border-radius: 0;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 13px;
-  transition: all 0.25s ease;
-  background: transparent;
-  border: 1px solid var(--color-border);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .back-button:hover {
+  background: var(--color-surface-hover);
   color: var(--color-text);
-  border-color: var(--color-text);
 }
 
 .user-mini {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 12px;
-  background: transparent;
-  border-radius: 0;
-  border-top: 1px solid var(--color-border);
-  padding-top: 16px;
-  margin-top: 8px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--color-border-light);
+  padding-top: 12px;
+  margin-top: 4px;
 }
 
 .user-name {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 右侧内容区 */
+/* ── Main content ── */
 .main-content {
   flex: 1;
   display: flex;
@@ -695,33 +644,23 @@ watch(() => projectId.value, () => {
 }
 
 .top-bar {
-  height: 56px;
+  height: 52px;
   background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-light);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  padding: 0 24px;
   flex-shrink: 0;
 }
 
 .breadcrumb {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.breadcrumb-item {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  padding: 6px 14px;
-  background: var(--color-bg);
-  border-radius: 8px;
-  border: 1px solid var(--color-border);
 }
 
-.project-title {
+.crumb-project {
   font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
@@ -731,56 +670,43 @@ watch(() => projectId.value, () => {
   color: var(--color-text-tertiary);
 }
 
-.page-title {
+.crumb-page {
   font-size: 14px;
   color: var(--color-text-secondary);
-  font-weight: 500;
 }
 
 .top-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .status-badge {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 0;
-  background: transparent;
-  border: none;
-  font: 500 11px/1 var(--font-mono);
-  color: var(--color-text-secondary);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  transition: all 0.3s ease;
-}
-
-.status-badge.online {
+  padding: 4px 10px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
 .status-dot {
   width: 6px;
   height: 6px;
-  border-radius: 0;
+  border-radius: 50%;
   background: var(--color-text-tertiary);
-  transition: all 0.3s ease;
 }
 
 .status-badge.online .status-dot {
   background: var(--color-success);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 .page-container {
   flex: 1;
   overflow: auto;
-  padding: 24px;
+  padding: 24px 32px;
 }
 </style>

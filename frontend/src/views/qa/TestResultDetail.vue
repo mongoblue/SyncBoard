@@ -406,10 +406,10 @@
         </template>
         <div class="screenshots-grid">
           <div
-            v-for="screenshot in result.screenshots"
+            v-for="(screenshot, idx) in result.screenshots"
             :key="screenshot.id"
             class="screenshot-item"
-            @click="previewScreenshot(screenshot)"
+            @click="previewScreenshot(screenshot, idx)"
           >
             <img :src="screenshot.image_url || screenshot.image" :alt="screenshot.name" />
             <div class="screenshot-info">
@@ -422,8 +422,29 @@
     </div>
 
     <!-- 截图预览弹窗 -->
-    <el-dialog v-model="previewVisible" title="截图预览" width="80%">
-      <img v-if="currentScreenshot" :src="currentScreenshot.image_url || currentScreenshot.image" style="width: 100%" />
+    <el-dialog v-model="previewVisible" title="截图预览" width="80%" class="screenshot-preview-dialog">
+      <el-carousel
+        v-if="previewVisible && previewList.length > 0"
+        :initial-index="previewIndex"
+        :autoplay="false"
+        arrow="always"
+        indicator-position="outside"
+        height="65vh"
+        trigger="click"
+        @change="onCarouselChange"
+      >
+        <el-carousel-item v-for="(item, i) in previewList" :key="item.id || i">
+          <div class="carousel-slide">
+            <img :src="item.image_url || item.image" :alt="item.name" class="carousel-img" />
+            <div class="carousel-caption">{{ item.name }}<span v-if="item.description"> · {{ item.description }}</span></div>
+          </div>
+        </el-carousel-item>
+      </el-carousel>
+      <img
+        v-else-if="previewVisible && currentScreenshot"
+        :src="currentScreenshot.image_url || currentScreenshot.image"
+        style="width: 100%"
+      />
     </el-dialog>
   </div>
 </template>
@@ -442,6 +463,8 @@ const result = ref<any>(null);
 const activeCaseIndex = ref<number[]>([0]); // 默认展开第一个
 const previewVisible = ref(false);
 const currentScreenshot = ref<any>(null);
+const previewList = ref<any[]>([]);
+const previewIndex = ref(0);
 
 const resultId = computed(() => route.params.id as string);
 
@@ -652,13 +675,21 @@ const goBack = () => {
 };
 
 // 预览截图
-const previewScreenshot = (screenshot: any) => {
+const previewScreenshot = (screenshot: any, idx?: number | string) => {
+  previewList.value = result.value?.screenshots || [];
+  previewIndex.value = typeof idx === 'number' ? idx : Math.max(0, previewList.value.findIndex((s: any) => s.id === screenshot.id));
   currentScreenshot.value = screenshot;
   previewVisible.value = true;
 };
 
+const onCarouselChange = (current: number) => {
+  previewIndex.value = current;
+  currentScreenshot.value = previewList.value[current] || currentScreenshot.value;
+};
+
 // 预览图片
 const previewImage = (url: string) => {
+  previewList.value = [];
   currentScreenshot.value = { image_url: url };
   previewVisible.value = true;
 };
@@ -926,6 +957,35 @@ onMounted(() => {
   width: 100%;
   height: 150px;
   object-fit: cover;
+}
+
+.carousel-slide {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg, #f4f4f5);
+}
+
+.carousel-img {
+  max-width: 100%;
+  max-height: calc(100% - 40px);
+  object-fit: contain;
+}
+
+.carousel-caption {
+  margin-top: 10px;
+  padding: 6px 16px;
+  font-size: 14px;
+  color: var(--color-text);
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: var(--radius-sm, 4px);
+  text-align: center;
+}
+
+.screenshot-preview-dialog :deep(.el-carousel__indicators--outside) {
+  margin-top: 12px;
 }
 
 .screenshot-info {

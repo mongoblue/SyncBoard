@@ -29,6 +29,13 @@
       <el-button @click="emit('append-all', recordEvents)" :disabled="!recordEvents.length">追加到当前用例</el-button>
     </div>
 
+    <div v-if="status === 'stopped'" class="footer-actions">
+      <el-button type="success" :disabled="!recordEvents.length" @click="onComplete">
+        完成并关闭（自动追加 {{ recordEvents.length }} 条）
+      </el-button>
+      <el-button @click="onDiscard">放弃录制并关闭</el-button>
+    </div>
+
     <el-dialog v-model="assertDialogVisible" title="选择断言类型" width="420px">
       <template v-if="pendingAssert">
         <el-form label-width="80px" size="small">
@@ -114,9 +121,17 @@ watch(events, (list) => {
 function onStart() { start(urlInput.value) }
 function onPause() { pause() }
 function onResume() { resume() }
-function onStop() { emit('panel-stopped'); stop() }
+function onStop() { stop() }
 
 function onTryStep(step: any) { runStep(step) }
+
+function onComplete() {
+  if (recordEvents.value.length > 0) {
+    emit('append-all', recordEvents.value)
+  }
+  emit('panel-stopped')
+}
+function onDiscard() { emit('panel-stopped') }
 
 function confirmAssert() {
   if (!pendingAssert.value) return
@@ -145,4 +160,5 @@ function confirmAssert() {
 .ev-item { display: flex; gap: 8px; padding: 4px; border-bottom: 1px dashed #f0f0f0; font-size: 12px; align-items: center; }
 .ev-item .selector { flex: 1; word-break: break-all; }
 .ev-item .value { color: #888; }
+.footer-actions { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid #eee; }
 </style>

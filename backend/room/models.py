@@ -1,3 +1,24 @@
+"""
+room 应用模型 —— 协作看板核心。
+
+按业务分组：
+  用户     → UserProfile（头像扩展）
+  项目     → Project（UUID PK, owner, members M2M）
+  标签     → Tag
+  看板列   → Column（UUID PK, position 浮点排序）
+  任务     → Task（UUID PK, position, tags M2M, assignee）
+  评论     → TaskComment
+  附件     → TaskAttachment
+  活动     → TaskActivityLog
+  通知     → Notification
+  审计     → AuditLog
+  AI 对话  → AIConversation, AIMessage
+  Sprint   → Sprint, SprintTask
+  文档     → ProjectApiDoc
+  角色     → ProjectRole, ProjectMember
+
+关键外链：Task → Column → Project，Project 被 qa_center/bug_tracker 大量 FK 引用。
+"""
 import uuid
 from django.db import models
 from django.contrib.auth.models import User

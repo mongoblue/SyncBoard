@@ -111,53 +111,6 @@
         创建第一个用例
       </el-button>
     </el-empty>
-
-    <!-- 运行结果弹窗 -->
-    <el-dialog
-      v-model="resultDialogVisible"
-      title="测试执行结果"
-      width="70%"
-      destroy-on-close
-    >
-      <div v-if="runResult" class="run-result">
-        <div class="result-header">
-          <el-tag :type="runResult.success ? 'success' : 'danger'" size="large">
-            {{ runResult.success ? '✅ 执行成功' : '❌ 执行失败' }}
-          </el-tag>
-        </div>
-
-        <!-- 截图 -->
-        <div v-if="runResult.screenshot" class="screenshot-wrapper">
-          <img :src="runResult.screenshot" alt="测试截图" class="screenshot-img" />
-        </div>
-
-        <!-- 错误信息 -->
-        <el-alert
-          v-if="runResult.error"
-          :title="runResult.error"
-          type="error"
-          :closable="false"
-          show-icon
-        />
-
-        <!-- 日志 -->
-        <div class="logs-section">
-          <h4>执行日志</h4>
-          <div class="logs-content">
-            <div
-              v-for="(log, index) in runResult.logs"
-              :key="index"
-              class="log-line"
-              :class="getLogClass(log)"
-            >
-              {{ log }}
-            </div>
-          </div>
-        </div>
-      </div>
-    </el-dialog>
-
-    <RunDrawer v-model="runDrawerVisible" :task-id="currentTaskId" :case-name="currentCaseName" />
   </div>
 </template>
 
@@ -175,7 +128,6 @@ import {
   Delete
 } from '@element-plus/icons-vue';
 import service from '@/utils/request';
-import RunDrawer from './components/RunDrawer.vue';
 
 const router = useRouter();
 const route = useRoute();
@@ -185,12 +137,6 @@ const projects = ref<any[]>([]);
 const loading = ref(false);
 const selectedProject = ref(route.query.project as string || '');
 const searchKeyword = ref('');
-
-const resultDialogVisible = ref(false);
-const runResult = ref<any>(null);
-const currentTaskId = ref<string>('');
-const currentCaseName = ref<string>('');
-const runDrawerVisible = ref(false);
 
 // 加载项目列表
 const loadProjects = async () => {
@@ -251,19 +197,13 @@ const handleEdit = (row: any) => {
   });
 };
 
-// 运行测试
-const handleRun = async (row: any) => {
-  loading.value = true;
-  try {
-    const res = await service.post(`/qa/ui-cases/${row.id}/run/`);
-    currentTaskId.value = res.task_id;
-    currentCaseName.value = row.name;
-    runDrawerVisible.value = true;
-  } catch (error: any) {
-    ElMessage.error(error.response?.data?.error || '运行测试失败');
-  } finally {
-    loading.value = false;
-  }
+// 运行测试 -> 跳转到详情页并自动开跑
+const handleRun = (row: any) => {
+  router.push({
+    name: 'UiCaseDetail',
+    params: { id: row.id },
+    query: { autorun: '1' }
+  });
 };
 
 // 删除用例
@@ -286,15 +226,6 @@ const handleDelete = async (row: any) => {
       ElMessage.error('删除失败');
     }
   }
-};
-
-// 获取日志样式类
-const getLogClass = (log: string) => {
-  if (log.includes('✅')) return 'log-success';
-  if (log.includes('❌')) return 'log-error';
-  if (log.includes('⚠️')) return 'log-warning';
-  if (log.includes('🚀') || log.includes('📍')) return 'log-info';
-  return '';
 };
 
 onMounted(() => {
@@ -327,56 +258,4 @@ onMounted(() => {
   display: block;
   max-width: 300px;
 }
-
-/* 运行结果弹窗 */
-.run-result {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-}
-
-.result-header {
-  display: flex;
-  justify-content: center;
-}
-
-.screenshot-wrapper {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
-  background: var(--color-bg);
-}
-
-.screenshot-img {
-  width: 100%;
-  display: block;
-}
-
-.logs-section h4 {
-  margin: 0 0 10px 0;
-  color: var(--color-text-secondary);
-}
-
-.logs-content {
-  background: var(--color-surface-sunken);
-  border: 1px solid var(--color-border-light);
-  color: var(--color-text);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  max-height: 300px;
-  overflow-y: auto;
-}
-
-.log-line {
-  color: var(--color-text);
-  padding: 2px 0;
-}
-
-.log-success { color: var(--color-success); }
-.log-error { color: var(--color-danger); }
-.log-warning { color: var(--color-warning); }
-.log-info { color: var(--color-info); }
 </style>

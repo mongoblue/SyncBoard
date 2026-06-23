@@ -1,3 +1,12 @@
+<!--
+UI 用例编辑 + 录制面板。
+
+嵌入 RecorderPanel 组件，通过 useRecorderSocket.ts 连接 ws/qa/recorder/。
+录制时后端启动 recorder_supervisor → recorder_worker（Playwright + CDP）。
+录制步骤保存到 UiTestCase 的 steps JSON 字段。
+
+路由：/projects/:projectId/qa/ui-cases[/create|/:id]
+-->
 <template>
   <div class="ui-case-detail">
     <div class="page-header">
@@ -570,7 +579,7 @@ const handleSave = async () => {
   }
 };
 
-// 运行测试（已保存的用例）
+// 运行测试（已保存的用例，同步：后端跑完再统一展示到右侧控制台）
 const handleRun = async () => {
   if (!isEdit.value) {
     ElMessage.warning('请先保存用例');
@@ -646,9 +655,12 @@ const goBack = () => {
   router.push({ name: 'UiCaseList' });
 };
 
-onMounted(() => {
+onMounted(async () => {
   loadProjects();
-  loadCaseDetail();
+  await loadCaseDetail();
+  if (route.query.autorun === '1' && isEdit.value) {
+    handleRun();
+  }
 });
 
 // 切换录制面板显示（实际的 WebSocket 由 RecorderPanel 内部管理）

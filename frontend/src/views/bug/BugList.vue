@@ -1,9 +1,9 @@
 <template>
   <div class="bug-list">
-    <div class="page-header">
-      <div class="header-left">
-        <h2>Bug 管理</h2>
-        <p class="subtitle">报告、追踪、修复 Bug 的完整生命周期</p>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">Bug 管理</h1>
+        <p class="page-subtitle">报告、追踪、修复 Bug 的完整生命周期</p>
       </div>
       <div class="header-actions">
         <el-button @click="loadStats">
@@ -19,7 +19,7 @@
           新建 Bug
         </el-button>
       </div>
-    </div>
+    </header>
 
     <!-- 统计卡片 -->
     <div class="statistics-cards" v-if="stats">
@@ -505,39 +505,37 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.bug-list {
-  padding: 20px;
-}
-.page-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 20px;
-}
-.subtitle {
-  color: var(--el-text-color-secondary); font-size: 14px; margin-top: 4px;
-}
+.bug-list { padding: 0; }
+.header-actions { display: flex; gap: 8px; }
+
 .statistics-cards {
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
   margin-bottom: 20px;
 }
-.stat-card { text-align: center; }
-.stat-value { font-size: 28px; font-weight: 600; color: var(--el-color-primary); }
-.stat-card.success .stat-value { color: var(--el-color-success); }
-.stat-card.warning .stat-value { color: var(--el-color-warning); }
-.stat-card.danger .stat-value { color: var(--el-color-danger); }
-.stat-label { color: var(--el-text-color-secondary); margin-top: 4px; font-size: 13px; }
+.stat-card { text-align: center; border: 1px solid var(--color-border); border-radius: var(--radius-md); box-shadow: var(--shadow-sm); }
+.stat-value { font-family: var(--font-heading); font-size: 24px; font-weight: 600; color: var(--color-text); }
+.stat-card.success .stat-value { color: var(--color-success); }
+.stat-card.warning .stat-value { color: var(--color-warning); }
+.stat-card.danger .stat-value { color: var(--color-danger); }
+.stat-label { color: var(--color-text-secondary); margin-top: 4px; font-size: 13px; }
+
 .filter-bar {
-  display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+  display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
 }
 .clickable-row { cursor: pointer; }
 .pagination { margin-top: 16px; justify-content: flex-end; display: flex; }
+
 .empty-demo-banner {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; background: var(--el-fill-color-light);
-  margin-bottom: 12px; border: 1px dashed var(--el-border-color);
+  padding: 12px 16px; background: var(--color-surface-sunken);
+  margin-bottom: 12px; border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
 }
+
 .linked-task-chip {
-  font-family: monospace;
-  color: var(--el-text-color-secondary);
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
-.muted { color: var(--el-text-color-placeholder); }
+.muted { color: var(--color-text-tertiary); }
 </style>

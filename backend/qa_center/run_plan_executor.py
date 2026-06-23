@@ -1,4 +1,7 @@
-"""批量执行计划（TestRunPlan）执行器。
+"""
+批量执行计划（TestRunPlan）执行器。
+
+特性：
 
 特性：
 - 串行 / 并发（ThreadPoolExecutor）
@@ -271,7 +274,10 @@ class TestRunPlanExecutor:
             assertion_details = ua.run_assertions(active_assertions, ctx)
             all_passed = all(r.get('passed') for r in assertion_details) if assertion_details else True
 
-            if case.expected_status and status_code != case.expected_status:
+            has_status_code_assertion = any(
+                getattr(a, 'assertion_type', None) == 'status_code' for a in active_assertions
+            )
+            if not has_status_code_assertion and case.expected_status and status_code != case.expected_status:
                 all_passed = False
                 assertion_details.insert(0, {
                     'assertion_type': 'status_code',

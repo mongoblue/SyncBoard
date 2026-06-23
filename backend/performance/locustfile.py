@@ -1,90 +1,80 @@
+import os
+import time
 from locust import HttpUser, task, between
 import random
+import string
 
 class SyncBoardUser(HttpUser):
     wait_time = between(1, 3)
-    project_id = None
-    column_id = None
 
     def on_start(self):
-        """用户启动流程：登录 -> 提取CSRF -> 找项目"""
-        # 1. 登录
+        # 1. 登录获取 Token
+        self.username = os.environ.get('LOCUST_USERNAME', 'test_user')
+        self.password = os.environ.get('LOCUST_PASSWORD', 'password123')
+        
+        # 登录
         response = self.client.post("/api/auth/login/", json={
-            "username": "mongoblue", 
-            "password": "13579mnb"
+            "username": self.username,
+            "password": self.password
         })
-
+        
         if response.status_code == 200:
-            print("✅ 登录成功")
+            self.token = response.json().get("access")
+            # 更新 header，加入 Authorization
+            self.headers = {"Authorization": f"Bearer {self.token}"}
             
-            # 👇👇👇【关键修复】从 Cookie 提取 CSRF Token 并放入 Header 👇👇👇
-            # Django 要求 POST 请求必须带 X-CSRFToken 头
-            csrf_token = self.client.cookies.get("csrftoken")
-            if csrf_token:
-                self.client.headers.update({"X-CSRFToken": csrf_token})
-                print(f"✅ CSRF Token 已配置: {csrf_token[:10]}...")
-            else:
-                print("⚠️ 警告: 登录响应中没找到 csrftoken Cookie (如果你用的是 JWT/Token 认证可忽略)")
-
-            # 2. 获取项目列表
-            resp_proj = self.client.get("/api/projects/")
-            if resp_proj.status_code == 200 and len(resp_proj.json()) > 0:
-                self.project_id = resp_proj.json()[0]['id']
-                print(f"✅ 找到项目 ID: {self.project_id}")
+            # 创建项目和列
+            project_res = self.client.post("/api/projects/", json={
+                "name": f"Project {self.username}",
+                "description": "Load Testing Project"
+            }, headers=self.headers)
+            
+            if project_res.status_code == 201:
+                self.project_id = project_res.json()["id"]
                 
-                # 3. 获取列
-                resp_col = self.client.get(f"/api/columns/?project={self.project_id}")
-                if resp_col.status_code == 200:
-                    cols = resp_col.json()
-                    if len(cols) > 0:
-                        self.column_id = cols[0]['id']
-                        print(f"✅ 找到列 ID: {self.column_id}")
+                # 获取列 (项目创建时会自动创建默认列)
+                column_res = self.client.get(f"/api/columns/?project={self.project_id}", headers=self.headers)
+                
+                if column_res.status_code == 200:
+                    columns = column_res.json()
+                    if columns:
+                        self.column_id = columns[0]["id"]
                     else:
-                        print("⚠️ 没有列，尝试创建...")
-                        self.create_column()
+                        print("No columns found")
+                else:
+                     print(f"Get columns failed: {column_res.status_code} {column_res.text}")
             else:
-                print("❌ 没有找到项目，请检查数据库")
+                 print(f"Create project failed: {project_res.status_code} {project_res.text}")
         else:
-            print(f"❌ 登录失败: {response.status_code}")
-
-    def create_column(self):
-        """备用方案：如果没有列，就现造一个"""
-        if self.project_id:
-            resp = self.client.post("/api/columns/", json={
-                "project": self.project_id,
-                "title": "Locust Auto Column",
-                "position": 1
-            })
-            if resp.status_code == 201:
-                self.column_id = resp.json()['id']
-                print(f"✅ 自动创建列成功: {self.column_id}")
+            print(f"Login failed: {response.text}")
+            self.token = None
 
     @task(3)
-    def view_projects(self):
-        self.client.get("/api/projects/")
+    def create_task(self):
+        if not hasattr(self, 'column_id'):
+            return
+            
+        task_title = ''.join(random.choices(string.ascii_letters, k=10))
+        self.client.post("/api/tasks/", json={
+            "title": f"Task {task_title}",
+            "content": "Load testing content",
+            "column": self.column_id,
+            "position": 0
+        }, headers=self.headers)
+
+    @task(3)
+    def search_tasks(self):
+        # 模拟搜索任务
+        # 我们搜索 "Task" 这个词，因为我们在创建任务时使用了它
+        # 注意：Search endpoint 需要我们在 urls.py 里确认
+        # 假设是 /api/tasks/search/
+        self.client.get("/api/tasks/search/?q=Task", headers=self.headers)
 
     @task(1)
-    def create_task(self):
-        # 只有当 Project 和 Column 都拿到手了，才发任务
-        if self.column_id and self.project_id:
-            # print(f"正在尝试创建任务: Proj={self.project_id}, Col={self.column_id}") # 调试用
-            
-            response = self.client.post("/api/tasks/", json={
-                "title": f"Stress Test {random.randint(1, 1000)}",
-                "description": "Generated by Locust",
-                # 👇 关键修复 1: 必须带上 project ID，否则后端不知道属于哪个项目
-                "project": self.project_id, 
-                
-                # 👇 关键修复 2: 确保字段名和后端 Serializer 一致
-                # 如果后端定义的是 column = serializers.PrimaryKeyRelatedField(...)
-                # 这里传 ID 即可
-                "column": self.column_id,
-                
-                # 👇 建议加上: 防止后端因为缺省值报错
-                "priority": "medium", 
-                "status": "todo" 
-            })
-            
-            # 👇 增加错误打印，这样如果不通，控制台直接告诉你原因
-            if response.status_code != 201:
-                print(f"❌ 创建任务失败: {response.status_code} - {response.text}")
+    def view_board(self):
+        # 浏览看板数据（获取项目下列和任务）
+        if self.project_id:
+            # 获取列
+             self.client.get(f"/api/columns/?project={self.project_id}", headers=self.headers)
+             # 获取任务
+             self.client.get(f"/api/tasks/?project={self.project_id}", headers=self.headers)

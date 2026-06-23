@@ -1,15 +1,15 @@
 <template>
   <div class="user-management">
-    <div class="page-header">
-      <h2 class="page-title">
-        <el-icon><User /></el-icon>
-        用户管理
-      </h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">用户管理</h1>
+        <p class="page-subtitle">管理系统账号、状态、角色分配与凭据</p>
+      </div>
       <el-button type="primary" @click="handleAdd" v-permission="'sys:user:add'">
-        <el-icon><Plus /></el-icon>
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         新增用户
       </el-button>
-    </div>
+    </header>
 
     <el-card class="user-card">
       <!-- 搜索栏 -->
@@ -225,7 +225,7 @@ import { ref, onMounted } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import type { FormInstance, FormRules } from 'element-plus';
 import service from '@/utils/request';
-import { Plus, User, Search } from '@element-plus/icons-vue';
+import { Plus, Search } from '@element-plus/icons-vue';
 
 // 默认头像
 const defaultAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png';
@@ -452,37 +452,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.user-management {
-  padding: 20px;
-}
+.user-management { padding: 0; }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
+.user-card { min-height: 500px; }
 
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.user-card {
-  min-height: 500px;
-}
-
-.search-bar {
-  margin-bottom: 20px;
-}
+.search-bar { margin-bottom: 16px; }
 
 .no-role {
-  color: var(--text-secondary);
+  color: var(--color-text-tertiary);
   font-size: 12px;
 }
 </style>

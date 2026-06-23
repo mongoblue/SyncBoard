@@ -1,15 +1,15 @@
 <template>
   <div class="sprint-board" v-loading="loading">
-    <div class="page-header">
+    <header class="page-header">
       <div>
-        <el-button link @click="$router.push(`/projects/${projectId}/sprints`)">
+        <el-button link @click="$router.push(`/projects/${projectId}/sprints`)" style="padding-left: 0">
           <el-icon><ArrowLeft /></el-icon> 返回迭代列表
         </el-button>
-        <h2>{{ sprint?.name }}</h2>
-        <p v-if="sprint?.goal" class="goal">{{ sprint.goal }}</p>
+        <h1 class="page-title">{{ sprint?.name }}</h1>
+        <p v-if="sprint?.goal" class="page-subtitle">{{ sprint.goal }}</p>
       </div>
       <el-tag :type="sprint?.is_active ? 'success' : 'info'">{{ sprint?.is_active ? '进行中' : '已结束' }}</el-tag>
-    </div>
+    </header>
 
     <el-row :gutter="20">
       <!-- 任务列表 -->
@@ -128,8 +128,8 @@ const renderBurndown = (data: any) => {
     xAxis: { type: 'category', data: bd.map((d: any) => d.date), axisLabel: { rotate: 30, fontSize: 10 } },
     yAxis: { type: 'value', name: '剩余任务' },
     series: [
-      { name: '理想线', type: 'line', data: bd.map((d: any) => d.ideal), lineStyle: { type: 'dashed', color: '#94A3B8' }, itemStyle: { color: '#94A3B8' } },
-      { name: '实际剩余', type: 'line', data: bd.map((d: any) => d.remaining), lineStyle: { color: '#14B8A6' }, itemStyle: { color: '#14B8A6' }, areaStyle: { color: 'rgba(20,184,166,0.08)' } },
+      { name: '理想线', type: 'line', data: bd.map((d: any) => d.ideal), lineStyle: { type: 'dashed', color: '#8C959F' }, itemStyle: { color: '#8C959F' } },
+      { name: '实际剩余', type: 'line', data: bd.map((d: any) => d.remaining), lineStyle: { color: '#0F766E' }, itemStyle: { color: '#0F766E' }, areaStyle: { color: 'rgba(15,118,110,0.08)' } },
     ],
     grid: { left: 40, right: 20, top: 10, bottom: 40 },
   });
@@ -186,19 +186,7 @@ onMounted(fetchSprint);
 </script>
 
 <style scoped>
-.sprint-board { max-width: 1100px; }
-
-.page-header { margin-bottom: 20px; }
-
-.page-header h2 {
-  margin: 0 0 4px;
-  font-family: var(--font-heading);
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.goal { color: var(--color-text-secondary); font-size: 13px; margin: 0; }
+.sprint-board { padding: 0; }
 
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 

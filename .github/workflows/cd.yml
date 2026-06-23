@@ -1,0 +1,277 @@
+name: SyncBoard CD - Deploy
+
+on:
+  workflow_run:
+    workflows: ["SyncBoard Enterprise CI/CD"]
+    types:
+      - completed
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+      version:
+        description: "Version tag to deploy (e.g., v1.0.0)"
+        required: false
+        default: ""
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      environment: ${{ steps.version.outputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine Version and Environment
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            ENV="staging"
+            VERSION=""
+          fi
+          
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ github.sha }}"
+          fi
+          
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+          echo "Deploying version: $VERSION to environment: $ENV"
+
+  deploy-staging:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: needs.prepare.outputs.environment == 'staging'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Staging Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: ${{ secrets.STAGING_PORT || 22 }}
+          script: |
+            cd ${{ secrets.STAGING_DEPLOY_PATH }}
+            
+            echo "Pulling latest images..."
+            docker compose pull
+            
+            echo "Stopping existing containers..."
+            docker compose down --remove-orphans
+            
+            echo "Starting new containers..."
+            docker compose up -d
+            
+            echo "Waiting for services to be healthy..."
+            sleep 30
+            
+            echo "Running database migrations..."
+            docker compose exec -T backend python manage.py migrate --noinput
+            
+            echo "Collecting static files..."
+            docker compose exec -T backend python manage.py collectstatic --noinput
+            
+            echo "Staging deployment completed!"
+
+      - name: Health Check
+        run: |
+          echo "Checking staging health..."
+          curl -f ${{ vars.STAGING_URL }}/health || exit 1
+          echo "Staging is healthy!"
+
+      - name: Notify Deployment Status
+        if: always()
+        run: |
+          STATUS="success"
+          if [ "${{ job.status }}" != "success" ]; then
+            STATUS="failed"
+          fi
+          echo "Staging deployment: $STATUS"
+
+  deploy-production:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: needs.prepare.outputs.environment == 'production'
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create Deployment Record
+        run: |
+          echo "Creating deployment record for version: ${{ needs.prepare.outputs.version }}"
+          echo "Environment: production"
+          echo "Timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+      - name: Deploy to Production Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ secrets.PRODUCTION_PORT || 22 }}
+          script: |
+            cd ${{ secrets.PRODUCTION_DEPLOY_PATH }}
+            
+            echo "Backup current version..."
+            docker compose exec -T backend python manage.py dumpdata > backup_$(date +%Y%m%d_%H%M%S).json || true
+            
+            echo "Pulling latest images..."
+            docker compose pull
+            
+            echo "Performing rolling update..."
+            docker compose up -d --no-deps --scale backend=2 backend
+            sleep 30
+            docker compose up -d --no-deps --scale backend=1 backend
+            
+            echo "Running database migrations..."
+            docker compose exec -T backend python manage.py migrate --noinput
+            
+            echo "Collecting static files..."
+            docker compose exec -T backend python manage.py collectstatic --noinput
+            
+            echo "Clearing cache..."
+            docker compose exec -T redis redis-cli FLUSHALL || true
+            
+            echo "Production deployment completed!"
+
+      - name: Health Check
+        run: |
+          echo "Checking production health..."
+          for i in {1..10}; do
+            if curl -f ${{ vars.PRODUCTION_URL }}/health; then
+              echo "Production is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10 seconds..."
+            sleep 10
+          done
+          echo "Production health check failed!"
+          exit 1
+
+      - name: Create GitHub Release
+        if: startsWith(needs.prepare.outputs.version, 'v')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          name: Release ${{ needs.prepare.outputs.version }}
+          body: |
+            ## SyncBoard Release ${{ needs.prepare.outputs.version }}
+            
+            ### Deployment Info
+            - Environment: Production
+            - Commit: ${{ github.sha }}
+            - Deployed at: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+            
+            ### Changes
+            See [commit history](https://github.com/${{ github.repository }}/commits/${{ github.sha }}) for details.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify Deployment Success
+        if: success() && env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{
+              "text": "SyncBoard Production Deployment Successful",
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "Production Deployment Successful"
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Version:*\n${{ needs.prepare.outputs.version }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Environment:*\nProduction"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*Commit:*\n${{ github.sha }}"
+                    },
+                    {
+                      "type": "mrkdwn",
+                      "text": "*URL:*\n${{ vars.PRODUCTION_URL }}"
+                    }
+                  ]
+                }
+              ]
+            }' \
+            $SLACK_WEBHOOK_URL || true
+
+  rollback:
+    needs: prepare
+    runs-on: ubuntu-latest
+    if: failure() && needs.prepare.outputs.environment == 'production'
+    environment:
+      name: production
+    steps:
+      - name: Rollback Production
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          port: ${{ secrets.PRODUCTION_PORT || 22 }}
+          script: |
+            cd ${{ secrets.PRODUCTION_DEPLOY_PATH }}
+            
+            echo "Rolling back to previous version..."
+            docker compose down --remove-orphans
+            docker compose up -d
+            
+            echo "Rollback completed!"
+
+      - name: Notify Rollback
+        if: env.SLACK_WEBHOOK_URL != ''
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{
+              "text": "SyncBoard Production Rollback Executed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *Production Rollback Executed*\nDeployment failed and rollback was triggered automatically."
+                  }
+                }
+              ]
+            }' \
+            $SLACK_WEBHOOK_URL || true

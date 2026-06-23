@@ -1,8 +1,11 @@
 <template>
   <div class="stats-page">
-    <div class="page-header">
-      <h2>统计报表</h2>
-    </div>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">统计报表</h1>
+        <p class="page-subtitle">项目任务、成员与标签的总体分布</p>
+      </div>
+    </header>
 
     <!-- 概览卡片 -->
     <div class="stats-overview">
@@ -17,7 +20,7 @@
       </el-card>
 
       <el-card class="stat-card" shadow="never">
-        <div class="stat-icon" style="background: #f0fdf4; color: var(--color-success);">
+        <div class="stat-icon" style="background: var(--color-success-bg); color: var(--color-success);">
           <el-icon :size="24"><Check /></el-icon>
         </div>
         <div class="stat-info">
@@ -27,7 +30,7 @@
       </el-card>
 
       <el-card class="stat-card" shadow="never">
-        <div class="stat-icon" style="background: #fffbeb; color: var(--color-warning);">
+        <div class="stat-icon" style="background: var(--color-warning-bg); color: var(--color-warning);">
           <el-icon :size="24"><User /></el-icon>
         </div>
         <div class="stat-info">
@@ -37,7 +40,7 @@
       </el-card>
 
       <el-card class="stat-card" shadow="never">
-        <div class="stat-icon" style="background: var(--color-bg); color: var(--color-text-tertiary);">
+        <div class="stat-icon" style="background: var(--color-surface-sunken); color: var(--color-text-tertiary);">
           <el-icon :size="24"><Collection /></el-icon>
         </div>
         <div class="stat-info">
@@ -132,7 +135,7 @@ const totalTags = computed(() => {
 // 列统计
 const columnStats = computed(() => {
   const total = totalTasks.value;
-  const colors = [getComputedStyle(document.documentElement).getPropertyValue('--color-primary-light').trim() || '#14B8A6', getComputedStyle(document.documentElement).getPropertyValue('--color-success').trim() || '#22C55E', getComputedStyle(document.documentElement).getPropertyValue('--color-warning').trim() || '#F59E0B', getComputedStyle(document.documentElement).getPropertyValue('--color-danger').trim() || '#EF4444', getComputedStyle(document.documentElement).getPropertyValue('--color-text-tertiary').trim() || '#94A3B8'];
+  const colors = ['#0F766E', '#0969DA', '#9A6700', '#1A7F37', '#CF222E', '#8C959F'];
   return boardStore.Columns.map((col, index) => {
     const count = col.tasks?.length || 0;
     return {
@@ -147,7 +150,7 @@ const columnStats = computed(() => {
 // 成员统计
 const memberStats = computed(() => {
   const stats: Record<number, { name: string; avatar: string; count: number; color: string }> = {};
-  const colors = [getComputedStyle(document.documentElement).getPropertyValue('--color-primary-light').trim() || '#14B8A6', getComputedStyle(document.documentElement).getPropertyValue('--color-success').trim() || '#22C55E', getComputedStyle(document.documentElement).getPropertyValue('--color-warning').trim() || '#F59E0B', getComputedStyle(document.documentElement).getPropertyValue('--color-danger').trim() || '#EF4444', getComputedStyle(document.documentElement).getPropertyValue('--color-text-tertiary').trim() || '#94A3B8', getComputedStyle(document.documentElement).getPropertyValue('--color-primary-light').trim() || '#14B8A6'];
+  const colors = ['#0F766E', '#0969DA', '#9A6700', '#1A7F37', '#CF222E', '#8C959F'];
 
   // 初始化所有成员
   boardStore.Users.forEach((user, index) => {
@@ -155,7 +158,7 @@ const memberStats = computed(() => {
       name: user.username,
       avatar: user.profile?.avatar || '',
       count: 0,
-      color: colors[index % colors.length] || '#409eff',
+      color: colors[index % colors.length] || '#0F766E',
     };
   });
 
@@ -187,73 +190,63 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.stats-page {
-  max-width: 1000px;
-}
-
-.page-header {
-  margin-bottom: 25px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-family: var(--font-heading); font-size: 22px; font-weight: 600;
-  color: var(--color-text);
-}
+.stats-page { padding: 0; }
 
 .stats-overview {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-  margin-bottom: 25px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .stat-card {
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .stat-card :deep(.el-card__body) {
   display: flex;
   align-items: center;
-  gap: 15px;
-  padding: 20px;
+  gap: 12px;
+  padding: 16px 20px;
 }
 
 .stat-icon {
-  width: 50px;
-  height: 50px;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.stat-info {
-  flex: 1;
-}
+.stat-info { flex: 1; }
 
 .stat-value {
-  font-family: var(--font-heading); font-size: 28px;
+  font-family: var(--font-heading);
+  font-size: 24px;
   font-weight: 600;
   color: var(--color-text);
-  line-height: 1;
+  line-height: 1.2;
 }
 
 .stat-label {
-  font-size: 14px;
-  color: var(--color-text-tertiary);
-  margin-top: 5px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
 }
 
 .section-card {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 
 .section-card :deep(.el-card__header) {
   font-family: var(--font-heading);
+  font-size: 14px;
   font-weight: 600;
   color: var(--color-text);
   border-bottom: 1px solid var(--color-border-light);
@@ -266,15 +259,15 @@ onMounted(() => {
 }
 
 .avatar-circle {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
+  font-size: 11px;
+  font-weight: 600;
   overflow: hidden;
 }
 

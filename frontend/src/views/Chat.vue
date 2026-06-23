@@ -1,12 +1,15 @@
 <template>
   <div class="chat-page">
-    <div class="page-header">
-      <h2>项目聊天</h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">项目聊天</h1>
+        <p class="page-subtitle">项目成员实时沟通频道</p>
+      </div>
       <div class="connection-status">
         <span class="status-dot" :class="{ online: isConnected }"></span>
         <span>{{ isConnected ? '已连接' : '连接中...' }}</span>
       </div>
-    </div>
+    </header>
 
     <div class="chat-container">
       <div class="messages" ref="msgListRef">
@@ -157,30 +160,17 @@ onUnmounted(() => {
 
 <style scoped>
 .chat-page {
-  max-width: 900px;
+  padding: 0;
   height: calc(100vh - 140px);
   display: flex;
   flex-direction: column;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-header h2 {
-  margin: 0;
-  font-family: var(--font-heading); font-size: 22px; font-weight: 600;
-  color: var(--color-text);
 }
 
 .connection-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
 }
 
@@ -189,28 +179,27 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 50%;
   background: var(--color-danger);
-  transition: background 0.3s;
+  transition: background var(--transition-fast);
 }
 
-.status-dot.online {
-  background: var(--color-success);
-}
+.status-dot.online { background: var(--color-success); }
 
 .chat-container {
   flex: 1;
   display: flex;
   flex-direction: column;
   background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
-  background: var(--color-bg);
+  padding: 20px 24px;
+  background: var(--color-surface-sunken);
 }
 
 .empty-tip {
@@ -220,46 +209,40 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   color: var(--color-text-tertiary);
-  gap: 15px;
+  gap: 12px;
 }
 
 .message-item {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
-.message-item.my-msg {
-  flex-direction: row-reverse;
-}
+.message-item.my-msg { flex-direction: row-reverse; }
 
-.msg-avatar {
-  flex-shrink: 0;
-}
+.msg-avatar { flex-shrink: 0; }
 
 .avatar-circle {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--color-primary-bg);
   color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   font-family: var(--font-heading);
 }
 
 .avatar-circle.me {
   background: var(--color-primary);
-  color: white;
+  color: var(--color-text-inverse);
 }
 
-.msg-content {
-  max-width: 70%;
-}
+.msg-content { max-width: 70%; }
 
 .msg-user {
   font-size: 12px;
@@ -270,9 +253,9 @@ onUnmounted(() => {
 
 .msg-bubble {
   background: var(--color-surface);
+  border: 1px solid var(--color-border-light);
   padding: 10px 14px;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  border-radius: 12px;
   word-wrap: break-word;
   font-size: 14px;
   line-height: 1.5;
@@ -280,8 +263,9 @@ onUnmounted(() => {
 }
 
 .my-msg .msg-bubble {
-  background: var(--color-primary-light);
-  color: white;
+  background: var(--color-primary-bg);
+  border-color: var(--color-primary-border);
+  color: var(--color-text);
 }
 
 .msg-time {
@@ -290,19 +274,13 @@ onUnmounted(() => {
   margin-left: 8px;
 }
 
-.my-msg .msg-time {
-  color: var(--color-primary-bg);
-}
-
 .input-area {
   display: flex;
   gap: 10px;
-  padding: 15px 20px;
-  border-top: 1px solid var(--color-border);
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border-light);
   background: var(--color-surface);
 }
 
-.input-area .el-textarea {
-  flex: 1;
-}
+.input-area .el-textarea { flex: 1; }
 </style>

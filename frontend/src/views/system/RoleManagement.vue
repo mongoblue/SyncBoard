@@ -1,15 +1,15 @@
 <template>
   <div class="role-management">
-    <div class="page-header">
-      <h2 class="page-title">
-        <el-icon><UserFilled /></el-icon>
-        角色管理
-      </h2>
+    <header class="page-header">
+      <div>
+        <h1 class="page-title">角色管理</h1>
+        <p class="page-subtitle">维护角色定义与权限分配</p>
+      </div>
       <el-button type="primary" @click="handleAdd" v-permission="'sys:role:add'">
-        <el-icon><Plus /></el-icon>
+        <el-icon style="margin-right: 4px"><Plus /></el-icon>
         新增角色
       </el-button>
-    </div>
+    </header>
 
     <el-card class="role-card">
       <el-table :data="roleList" v-loading="loading" border>
@@ -155,7 +155,6 @@ import type { FormInstance, FormRules, ElTree } from 'element-plus';
 import service from '@/utils/request';
 import {
   Plus,
-  UserFilled,
   Grid,
   User,
   Collection,
@@ -370,34 +369,13 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.role-management {
-  padding: 20px;
-}
+.role-management { padding: 0; }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-
-.role-card {
-  min-height: 500px;
-}
+.role-card { min-height: 500px; }
 
 .form-tip {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--color-text-secondary);
   margin-top: 4px;
 }
 

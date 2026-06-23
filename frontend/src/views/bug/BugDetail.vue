@@ -4,8 +4,8 @@
       <!-- 顶部：标题 + 操作 -->
       <div class="detail-header">
         <div class="header-left">
-          <el-button link @click="goBack">
-            <el-icon><ArrowLeft /></el-icon> 返回列表
+          <el-button link @click="goBack" style="padding: 0; align-self: flex-start; color: var(--color-text-secondary)">
+            <el-icon style="margin-right: 4px"><ArrowLeft /></el-icon> 返回列表
           </el-button>
           <div class="title-row">
             <span class="bug-id">#{{ bug.id }}</span>
@@ -252,11 +252,11 @@ import { ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, ArrowDown, Refresh, User, Delete } from '@element-plus/icons-vue';
-import service from '@/utils/request';
 import {
   getBug, updateBug, deleteBug, transitionBug, assignBug, addBugComment,
+  getProjectMembers,
   STATUS_TAG_TYPE, SEVERITY_TAG_TYPE, PRIORITY_TAG_TYPE, STATUS_LABEL,
-  type BugDetail, type BugStatus,
+  type BugDetail, type BugStatus, type ProjectMemberBrief,
 } from '@/api/bug';
 import EditableText from '@/components/bug/EditableText.vue';
 import { extractErrorMessage } from '@/utils/error';
@@ -357,15 +357,11 @@ const assignDialogVisible = ref(false);
 const assignUserId = ref<number | null>(null);
 const assignComment = ref('');
 const assignSubmitting = ref(false);
-const members = ref<Array<{ user_id: number; username: string }>>([]);
+const members = ref<ProjectMemberBrief[]>([]);
 
 const loadMembers = async () => {
   try {
-    const res: any = await service.get(`/projects/${projectId}/members/`);
-    members.value = (res || []).map((m: any) => ({
-      user_id: m.user_id || m.user?.id || m.id,
-      username: m.username || m.user?.username || '',
-    }));
+    members.value = await getProjectMembers(projectId);
   } catch {
     // 项目无权限或接口异常时不阻塞
   }
@@ -426,50 +422,66 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.bug-detail { padding: 20px; }
+.bug-detail { padding: 0; }
 .detail-header {
   display: flex; justify-content: space-between; align-items: flex-start;
-  margin-bottom: 20px;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--color-border-light);
 }
-.title-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
-.bug-id { font-size: 22px; color: var(--el-text-color-secondary); }
-.bug-title { margin: 0; font-size: 22px; cursor: pointer; }
-.meta-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
-.header-actions { display: flex; gap: 8px; }
+.header-left { display: flex; flex-direction: column; gap: 8px; }
+.title-row { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.bug-id { font-size: 14px; color: var(--color-text-tertiary); font-weight: 500; }
+.bug-title {
+  margin: 0;
+  font: 600 20px/1.3 var(--font-heading);
+  color: var(--color-text);
+  cursor: pointer;
+}
+.meta-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
+.header-actions { display: flex; gap: 8px; flex-shrink: 0; }
 .content-grid {
   display: grid; grid-template-columns: 1fr 320px; gap: 16px;
 }
 .left-pane, .right-pane { display: flex; flex-direction: column; gap: 12px; }
-.section-card { box-shadow: none; border: 1px solid var(--el-border-color-light); }
-.text-block {
-  white-space: pre-wrap; font-family: inherit; margin: 0;
-  color: var(--el-text-color-primary);
+.section-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
 }
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .prop-row {
   display: flex; justify-content: space-between; align-items: center;
   padding: 6px 0; font-size: 13px;
+  color: var(--color-text);
 }
-.prop-label { color: var(--el-text-color-secondary); }
-.empty-hint { color: var(--el-text-color-secondary); text-align: center; padding: 12px; font-size: 13px; }
+.prop-label { color: var(--color-text-secondary); }
+.empty-hint {
+  color: var(--color-text-tertiary);
+  text-align: center; padding: 12px; font-size: 13px;
+}
 .comment-list { display: flex; flex-direction: column; gap: 12px; }
 .comment-item {
-  background: var(--el-fill-color-lighter);
-  padding: 10px 12px; border-radius: 6px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
 }
 .comment-head {
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 6px;
+  font-size: 13px;
 }
-.comment-time { color: var(--el-text-color-secondary); font-size: 12px; }
-.comment-body { white-space: pre-wrap; }
+.comment-time { color: var(--color-text-tertiary); font-size: 12px; }
+.comment-body { white-space: pre-wrap; font-size: 13px; color: var(--color-text); }
 .transition-comment {
-  color: var(--el-text-color-secondary); margin-top: 4px;
-  font-size: 13px; font-style: italic;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+  font-size: 13px;
 }
 .linked-task-chip {
-  font-family: monospace;
-  color: var(--el-text-color-secondary);
+  color: var(--color-text-secondary);
+  font-size: 13px;
 }
 @media (max-width: 1000px) {
   .content-grid { grid-template-columns: 1fr; }

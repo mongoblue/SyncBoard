@@ -93,18 +93,18 @@ const handleError = (error: any) => {
 }
 
 .avatar-uploader-component {
-  border: 1px dashed var(--el-border-color);
+  border: 1px dashed var(--color-border);
   border-radius: 50%;
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: var(--el-transition-duration-fast);
+  transition: border-color var(--transition-fast);
   width: 80px;
   height: 80px;
 }
 
 .avatar-uploader-component:hover {
-  border-color: var(--el-color-primary);
+  border-color: var(--color-primary);
 }
 
 .avatar-uploader-icon {

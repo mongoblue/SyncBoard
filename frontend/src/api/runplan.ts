@@ -1,9 +1,11 @@
 /**
- * TestRunPlan（批量执行计划）API 客户端。
+ * TestRunPlan（批量执行计划）API 封装。
  *
- * 后端约定见 backend/qa_center/views_run_plan.py。
- * 进度通过 WebSocket /ws/qa/dashboard/ 推送 `run_plan_progress` 事件，
- * 事件 schema 见下方 RunPlanProgressEvent。
+ * 后端映射：/api/qa/run-plans/
+ * 核心操作：获取计划列表/详情 → 触发执行 → 监听 ws/qa/dashboard/ 进度
+ *
+ * 与 BatchRunExecuteDialog.vue 配合使用。
+ * 执行结果详情跳转到 AutoResultDetail.vue 查看。
  */
 import service from '@/utils/request';
 

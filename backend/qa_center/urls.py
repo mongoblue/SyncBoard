@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import DataFactoryView, RunTestView
 from .views_api_test import ApiTestCaseViewSet, ApiTestResultViewSet, ApiTestCaseBatchRunView
-from .views_ui_test import UiTestCaseViewSet, ui_run_screenshot
+from .views_ui_test import UiTestCaseViewSet, ui_run_screenshot, ui_run_screenshot_by_index
 from .views_test_result import TestResultViewSet
 from .views_performance import PerformanceTestCaseViewSet, PerformanceTestResultViewSet
 from .views_api_auto_test import (
@@ -87,5 +87,6 @@ urlpatterns = [
     path('devops/cicd-config/<int:config_id>/trigger/', PipelineRunTriggerView.as_view(), name='cicd_trigger'),
     path('devops/cicd-config/<int:config_id>/webhook/', PipelineRunWebhookView.as_view(), name='cicd_webhook'),
     path('ui-run/screenshot/', ui_run_screenshot, name='ui_run_screenshot'),
+    path('ui-run/<str:task_id>/screenshot/<int:index>/', ui_run_screenshot_by_index, name='ui_run_screenshot_by_index'),
     path('devops/quick-test/', QuickTestView.as_view(), name='devops_quick_test'),
 ]
