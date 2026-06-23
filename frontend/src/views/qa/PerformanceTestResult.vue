@@ -255,6 +255,7 @@ import {
 } from '@element-plus/icons-vue';
 import * as echarts from 'echarts';
 import service from '@/utils/request';
+import { buildWsUrl } from '@/composables/wsHost';
 
 // 数据
 const cases = ref<any[]>([]);
@@ -426,8 +427,8 @@ const stopTest = async () => {
 
 const connectWebSocket = (executionId: number) => {
   if (ws) ws.close();
-  
-  ws = new WebSocket(`ws://localhost:8000/ws/qa/performance/${executionId}/`);
+
+  ws = new WebSocket(buildWsUrl(`/ws/qa/performance/${executionId}/`));
   
   ws.onmessage = (event) => {
     try {
@@ -518,23 +519,23 @@ const initChart = () => {
         type: 'line', 
         smooth: true, 
         data: chartData.value.map(d => d.rps),
-        itemStyle: { color: '#5470c6' },
+        itemStyle: { color: '#0F766E' },
         areaStyle: { opacity: 0.1 }
       },
-      { 
-        name: '响应时间(ms)', 
-        type: 'line', 
-        smooth: true, 
-        yAxisIndex: 1, 
+      {
+        name: '响应时间(ms)',
+        type: 'line',
+        smooth: true,
+        yAxisIndex: 1,
         data: chartData.value.map(d => d.avgResponseTime),
-        itemStyle: { color: '#91cc75' }
+        itemStyle: { color: '#0969DA' }
       },
-      { 
-        name: '错误率(%)', 
-        type: 'line', 
-        smooth: true, 
+      {
+        name: '错误率(%)',
+        type: 'line',
+        smooth: true,
         data: chartData.value.map(d => d.errorRate),
-        itemStyle: { color: '#ee6666' }
+        itemStyle: { color: '#CF222E' }
       }
     ],
     animation: true
@@ -709,72 +710,68 @@ watch(() => selectedCase.value, (newCase) => {
 .performance-test-page {
   display: flex;
   height: calc(100vh - 100px);
-  gap: 20px;
+  gap: 16px;
 }
 
 /* 左侧面板 */
 .left-panel {
-  width: 350px;
-  background: #fff;
-  border-radius: 8px;
+  width: 320px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   padding: 16px;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .panel-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .panel-header h3 {
   margin: 0;
-  font-size: 16px;
+  font: 600 14px/1.3 var(--font-heading);
+  color: var(--color-text);
 }
 
-.filter-bar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
+.filter-bar { display: flex; gap: 8px; margin-bottom: 12px; }
 
-.case-list {
-  flex: 1;
-  overflow-y: auto;
-}
+.case-list { flex: 1; overflow-y: auto; }
 
 .case-item {
-  padding: 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  margin-bottom: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  margin-bottom: 6px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
 }
 
 .case-item:hover {
-  border-color: var(--color-primary-light);
-  background: var(--color-bg);
+  border-color: var(--color-border);
+  background: var(--color-surface-hover);
 }
 
 .case-item.active {
-  border-color: var(--color-primary-light);
-  background: #ecf5ff;
+  border-color: var(--color-primary);
+  background: var(--color-primary-bg);
 }
 
 .case-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .case-name {
   font-weight: 500;
-  font-size: 14px;
+  font-size: 13px;
+  color: var(--color-text);
   flex: 1;
 }
 
@@ -782,27 +779,25 @@ watch(() => selectedCase.value, (newCase) => {
   display: flex;
   gap: 4px;
   opacity: 0;
-  transition: opacity 0.2s;
+  transition: opacity var(--transition-fast);
 }
 
-.case-item:hover .case-actions {
-  opacity: 1;
-}
+.case-item:hover .case-actions { opacity: 1; }
 
 .case-url {
   font-size: 12px;
-  color: #666;
+  color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .case-meta {
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-tertiary);
 }
 
 .case-meta span {
@@ -814,11 +809,12 @@ watch(() => selectedCase.value, (newCase) => {
 /* 右侧面板 */
 .right-panel {
   flex: 1;
-  background: #fff;
-  border-radius: 8px;
-  padding: 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 20px 24px;
   overflow-y: auto;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 .empty-state {
@@ -827,12 +823,12 @@ watch(() => selectedCase.value, (newCase) => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #999;
+  color: var(--color-text-tertiary);
 }
 
 .empty-state .el-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 40px;
+  margin-bottom: 12px;
 }
 
 /* 工具栏 */
@@ -842,11 +838,13 @@ watch(() => selectedCase.value, (newCase) => {
   align-items: center;
   margin-bottom: 20px;
   padding-bottom: 16px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .toolbar-left h4 {
-  margin: 0 0 8px 0;
+  margin: 0 0 4px 0;
+  font: 600 16px/1.3 var(--font-heading);
+  color: var(--color-text);
 }
 
 /* Locust 仪表板 */
@@ -855,7 +853,7 @@ watch(() => selectedCase.value, (newCase) => {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -865,8 +863,9 @@ watch(() => selectedCase.value, (newCase) => {
   align-items: center;
   margin-bottom: 16px;
   padding: 8px 12px;
-  background: var(--color-bg);
-  border-radius: 4px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
 }
 
 .status {
@@ -874,19 +873,13 @@ watch(() => selectedCase.value, (newCase) => {
   align-items: center;
   gap: 6px;
   font-weight: 500;
+  font-size: 13px;
 }
 
-.status.running {
-  color: var(--color-success);
-}
+.status.running { color: var(--color-success); }
+.status.stopped { color: var(--color-text-tertiary); }
 
-.status.stopped {
-  color: var(--color-text-tertiary);
-}
-
-.status .el-icon {
-  animation: rotating 2s linear infinite;
-}
+.status .el-icon { animation: rotating 2s linear infinite; }
 
 @keyframes rotating {
   from { transform: rotate(0deg); }
@@ -894,9 +887,9 @@ watch(() => selectedCase.value, (newCase) => {
 }
 
 .duration {
-  font-family: monospace;
-  font-size: 14px;
-  color: #666;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--color-text-secondary);
 }
 
 /* 统计网格 */
@@ -908,27 +901,26 @@ watch(() => selectedCase.value, (newCase) => {
 }
 
 .stat-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 8px;
-  padding: 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
   text-align: center;
-  color: white;
 }
 
 .stat-card .stat-label {
   font-size: 12px;
-  opacity: 0.9;
-  margin-bottom: 6px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
 }
 
 .stat-card .stat-value {
-  font-size: 24px;
-  font-weight: bold;
+  font: 600 24px/1.2 var(--font-heading);
+  color: var(--color-text);
 }
 
-.stat-card .stat-value.text-danger {
-  color: #ff6b6b;
-}
+.stat-card .stat-value.text-danger { color: var(--color-danger); }
 
 /* 统计表格 */
 .stats-table-container,
@@ -938,15 +930,16 @@ watch(() => selectedCase.value, (newCase) => {
 
 .stats-table-container h5,
 .failures-container h5 {
-  margin: 0 0 12px 0;
-  font-size: 14px;
-  color: #333;
+  margin: 0 0 8px 0;
+  font: 600 13px/1.3 var(--font-heading);
+  color: var(--color-text);
 }
 
 /* 图表容器 */
 .charts-container {
-  background: var(--color-bg);
-  border-radius: 8px;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
   padding: 16px;
   margin-bottom: 20px;
 }
@@ -963,36 +956,34 @@ watch(() => selectedCase.value, (newCase) => {
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
-  color: #999;
+  color: var(--color-text-tertiary);
 }
 
 .ready-state .el-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
-  color: var(--color-primary-light);
+  font-size: 40px;
+  margin-bottom: 12px;
+  color: var(--color-primary);
 }
 
 .test-config {
-  margin-top: 24px;
+  margin-top: 20px;
   display: flex;
   gap: 24px;
 }
 
-.config-item {
-  text-align: center;
-}
+.config-item { text-align: center; }
 
 .config-item label {
   display: block;
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 
 .config-item span {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text);
 }
 
 /* 通用 */

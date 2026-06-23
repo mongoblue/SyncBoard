@@ -44,7 +44,8 @@ class TestMetrics:
 class LocustRunner:
     """Locust 测试运行器 - 使用事件系统和文件通信"""
 
-    def __init__(self):
+    def __init__(self, execution_id: Optional[int] = None):
+        self.execution_id = execution_id
         self.process: Optional[subprocess.Popen] = None
         self.metrics = TestMetrics()
         self._callbacks: list[Callable[[TestMetrics], None]] = []
@@ -55,6 +56,7 @@ class LocustRunner:
         self._start_timestamp: Optional[float] = None
         self._response_times: deque = deque(maxlen=10000)
         self._last_request_count: int = 0
+        self.last_payload: Dict[str, Any] = {}
 
     def register_callback(self, callback: Callable[[TestMetrics], None]):
         """注册回调函数，用于接收实时数据"""
@@ -113,7 +115,11 @@ _metrics_data = {{
     'response_times': [],
     'errors': [],
     'state': 'running',
-    'start_time': time.time()
+    'start_time': time.time(),
+    'throughput_series': [],
+    'response_time_series': [],
+    'last_sample_time': 0.0,
+    'last_total_requests': 0,
 }}
 
 def write_metrics():
@@ -133,9 +139,41 @@ def write_metrics():
             else:
                 avg_time = p50 = p90 = p95 = p99 = 0
 
-            elapsed = time.time() - data['start_time']
+            now = time.time()
+            elapsed = now - data['start_time']
             throughput = data['total_requests'] / elapsed if elapsed > 0 else 0
             error_rate = (data['failed_requests'] / data['total_requests'] * 100) if data['total_requests'] > 0 else 0
+
+            # 每秒采样一次时间序列，避免无界增长
+            if now - _metrics_data['last_sample_time'] >= 1.0:
+                delta_reqs = data['total_requests'] - _metrics_data['last_total_requests']
+                delta_t = now - _metrics_data['last_sample_time'] if _metrics_data['last_sample_time'] else 1.0
+                instant_rps = delta_reqs / delta_t if delta_t > 0 else 0
+                _metrics_data['throughput_series'].append({{
+                    't': round(now - data['start_time'], 1),
+                    'rps': round(instant_rps, 2),
+                }})
+                _metrics_data['response_time_series'].append({{
+                    't': round(now - data['start_time'], 1),
+                    'avg': round(avg_time, 2),
+                    'p95': round(p95, 2),
+                }})
+                # 限长，保留最近 600 个点（约 10 分钟）
+                if len(_metrics_data['throughput_series']) > 600:
+                    _metrics_data['throughput_series'] = _metrics_data['throughput_series'][-600:]
+                    _metrics_data['response_time_series'] = _metrics_data['response_time_series'][-600:]
+                _metrics_data['last_sample_time'] = now
+                _metrics_data['last_total_requests'] = data['total_requests']
+
+            # 响应时间分布：50ms 桶，最多 40 个桶（0-2s+）
+            distribution = {{}}
+            if times:
+                bucket_size = 50
+                max_buckets = 40
+                for rt in times:
+                    bucket = min(int(rt // bucket_size), max_buckets - 1)
+                    key = f"{{bucket * bucket_size}}-{{(bucket + 1) * bucket_size}}ms"
+                    distribution[key] = distribution.get(key, 0) + 1
 
             output = {{
                 'state': data['state'],
@@ -152,6 +190,9 @@ def write_metrics():
                 'throughput': round(throughput, 2),
                 'error_rate': round(error_rate, 2),
                 'errors': data['errors'][-10:],
+                'throughput_over_time': list(_metrics_data['throughput_series']),
+                'response_time_over_time': list(_metrics_data['response_time_series']),
+                'response_time_distribution': distribution,
                 'timestamp': time.time()
             }}
 
@@ -227,8 +268,9 @@ class PerformanceTestUser(HttpUser):
         except Exception as e:
             print(f"Request failed: {{e}}")
 '''
-        # 使用固定文件名，每次覆盖
-        path = os.path.join(base_temp, 'locustfile_current.py')
+        # 按 execution_id 隔离文件，避免并发跑多个用例时互相覆盖
+        suffix = self.execution_id if self.execution_id is not None else os.getpid()
+        path = os.path.join(base_temp, f'locustfile_{suffix}.py')
         with open(path, 'w', encoding='utf-8') as f:
             f.write(locust_code)
 
@@ -250,7 +292,7 @@ class PerformanceTestUser(HttpUser):
                 if self.metrics_file_path and os.path.exists(self.metrics_file_path):
                     with open(self.metrics_file_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    
+
                     self.metrics.state = data.get('state', 'running')
                     self.metrics.total_requests = data.get('total_requests', 0)
                     self.metrics.successful_requests = data.get('successful_requests', 0)
@@ -265,7 +307,8 @@ class PerformanceTestUser(HttpUser):
                     self.metrics.throughput = data.get('throughput', 0)
                     self.metrics.error_rate = data.get('error_rate', 0)
                     self.metrics.errors = data.get('errors', [])
-                    
+                    self.last_payload = data
+
                     self._notify_callbacks()
                     
             except json.JSONDecodeError:
@@ -282,8 +325,9 @@ class PerformanceTestUser(HttpUser):
             base_temp = os.path.join(tempfile.gettempdir(), 'syncboard-locust')
             os.makedirs(base_temp, exist_ok=True)
 
-            # 使用固定文件名，每次覆盖
-            self.metrics_file_path = os.path.join(base_temp, 'locust_metrics_current.json')
+            # 按 execution_id 隔离 metrics 文件
+            suffix = self.execution_id if self.execution_id is not None else os.getpid()
+            self.metrics_file_path = os.path.join(base_temp, f'locust_metrics_{suffix}.json')
             with open(self.metrics_file_path, 'w', encoding='utf-8') as f:
                 json.dump({'state': 'initializing'}, f)
             
@@ -412,3 +456,13 @@ class PerformanceTestUser(HttpUser):
     def is_running(self) -> bool:
         """检查测试是否正在运行"""
         return self.process is not None and self.process.poll() is None
+
+    def get_full_payload(self) -> Dict[str, Any]:
+        """读取最新的完整 metrics 文件内容（包含时间序列与分布）"""
+        if self.metrics_file_path and os.path.exists(self.metrics_file_path):
+            try:
+                with open(self.metrics_file_path, 'r', encoding='utf-8') as f:
+                    self.last_payload = json.load(f)
+            except Exception:
+                pass
+        return self.last_payload or {}
