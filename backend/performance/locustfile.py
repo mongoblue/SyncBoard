@@ -7,6 +7,13 @@ import string
 class SyncBoardUser(HttpUser):
     wait_time = between(1, 3)
 
+    def csrf_headers(self):
+        csrf_token = self.client.cookies.get("csrftoken")
+        if not csrf_token:
+            return {}
+        token_value = getattr(csrf_token, "value", csrf_token)
+        return {"X-CSRFToken": token_value}
+
     def on_start(self):
         # 1. 登录获取 Token
         self.username = os.environ.get('LOCUST_USERNAME', 'test_user')
@@ -19,10 +26,11 @@ class SyncBoardUser(HttpUser):
         })
         
         if response.status_code == 200:
-            self.token = response.json().get("access")
-            # 更新 header，加入 Authorization
-            self.headers = {"Authorization": f"Bearer {self.token}"}
-            
+            self.headers = self.csrf_headers()
+            if not self.headers:
+                print("Login succeeded but csrftoken cookie missing")
+                return
+
             # 创建项目和列
             project_res = self.client.post("/api/projects/", json={
                 "name": f"Project {self.username}",
@@ -47,7 +55,6 @@ class SyncBoardUser(HttpUser):
                  print(f"Create project failed: {project_res.status_code} {project_res.text}")
         else:
             print(f"Login failed: {response.text}")
-            self.token = None
 
     @task(3)
     def create_task(self):
@@ -60,7 +67,7 @@ class SyncBoardUser(HttpUser):
             "content": "Load testing content",
             "column": self.column_id,
             "position": 0
-        }, headers=self.headers)
+        }, headers=self.csrf_headers())
 
     @task(3)
     def search_tasks(self):
