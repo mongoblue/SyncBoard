@@ -1,0 +1,77 @@
+# 登录模块测试数据
+# 使用 httpbin.org 作为测试接口演示
+
+test_cases:
+  - name: "正常登录-获取Token"
+    description: "使用正确的用户名密码登录，获取Token"
+    request:
+      method: POST
+      path: "/post"
+      json:
+        username: "admin"
+        password: "Admin@123"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "json_path_equals"
+          path: "json.username"
+          expected: "admin"
+
+  - name: "登录失败-密码错误"
+    description: "使用错误密码登录，验证返回401"
+    request:
+      method: POST
+      path: "/post"
+      json:
+        username: "admin"
+        password: "wrong_password"
+    expected:
+      status_code: 200  # httpbin.org 始终返回200，这里仅演示结构
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  - name: "登录失败-用户名为空"
+    description: "用户名为空时登录失败"
+    request:
+      method: POST
+      path: "/post"
+      json:
+        username: ""
+        password: "Admin@123"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  - name: "登录失败-缺少密码"
+    description: "缺少密码参数时登录失败"
+    request:
+      method: POST
+      path: "/post"
+      json:
+        username: "admin"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  - name: "GET请求-验证响应头"
+    description: "使用GET请求验证响应头信息"
+    request:
+      method: GET
+      path: "/get"
+      params:
+        name: "test_user"
+        age: "25"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "response_header_exists"
+          header: "Content-Type"

@@ -22,30 +22,96 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-table :data="bugs" v-loading="loading" stripe @row-click="goDetail" row-class-name="clickable-row">
+    <el-table :data="bugs" v-loading="loading" stripe>
       <el-table-column prop="id" label="#" width="70" />
       <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip />
-      <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
-      <el-table-column label="状态" width="100">
+      <el-table-column label="标题" min-width="240" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-tag :type="STATUS_TAG_TYPE[row.status as keyof typeof STATUS_TAG_TYPE]" size="small">{{ row.status_display }}</el-tag>
+          <button class="bug-title-link" type="button" @click="goDetail(row)">
+            {{ row.title }}
+          </button>
         </template>
       </el-table-column>
-      <el-table-column label="严重度" width="90">
+      <el-table-column label="状态" width="120">
         <template #default="{ row }">
-          <el-tag :type="SEVERITY_TAG_TYPE[row.severity as keyof typeof SEVERITY_TAG_TYPE]" size="small">{{ row.severity_display }}</el-tag>
+          <el-dropdown
+            v-if="row.allowed_transitions?.length"
+            trigger="click"
+            @command="(cmd: BugStatus) => onQuickTransition(row, cmd)"
+            @click.stop
+          >
+            <el-tag
+              class="editable-tag"
+              :type="STATUS_TAG_TYPE[row.status as keyof typeof STATUS_TAG_TYPE]"
+              size="small"
+            >
+              {{ row.status_display }} <el-icon class="tag-arrow"><ArrowDown /></el-icon>
+            </el-tag>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="s in row.allowed_transitions"
+                  :key="s"
+                  :command="s"
+                >
+                  → {{ STATUS_LABEL[s as BugStatus] }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-tag v-else :type="STATUS_TAG_TYPE[row.status as keyof typeof STATUS_TAG_TYPE]" size="small">
+            {{ row.status_display }}
+          </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="优先级" width="80">
+      <el-table-column label="严重度" width="120">
         <template #default="{ row }">
-          <el-tag :type="PRIORITY_TAG_TYPE[row.priority as keyof typeof PRIORITY_TAG_TYPE]" size="small">{{ row.priority_display }}</el-tag>
+          <el-select
+            v-model="row.severity"
+            size="small"
+            class="table-select"
+            @change="(value: BugSeverity) => saveSeverity(row, value)"
+            @click.stop
+          >
+            <el-option v-for="s in SEVERITY_OPTIONS" :key="s.value" :label="s.label" :value="s.value" />
+          </el-select>
+        </template>
+      </el-table-column>
+      <el-table-column label="优先级" width="110">
+        <template #default="{ row }">
+          <el-select
+            v-model="row.priority"
+            size="small"
+            class="table-select"
+            @change="(value: BugPriority) => savePriority(row, value)"
+            @click.stop
+          >
+            <el-option v-for="p in PRIORITY_OPTIONS" :key="p.value" :label="p.label" :value="p.value" />
+          </el-select>
         </template>
       </el-table-column>
       <el-table-column label="报告人" width="120">
         <template #default="{ row }">{{ row.reporter?.username || '-' }}</template>
       </el-table-column>
-      <el-table-column label="指派给" width="120">
-        <template #default="{ row }">{{ row.assignee?.username || '-' }}</template>
+      <el-table-column label="指派给" width="150">
+        <template #default="{ row }">
+          <el-select
+            :model-value="row.assignee?.id || null"
+            size="small"
+            class="table-select"
+            placeholder="未指派"
+            filterable
+            @change="(userId: number) => saveAssignee(row, userId)"
+            @click.stop
+          >
+            <el-option
+              v-for="m in projectMembers"
+              :key="m.user_id"
+              :label="m.username"
+              :value="m.user_id"
+            />
+          </el-select>
+        </template>
       </el-table-column>
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
@@ -60,39 +126,20 @@
       </el-table-column>
       <el-table-column label="操作" width="180" fixed="right">
         <template #default="{ row }">
-          <el-dropdown
-            v-if="row.allowed_transitions?.length"
-            trigger="click"
-            @command="(cmd: BugStatus) => onQuickTransition(row, cmd)"
-            style="margin-right: 8px"
-          >
-            <el-button size="small">
-              流转<el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item
-                  v-for="s in row.allowed_transitions"
-                  :key="s"
-                  :command="s"
-                >
-                  → {{ STATUS_LABEL[s as BugStatus] }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <el-popconfirm
-            title="确认删除此 Bug？"
-            confirm-button-text="删除"
-            cancel-button-text="取消"
-            @confirm="confirmDelete(row)"
-          >
-            <template #reference>
-              <el-button size="small" type="danger" plain>
-                <el-icon><Delete /></el-icon> 删除
-              </el-button>
-            </template>
-          </el-popconfirm>
+          <div class="row-actions" @click.stop>
+            <el-popconfirm
+              title="确认删除此 Bug？"
+              confirm-button-text="删除"
+              cancel-button-text="取消"
+              @confirm="confirmDelete(row)"
+            >
+              <template #reference>
+                <el-button size="small" type="danger" plain @click.stop>
+                  <el-icon><Delete /></el-icon> 删除
+                </el-button>
+              </template>
+            </el-popconfirm>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -115,9 +162,9 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowDown, Delete } from '@element-plus/icons-vue';
 import {
-  listMyBugs, deleteBug, transitionBug,
-  STATUS_TAG_TYPE, SEVERITY_TAG_TYPE, PRIORITY_TAG_TYPE, STATUS_LABEL,
-  type BugListItem, type BugStatus,
+  listMyBugs, deleteBug, transitionBug, updateBug, assignBug, getProjectMembers,
+  STATUS_TAG_TYPE, STATUS_LABEL,
+  type BugListItem, type BugStatus, type BugSeverity, type BugPriority, type ProjectMemberBrief,
 } from '@/api/bug';
 import { extractErrorMessage } from '@/utils/error';
 
@@ -130,9 +177,24 @@ const activeRole = ref<Role>('assignee');
 
 const loading = ref(false);
 const bugs = ref<BugListItem[]>([]);
+const projectMembers = ref<ProjectMemberBrief[]>([]);
 const total = ref(0);
 const page = ref(1);
 const pageSize = 20;
+
+const SEVERITY_OPTIONS = [
+  { value: 'blocker', label: '阻塞' },
+  { value: 'critical', label: '严重' },
+  { value: 'major', label: '一般' },
+  { value: 'minor', label: '次要' },
+  { value: 'trivial', label: '轻微' },
+];
+const PRIORITY_OPTIONS = [
+  { value: 'p0', label: 'P0' },
+  { value: 'p1', label: 'P1' },
+  { value: 'p2', label: 'P2' },
+  { value: 'p3', label: 'P3' },
+];
 
 const loadList = async () => {
   loading.value = true;
@@ -151,6 +213,14 @@ const loadList = async () => {
   }
 };
 
+const loadMembers = async () => {
+  try {
+    projectMembers.value = await getProjectMembers(projectId);
+  } catch {
+    // 指派人快捷编辑不可用不影响主列表
+  }
+};
+
 const goDetail = (row: BugListItem) => {
   router.push(`/projects/${projectId}/bugs/${row.id}`);
 };
@@ -165,23 +235,80 @@ const confirmDelete = async (row: BugListItem) => {
   }
 };
 
+interface BugDetailLike {
+  status?: BugStatus;
+  status_display?: string;
+  severity?: BugSeverity;
+  severity_display?: string;
+  priority?: BugPriority;
+  priority_display?: string;
+  assignee?: BugListItem['assignee'];
+  allowed_transitions?: BugStatus[];
+}
+
+const applyBugUpdate = (row: BugListItem, updated: BugDetailLike) => {
+  Object.assign(row, {
+    status: updated.status ?? row.status,
+    status_display: updated.status_display ?? row.status_display,
+    severity: updated.severity ?? row.severity,
+    severity_display: updated.severity_display ?? row.severity_display,
+    priority: updated.priority ?? row.priority,
+    priority_display: updated.priority_display ?? row.priority_display,
+    assignee: updated.assignee ?? row.assignee,
+    allowed_transitions: updated.allowed_transitions ?? row.allowed_transitions,
+  });
+};
+
+const saveSeverity = async (row: BugListItem, severity: BugSeverity) => {
+  try {
+    const updated = await updateBug(row.id, { severity });
+    applyBugUpdate(row, updated);
+    ElMessage.success('严重度已更新');
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e, '保存严重度失败'));
+    await loadList();
+  }
+};
+
+const savePriority = async (row: BugListItem, priority: BugPriority) => {
+  try {
+    const updated = await updateBug(row.id, { priority });
+    applyBugUpdate(row, updated);
+    ElMessage.success('优先级已更新');
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e, '保存优先级失败'));
+    await loadList();
+  }
+};
+
+const saveAssignee = async (row: BugListItem, userId: number) => {
+  try {
+    await assignBug(row.id, userId, '');
+    ElMessage.success('负责人已更新');
+    await loadList();
+  } catch (e) {
+    ElMessage.error(extractErrorMessage(e, '指派失败'));
+    await loadList();
+  }
+};
+
 const onQuickTransition = async (row: BugListItem, to: BugStatus) => {
   try {
     const updated = await transitionBug(row.id, to, '');
-    Object.assign(row, {
-      status: updated.status,
-      status_display: updated.status_display,
-      allowed_transitions: updated.allowed_transitions,
-    });
+    applyBugUpdate(row, updated);
     ElMessage.success(`已流转到 ${STATUS_LABEL[to]}`);
   } catch (e) {
     ElMessage.error(extractErrorMessage(e, '流转失败'));
+    await loadList();
   }
 };
 
 const formatTime = (t: string) => t ? new Date(t).toLocaleString() : '-';
 
-onMounted(loadList);
+onMounted(() => {
+  loadList();
+  loadMembers();
+});
 </script>
 
 <style scoped>
@@ -191,7 +318,24 @@ onMounted(loadList);
   font-size: 13px;
   margin-bottom: 12px;
 }
-.clickable-row { cursor: pointer; }
+.bug-title-link {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bug-title-link:hover { text-decoration: underline; }
+.table-select { width: 100%; }
+.editable-tag { cursor: pointer; }
+.tag-arrow { margin-left: 4px; vertical-align: -1px; }
+.row-actions { display: flex; align-items: center; gap: 8px; }
 .pagination { margin-top: 16px; justify-content: flex-end; display: flex; }
 .linked-task-chip {
   color: var(--color-text-secondary);

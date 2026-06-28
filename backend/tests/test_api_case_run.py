@@ -38,8 +38,10 @@ def test_single_run_extracts_response_variables(api_auth_client, test_project):
     assert any(isinstance(r, dict) and 'extractions' in r for r in data['assertion_results'])
     # 找出 extractions 块,确认 health_status 被抽取出来
     ext_block = next(r for r in data['assertion_results'] if isinstance(r, dict) and 'extractions' in r)
-    names = [it['name'] for it in ext_block['extractions']]
-    assert 'health_status' in names
+    extractions = {it['name']: it for it in ext_block['extractions']}
+    assert 'health_status' in extractions
+    assert extractions['health_status']['value'] == 'ok'
+    assert extractions['health_status']['success'] is True
 
 
 @pytest.mark.django_db

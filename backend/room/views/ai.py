@@ -45,9 +45,17 @@ class AIConversationListView(APIView):
     def post(self, request):
         data = request.data.copy()
         data['user'] = request.user.id
+
+        project_id = data.get('project') or data.get('project_id')
+        if project_id:
+            project = get_object_or_404(Project, pk=project_id)
+            if not _check_project_member(project, request.user):
+                return Response({'detail': '您不是该项目成员'}, status=status.HTTP_403_FORBIDDEN)
+            data['project'] = str(project.id)
+
         serializer = AIConversationSerializer(data=data)
         if serializer.is_valid():
-            conv = serializer.save()
+            conv = serializer.save(user=request.user)
             return Response(AIConversationSerializer(conv).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

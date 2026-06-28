@@ -1,0 +1,33 @@
+# 测试环境配置
+env: test
+
+# API 配置
+api:
+  base_url: http://httpbin.org
+  timeout: 30
+
+# 登录测试数据
+login:
+  valid_user:
+    username: admin
+    password: Admin@123
+
+  invalid_user:
+    username: admin
+    password: wrong_password
+
+  empty_username:
+    username: ""
+    password: Admin@123
+
+# 用户测试数据
+user:
+  new_user:
+    username: user_${random_string:6}
+    email: test_${random_string:4}@example.com
+    password: User@123456
+    real_name: 测试用户
+
+  update_user:
+    real_name: 更新后的姓名
+    email: updated@example.com

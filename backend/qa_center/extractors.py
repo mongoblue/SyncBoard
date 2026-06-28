@@ -101,6 +101,8 @@ def summarize_extractions(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
         text = '' if value is None else str(value)
         items.append({
             'name': name,
+            'value': value,
+            'success': value is not None,
             'value_preview': text[:200] + ('…' if len(text) > 200 else ''),
             'is_none': value is None,
         })

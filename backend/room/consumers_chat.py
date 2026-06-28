@@ -77,14 +77,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     # 接收前端发来的消息
     async def receive(self, text_data):
+        if not self.scope["user"].is_authenticated:
+            await self.close(code=4003)
+            return
+
         data = json.loads(text_data)
         message = data.get('message')
 
         # ✨ 核心修复：不信任前端传来的 user，而是用 session 里的真实用户
-        if self.scope["user"].is_authenticated:
-            username = self.scope["user"].username
-        else:
-            username = "Anonymous"  # 或者直接 return 不处理
+        username = self.scope["user"].username
 
         # Sanitize message content against XSS
         safe_message = sanitize_html(message)

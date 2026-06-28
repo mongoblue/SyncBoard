@@ -1,0 +1,176 @@
+# 项目模块测试数据
+# 使用 JSONPlaceholder API (https://jsonplaceholder.typicode.com) 作为测试接口
+
+base_url: "https://jsonplaceholder.typicode.com"
+
+test_cases:
+  # -------------------- 新增项目 --------------------
+  - name: "创建项目-正常创建"
+    description: "使用有效数据创建新项目"
+    request:
+      method: POST
+      path: "/posts"
+      json:
+        title: "新项目"
+        body: "这是项目描述"
+        userId: 1
+    expected:
+      status_code: 201
+      assertions:
+        - type: "status_code"
+          expected: 201
+        - type: "json_path_exists"
+          path: "id"
+        - type: "json_path_equals"
+          path: "title"
+          expected: "新项目"
+
+  - name: "创建项目-空标题"
+    description: "空标题创建项目，验证返回400或201"
+    request:
+      method: POST
+      path: "/posts"
+      json:
+        title: ""
+        body: "描述内容"
+        userId: 1
+    expected:
+      status_code: 201
+      assertions:
+        - type: "status_code"
+          expected: 201
+
+  - name: "创建项目-缺失必填字段"
+    description: "缺少body字段创建项目"
+    request:
+      method: POST
+      path: "/posts"
+      json:
+        title: "测试项目"
+        userId: 1
+    expected:
+      status_code: 201
+      assertions:
+        - type: "status_code"
+          expected: 201
+
+  # -------------------- 查询项目 --------------------
+  - name: "查询单个项目-存在"
+    description: "根据ID查询已存在的项目"
+    request:
+      method: GET
+      path: "/posts/1"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "json_path_equals"
+          path: "id"
+          expected: 1
+        - type: "json_path_exists"
+          path: "title"
+        - type: "json_path_exists"
+          path: "body"
+
+  - name: "查询单个项目-不存在"
+    description: "查询不存在的项目ID"
+    request:
+      method: GET
+      path: "/posts/9999"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  - name: "查询项目列表-分页"
+    description: "获取项目列表，验证分页"
+    request:
+      method: GET
+      path: "/posts"
+      params:
+        _limit: 5
+        _page: 1
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "json_path_type"
+          path: ""
+          expected: "array"
+        - type: "response_time"
+          max_ms: 2000
+
+  - name: "查询项目列表-筛选用户"
+    description: "根据用户ID筛选项目"
+    request:
+      method: GET
+      path: "/posts"
+      params:
+        userId: 1
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  # -------------------- 更新项目 --------------------
+  - name: "更新项目-PUT全量更新"
+    description: "使用PUT全量更新项目"
+    request:
+      method: PUT
+      path: "/posts/1"
+      json:
+        id: 1
+        title: "更新后的标题"
+        body: "更新后的描述"
+        userId: 1
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "json_path_equals"
+          path: "title"
+          expected: "更新后的标题"
+
+  - name: "更新项目-PATCH部分更新"
+    description: "使用PATCH只更新标题"
+    request:
+      method: PATCH
+      path: "/posts/1"
+      json:
+        title: "仅更新标题"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+        - type: "json_path_equals"
+          path: "title"
+          expected: "仅更新标题"
+
+  # -------------------- 删除项目 --------------------
+  - name: "删除项目-成功"
+    description: "删除已存在的项目"
+    request:
+      method: DELETE
+      path: "/posts/1"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200
+
+  - name: "删除项目-不存在"
+    description: "删除不存在的项目"
+    request:
+      method: DELETE
+      path: "/posts/9999"
+    expected:
+      status_code: 200
+      assertions:
+        - type: "status_code"
+          expected: 200

@@ -104,6 +104,14 @@ class TestBugCRUD:
         assert 'linked_task' in resp.data['results'][0]
         assert resp.data['results'][0]['linked_task'] == str(task.id)
 
+    def test_list_returns_allowed_transitions(self, auth_client, test_project, test_user):
+        Bug.objects.create(project=test_project, title='B1', status='new', reporter=test_user)
+
+        resp = auth_client.get(f'/api/bugs/?project={test_project.id}')
+
+        assert resp.status_code == 200
+        assert set(resp.data['results'][0]['allowed_transitions']) == {'confirmed', 'rejected', 'assigned'}
+
     def test_update_does_not_change_status(self, auth_client, test_project, test_user):
         bug = Bug.objects.create(
             project=test_project, title='X', status='new', reporter=test_user
