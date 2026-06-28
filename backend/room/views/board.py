@@ -11,12 +11,48 @@ from rest_framework import status, permissions
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
 from django.db import transaction
+from django.contrib.auth.models import User
 from django.db.models import Prefetch
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
-from ..models import Column, Task, Project, TaskActivityLog
+from ..models import Column, Task, Project, TaskActivityLog, Tag
 from ..serializers import ColumnSerializer, TaskSerializer
 from .mixins import ProjectAccessMixin
+
+
+def _user_belongs_to_project(user, project):
+    """检查用户是否是项目 owner 或成员。"""
+    return user == project.owner or project.members.filter(id=user.id).exists()
+
+
+def _validate_task_relationships(project, data):
+    """校验任务关联字段不跨项目。"""
+    tags = data.get('tags')
+    if tags is not None:
+        tag_ids = [tag.get('id') if isinstance(tag, dict) else tag for tag in tags]
+        if Tag.objects.filter(id__in=tag_ids).exclude(project=project).exists():
+            return Response(
+                {'detail': '标签不属于当前项目'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    assignee_id = data.get('assignee')
+    if assignee_id:
+        try:
+            assignee = User.objects.get(pk=assignee_id)
+        except (User.DoesNotExist, ValueError, TypeError):
+            return Response(
+                {'detail': '负责人不存在'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not _user_belongs_to_project(assignee, project):
+            return Response(
+                {'detail': '负责人不是项目成员'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    return None
 
 
 class TaskPagination(PageNumberPagination):
@@ -133,11 +169,16 @@ class ColumnListView(ProjectAccessMixin, APIView):
 
     def post(self, request):
         # 验证 column 所属项目的访问权限
-        column_id = request.data.get('id')
-        if column_id:
-            column, error_response = self.get_column_with_project_access(request, column_id)
-            if error_response:
-                return error_response
+        project_id = request.data.get('project')
+        if not project_id:
+            return Response(
+                {'detail': '缺少 project 参数'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        project, error_response = self.get_project_with_access(request, project_id)
+        if error_response:
+            return error_response
 
         serializer = ColumnSerializer(data=request.data)
         if serializer.is_valid():
@@ -173,6 +214,12 @@ class ColumnDetailView(ProjectAccessMixin, APIView):
         column, error_response = self.get_column_with_project_access(request, pk)
         if error_response:
             return error_response
+
+        if 'project' in request.data and str(request.data.get('project')) != str(column.project_id):
+            return Response(
+                {'detail': '不能修改列所属项目'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         serializer = ColumnSerializer(column, data=request.data, partial=True)
         if serializer.is_valid():
@@ -242,6 +289,10 @@ class TaskListView(ProjectAccessMixin, APIView):
         if error_response:
             return error_response
 
+        validation_error = _validate_task_relationships(column.project, request.data)
+        if validation_error:
+            return validation_error
+
         serializer = TaskSerializer(data=request.data)
         if serializer.is_valid():
             task = serializer.save()
@@ -279,6 +330,20 @@ class TaskDetailView(ProjectAccessMixin, APIView):
         task, error_response = self.get_task_with_project_access(request, pk)
         if error_response:
             return error_response
+
+        if 'column' in request.data:
+            target_column, column_error = self.get_column_with_project_access(request, request.data.get('column'))
+            if column_error:
+                return column_error
+            if target_column.project_id != task.column.project_id:
+                return Response(
+                    {'detail': '任务不能移动到其他项目的列'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        validation_error = _validate_task_relationships(task.column.project, request.data)
+        if validation_error:
+            return validation_error
 
         serializer = TaskSerializer(task, data=request.data, partial=True)
 
@@ -340,42 +405,52 @@ class TaskBatchDeleteView(ProjectAccessMixin, APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 获取任务并预加载关联数据
-        tasks = Task.objects.filter(id__in=task_ids).select_related('column__project')
+        requested_ids = [str(task_id) for task_id in task_ids]
+        unique_requested_ids = list(dict.fromkeys(requested_ids))
 
-        if not tasks.exists():
+        # 获取任务并预加载关联数据
+        tasks = list(
+            Task.objects.filter(id__in=unique_requested_ids).select_related('column__project')
+        )
+
+        if not tasks:
             return Response(
                 {'detail': '未找到指定任务'},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # 使用 Mixin 统一验证权限（验证第一个任务所属项目）
-        first_task = tasks.first()
-        project_id = str(first_task.column.project.id)
+        found_ids = {str(task.id) for task in tasks}
+        if found_ids != set(unique_requested_ids):
+            return Response(
+                {'detail': '部分任务不存在'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        project_ids = {str(task.column.project.id) for task in tasks}
+        if len(project_ids) != 1:
+            return Response(
+                {'detail': '批量删除只支持同一项目内的任务'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        project_id = project_ids.pop()
 
         # 验证项目访问权限
         project, error_response = self.get_project_with_access(request, project_id)
         if error_response:
             return error_response
 
-        # 二次验证：确保所有任务都属于同一项目
-        for task in tasks:
-            if str(task.column.project.id) != project_id:
-                return Response(
-                    {'detail': '批量删除只支持同一项目内的任务'},
-                    status=status.HTTP_400_BAD_REQUEST
+        count = len(tasks)
+
+        with transaction.atomic():
+            # 在删除前记录活动日志
+            for task in tasks:
+                TaskActivityLog.objects.create(
+                    task=task, user=request.user, action='deleted',
+                    field_name='task', new_value=task.title
                 )
 
-        count = tasks.count()
-
-        # 在删除前记录活动日志
-        for task in tasks:
-            TaskActivityLog.objects.create(
-                task=task, user=request.user, action='deleted',
-                field_name='task', new_value=task.title
-            )
-
-        tasks.delete()
+            Task.objects.filter(id__in=unique_requested_ids).delete()
 
         # 广播刷新信号
         channel_layer = get_channel_layer()
