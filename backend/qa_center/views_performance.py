@@ -2,7 +2,7 @@
 性能测试 API 视图。
 
 execute 仅创建 TestResult 行并投递 Celery 任务（qa_center.tasks.run_performance_test），
-真正的 Locust 子进程在 worker 中跑。stop 通过把 DB 状态置为 'stopped' 通知 worker 退出。
+真正的 Locust 子进程在 worker 中跑。stop 通过把 TestResult.aborted 置为 True 通知 worker 退出。
 """
 
 from urllib.parse import urlparse
@@ -102,10 +102,10 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
         except TestResult.DoesNotExist:
             return Response({'error': '未找到测试记录'}, status=status.HTTP_404_NOT_FOUND)
 
-        if test_result.status in ('completed', 'failed', 'stopped', 'error'):
+        if test_result.status in ('passed', 'failed', 'error') or test_result.aborted:
             return Response({'message': f'测试已处于终态：{test_result.status}'})
 
-        test_result.status = 'stopped'
+        test_result.aborted = True
         test_result.completed_at = timezone.now()
         if test_result.started_at:
             duration = (test_result.completed_at - test_result.started_at).total_seconds() * 1000

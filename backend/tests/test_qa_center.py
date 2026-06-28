@@ -62,3 +62,34 @@ class TestQaCenterAPI:
     def test_devops_recent_executions(self, auth_client):
         response = auth_client.get('/api/qa/devops/recent-executions/')
         assert response.status_code == 200
+
+    def test_test_result_statistics_counts_by_type_and_status(self, auth_client, test_project, test_user):
+        from qa_center.models import TestResult
+
+        TestResult.objects.create(
+            test_type='api',
+            name='api passed',
+            status='passed',
+            project=test_project,
+            executed_by=test_user,
+        )
+        TestResult.objects.create(
+            test_type='ui',
+            name='ui failed',
+            status='failed',
+            project=test_project,
+            executed_by=test_user,
+        )
+
+        response = auth_client.get(f'/api/qa/test-results/statistics/?project={test_project.id}')
+
+        assert response.status_code == 200
+        assert response.data['total'] == 2
+        assert response.data['passed'] == 1
+        assert response.data['failed'] == 1
+        assert response.data['error'] == 0
+        assert response.data['pass_rate'] == 50.0
+        assert response.data['by_type']['api'] == 1
+        assert response.data['by_type']['ui'] == 1
+        assert response.data['by_status']['passed'] == 1
+        assert response.data['by_status']['failed'] == 1

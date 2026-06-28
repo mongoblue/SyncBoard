@@ -5,6 +5,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -19,6 +20,7 @@ from .serializers import (
     BugUpdateSerializer,
 )
 from .state_machine import TERMINAL_STATUSES, TransitionError, validate_transition
+from room.project_access import ensure_project_id_access, project_access_q, user_can_access_project
 
 
 class BugViewSet(viewsets.ModelViewSet):
@@ -48,14 +50,25 @@ class BugViewSet(viewsets.ModelViewSet):
             return BugUpdateSerializer
         return BugDetailSerializer
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            Bug.objects.select_related('project', 'reporter', 'assignee', 'fixer', 'verifier'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
         qs = Bug.objects.select_related(
             'project', 'reporter', 'assignee', 'fixer', 'verifier'
-        )
+        ).filter(project_access_q('project', self.request.user)).distinct()
         params = self.request.query_params
 
         project_id = params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             qs = qs.filter(project_id=project_id)
 
         status_filter = params.get('status')
@@ -89,12 +102,27 @@ class BugViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        ensure_project_id_access(self.request.user, project.id)
+        linked_task = serializer.validated_data.get('linked_task')
+        if linked_task and linked_task.column.project_id != project.id:
+            raise PermissionDenied('关联任务不属于此项目')
+        assignee = serializer.validated_data.get('assignee')
+        if assignee and not user_can_access_project(assignee, project):
+            raise PermissionDenied('指派用户不属于此项目')
         bug = serializer.save(reporter=self.request.user)
         BugTransition.objects.create(
             bug=bug, operator=self.request.user,
             from_status='', to_status=bug.status,
             comment='创建 Bug',
         )
+
+    def perform_update(self, serializer):
+        bug = self.get_object()
+        linked_task = serializer.validated_data.get('linked_task')
+        if linked_task and linked_task.column.project_id != bug.project_id:
+            raise PermissionDenied('关联任务不属于此项目')
+        serializer.save()
 
     @action(detail=True, methods=['post'])
     def transition(self, request, pk=None):
@@ -221,8 +249,9 @@ class BugStatsView(APIView):
 
     def get(self, request):
         project_id = request.query_params.get('project')
-        qs = Bug.objects.all()
+        qs = Bug.objects.filter(project_access_q('project', request.user)).distinct()
         if project_id:
+            ensure_project_id_access(request.user, project_id)
             qs = qs.filter(project_id=project_id)
 
         open_qs = qs.exclude(status__in=TERMINAL_STATUSES)

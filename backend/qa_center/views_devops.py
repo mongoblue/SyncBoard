@@ -844,11 +844,14 @@ class ProjectQualityReportView(APIView):
         test_pass_rate = round(passed_recent / total_recent * 20, 1) if total_recent > 0 else 0
 
         # 3. 性能指标
-        perf_results = PerformanceTestResult.objects.filter(
+        perf_results = list(PerformanceTestResult.objects.filter(
             test_case__project_id=project_id
-        ).order_by('-executed_at')[:5]
-        if perf_results.exists():
-            avg_p95 = sum(r.p95 or r.p99 or 0 for r in perf_results) / perf_results.count()
+        ).order_by('-executed_at')[:5])
+        if perf_results:
+            avg_p95 = sum(
+                r.p95_response_time_ms or r.p99_response_time_ms or 0
+                for r in perf_results
+            ) / len(perf_results)
             perf_score = 20 if avg_p95 < 500 else (15 if avg_p95 < 1000 else (10 if avg_p95 < 2000 else 5))
         else:
             avg_p95 = 0
@@ -903,6 +906,6 @@ class ProjectQualityReportView(APIView):
                 'total_tasks': total_tasks,
                 'bug_count': bug_count,
                 'recent_pipelines': total_pl,
-                'has_perf_data': perf_results.exists(),
+                'has_perf_data': bool(perf_results),
             }
         })

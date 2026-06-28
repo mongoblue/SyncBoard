@@ -4,7 +4,7 @@ QA Center Celery 任务：性能压测异步执行。
 将 Locust 子进程的生命周期与 Django 进程解耦：
 - views_performance.execute 提交 run_performance_test.delay(...)
 - worker 拉起 LocustRunner、阻塞等待结束、写入 PerformanceTestResult、通过 channels 推送实时指标
-- stop 通过把 TestResult.status 置为 'stopped' 来通知 worker 中的轮询循环退出
+- stop 通过把 TestResult.aborted 置为 True 来通知 worker 中的轮询循环退出
 """
 
 import json
@@ -33,10 +33,10 @@ def _ws_send(execution_id: int, payload: dict) -> None:
 
 
 def _should_stop(execution_id: int) -> bool:
-    """检查 DB 中是否被标记为 stopped（由 views.stop 设置）。"""
+    """检查 DB 中是否被标记为 aborted（由 views.stop 设置）。"""
     from .models import TestResult
     try:
-        return TestResult.objects.filter(id=execution_id, status='stopped').exists()
+        return TestResult.objects.filter(id=execution_id, aborted=True).exists()
     except Exception:
         return False
 
@@ -105,9 +105,9 @@ def run_performance_test(
 
     error_rate = final_stats.get('error_rate', 0) or 0
     if stopped_by_user:
-        final_status = 'stopped'
+        final_status = 'error'
     elif error_rate < (test_case.expected_error_rate or 5.0):
-        final_status = 'completed'
+        final_status = 'passed'
     else:
         final_status = 'failed'
 
@@ -115,6 +115,10 @@ def run_performance_test(
     test_result.response_time_ms = final_stats.get('avg_response_time', 0)
     test_result.throughput = final_stats.get('throughput', 0)
     test_result.error_rate = error_rate
+    if stopped_by_user:
+        test_result.aborted = True
+        test_result.error_message = '用户停止性能测试'
+        test_result.error_code = 'USER_STOPPED'
     test_result.completed_at = completed_at
     if duration_ms is not None:
         test_result.duration_ms = duration_ms
@@ -122,15 +126,15 @@ def run_performance_test(
     execution_log = {
         'summary': {
             'total': 1,
-            'passed': 1 if final_status == 'completed' else 0,
-            'failed': 0 if final_status == 'completed' else 1,
-            'pass_rate': 100 if final_status == 'completed' else 0,
+            'passed': 1 if final_status == 'passed' else 0,
+            'failed': 0 if final_status == 'passed' else 1,
+            'pass_rate': 100 if final_status == 'passed' else 0,
         },
         'results': [{
             'case_id': test_case.id,
             'case_name': test_case.name,
             'type': 'performance',
-            'passed': final_status == 'completed',
+            'passed': final_status == 'passed',
             'response_time_ms': final_stats.get('avg_response_time', 0),
             'message': (
                 f"RPS: {final_stats.get('throughput', 0):.1f}, "

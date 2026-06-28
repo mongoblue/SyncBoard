@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 
 from .models import Bug, BugTransition, BugComment
 from .state_machine import allowed_next_statuses
+from room.project_access import user_can_access_project
 
 
 class _UserBriefSerializer(serializers.ModelSerializer):
@@ -38,6 +39,7 @@ class BugListSerializer(serializers.ModelSerializer):
     severity_display = serializers.CharField(source='get_severity_display', read_only=True)
     priority_display = serializers.CharField(source='get_priority_display', read_only=True)
     linked_task = serializers.SerializerMethodField()
+    allowed_transitions = serializers.SerializerMethodField()
 
     class Meta:
         model = Bug
@@ -46,11 +48,14 @@ class BugListSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'severity', 'severity_display',
             'priority', 'priority_display', 'reporter', 'assignee',
             'source_test_type', 'created_at', 'updated_at',
-            'linked_task',
+            'linked_task', 'allowed_transitions',
         ]
 
     def get_linked_task(self, obj):
         return str(obj.linked_task_id) if obj.linked_task_id else None
+
+    def get_allowed_transitions(self, obj):
+        return allowed_next_statuses(obj.status)
 
 
 class BugDetailSerializer(serializers.ModelSerializer):
@@ -105,8 +110,22 @@ class BugCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         assignee_id = validated_data.pop('assignee_id', None)
         if assignee_id:
-            validated_data['assignee'] = User.objects.filter(pk=assignee_id).first()
+            assignee = User.objects.filter(pk=assignee_id).first()
+            if assignee:
+                validated_data['assignee'] = assignee
         return super().create(validated_data)
+
+    def validate(self, attrs):
+        project = attrs.get('project')
+        linked_task = attrs.get('linked_task')
+        if linked_task and project and linked_task.column.project_id != project.id:
+            raise serializers.ValidationError({'linked_task': '关联任务不属于此项目'})
+        assignee_id = attrs.get('assignee_id')
+        if assignee_id and project:
+            assignee = User.objects.filter(pk=assignee_id).first()
+            if assignee and not user_can_access_project(assignee, project):
+                raise serializers.ValidationError({'assignee_id': '指派用户不属于此项目'})
+        return attrs
 
 
 class BugUpdateSerializer(serializers.ModelSerializer):
@@ -118,3 +137,9 @@ class BugUpdateSerializer(serializers.ModelSerializer):
             'expected', 'actual', 'environment',
             'severity', 'priority', 'linked_task',
         ]
+
+    def validate(self, attrs):
+        linked_task = attrs.get('linked_task')
+        if linked_task and self.instance and linked_task.column.project_id != self.instance.project_id:
+            raise serializers.ValidationError({'linked_task': '关联任务不属于此项目'})
+        return attrs

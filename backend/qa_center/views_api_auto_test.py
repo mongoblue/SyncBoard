@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import IsAuthenticated
 from django.db.models import Q
 from django.utils import timezone
 import json
@@ -22,6 +23,19 @@ from .serializers import (
     ApiAutoTestExtractorSerializer,
 )
 from .api_auto_executor import run_api_auto_test
+from room.project_access import ensure_project_id_access, project_access_q
+
+
+class ProjectScopedViewSetMixin:
+    permission_classes = [IsAuthenticated]
+
+    def _accessible_project_q(self, project_path='project'):
+        return project_access_q(project_path, self.request.user)
+
+    def _ensure_query_project_access(self):
+        project_id = self.request.query_params.get('project')
+        if project_id:
+            ensure_project_id_access(self.request.user, project_id)
 
 
 class _CaseResultsPagination(PageNumberPagination):
@@ -31,14 +45,15 @@ class _CaseResultsPagination(PageNumberPagination):
     max_page_size = 200
 
 
-class ApiAutoTestSuiteViewSet(viewsets.ModelViewSet):
+class ApiAutoTestSuiteViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     queryset = ApiAutoTestSuite.objects.all()
     serializer_class = ApiAutoTestSuiteSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(self._accessible_project_q('project')).distinct()
         project_id = self.request.query_params.get('project')
         if project_id:
+            self._ensure_query_project_access()
             queryset = queryset.filter(project_id=project_id)
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
@@ -54,6 +69,7 @@ class ApiAutoTestSuiteViewSet(viewsets.ModelViewSet):
         return ApiAutoTestSuiteSerializer
 
     def perform_create(self, serializer):
+        ensure_project_id_access(self.request.user, serializer.validated_data['project'].id)
         serializer.save(created_by=self.request.user)
 
     @action(detail=True, methods=['post'])
@@ -74,12 +90,12 @@ class ApiAutoTestSuiteViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class ApiAutoTestCaseViewSet(viewsets.ModelViewSet):
+class ApiAutoTestCaseViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     queryset = ApiAutoTestCase.objects.all()
     serializer_class = ApiAutoTestCaseSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(self._accessible_project_q('suite__project')).distinct()
         suite_id = self.request.query_params.get('suite')
         if suite_id:
             queryset = queryset.filter(suite_id=suite_id)
@@ -97,6 +113,7 @@ class ApiAutoTestCaseViewSet(viewsets.ModelViewSet):
         return ApiAutoTestCaseSerializer
 
     def perform_create(self, serializer):
+        ensure_project_id_access(self.request.user, serializer.validated_data['suite'].project_id)
         serializer.save(created_by=self.request.user)
 
     @action(detail=True, methods=['post'])
@@ -116,8 +133,7 @@ class ApiAutoTestCaseViewSet(viewsets.ModelViewSet):
         )
 
         executor = ApiAutoTestExecutor(suite.id, request.user)
-        executor.test_result = test_result
-        case_result = executor._execute_case(case)
+        case_result = executor.execute_single_case(case, test_result=test_result)
 
         test_result.passed_cases = 1 if case_result.passed else 0
         test_result.failed_cases = 0 if case_result.passed else 1
@@ -135,23 +151,24 @@ class ApiAutoTestCaseViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'])
     def bulk_delete(self, request):
         ids = request.data.get('ids', [])
-        deleted_count = ApiAutoTestCase.objects.filter(id__in=ids).delete()[0]
+        deleted_count = self.get_queryset().filter(id__in=ids).delete()[0]
         return Response({'deleted': deleted_count})
 
     @action(detail=False, methods=['post'])
     def reorder(self, request):
         ordering = request.data.get('ordering', [])
+        accessible = self.get_queryset()
         for item in ordering:
-            ApiAutoTestCase.objects.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
+            accessible.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
         return Response({'message': 'Ordering updated'})
 
 
-class ApiAutoTestAssertionViewSet(viewsets.ModelViewSet):
+class ApiAutoTestAssertionViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     queryset = ApiAutoTestAssertion.objects.all()
     serializer_class = ApiAutoTestAssertionSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(self._accessible_project_q('case__suite__project')).distinct()
         case_id = self.request.query_params.get('case')
         if case_id:
             queryset = queryset.filter(case_id=case_id)
@@ -160,21 +177,26 @@ class ApiAutoTestAssertionViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(assertion_type=assertion_type)
         return queryset.order_by('sort_order', 'id')
 
+    def perform_create(self, serializer):
+        ensure_project_id_access(self.request.user, serializer.validated_data['case'].suite.project_id)
+        serializer.save()
+
     @action(detail=False, methods=['post'])
     def bulk_delete(self, request):
         ids = request.data.get('ids', [])
-        deleted_count = ApiAutoTestAssertion.objects.filter(id__in=ids).delete()[0]
+        deleted_count = self.get_queryset().filter(id__in=ids).delete()[0]
         return Response({'deleted': deleted_count})
 
     @action(detail=False, methods=['post'])
     def reorder(self, request):
         ordering = request.data.get('ordering', [])
+        accessible = self.get_queryset()
         for item in ordering:
-            ApiAutoTestAssertion.objects.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
+            accessible.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
         return Response({'message': 'Ordering updated'})
 
 
-class ApiAutoTestExtractorViewSet(viewsets.ModelViewSet):
+class ApiAutoTestExtractorViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     """变量抽取器 ViewSet —— M3.3。
 
     GET    /api/qa/auto-extractors/?case=<id>   列出某用例的抽取器
@@ -188,7 +210,7 @@ class ApiAutoTestExtractorViewSet(viewsets.ModelViewSet):
     serializer_class = ApiAutoTestExtractorSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = super().get_queryset().filter(self._accessible_project_q('case__suite__project')).distinct()
         case_id = self.request.query_params.get('case')
         if case_id:
             qs = qs.filter(case_id=case_id)
@@ -197,21 +219,26 @@ class ApiAutoTestExtractorViewSet(viewsets.ModelViewSet):
             qs = qs.filter(source=source)
         return qs.order_by('sort_order', 'id')
 
+    def perform_create(self, serializer):
+        ensure_project_id_access(self.request.user, serializer.validated_data['case'].suite.project_id)
+        serializer.save()
+
     @action(detail=False, methods=['post'])
     def bulk_delete(self, request):
         ids = request.data.get('ids', [])
-        deleted = ApiAutoTestExtractor.objects.filter(id__in=ids).delete()[0]
+        deleted = self.get_queryset().filter(id__in=ids).delete()[0]
         return Response({'deleted': deleted})
 
     @action(detail=False, methods=['post'])
     def reorder(self, request):
         ordering = request.data.get('ordering', [])
+        accessible = self.get_queryset()
         for item in ordering:
-            ApiAutoTestExtractor.objects.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
+            accessible.filter(id=item['id']).update(sort_order=item.get('sort_order', 0))
         return Response({'message': 'Ordering updated'})
 
 
-class ApiAutoTestResultViewSet(viewsets.ReadOnlyModelViewSet):
+class ApiAutoTestResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = ApiAutoTestResult.objects.all()
     serializer_class = ApiAutoTestResultSerializer
 
@@ -225,7 +252,7 @@ class ApiAutoTestResultViewSet(viewsets.ReadOnlyModelViewSet):
         return super().paginator
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(self._accessible_project_q('suite__project')).distinct()
         suite_id = self.request.query_params.get('suite')
         if suite_id:
             queryset = queryset.filter(suite_id=suite_id)
@@ -234,6 +261,7 @@ class ApiAutoTestResultViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(status=status_filter)
         project_id = self.request.query_params.get('project')
         if project_id:
+            self._ensure_query_project_access()
             queryset = queryset.filter(suite__project_id=project_id)
         return queryset.select_related('suite', 'executed_by').order_by('-created_at')
 
@@ -310,11 +338,13 @@ class ApiAutoTestResultViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['delete'])
     def bulk_delete(self, request):
         ids = request.data.get('ids', [])
-        deleted_count = ApiAutoTestResult.objects.filter(id__in=ids).delete()[0]
+        deleted_count = self.get_queryset().filter(id__in=ids).delete()[0]
         return Response({'deleted': deleted_count})
 
 
 class ApiAutoTestExecuteView(APIView):
+    permission_classes = [IsAuthenticated]
+
     def post(self, request):
         serializer = ApiAutoTestExecuteSerializer(data=request.data)
         if not serializer.is_valid():
@@ -322,6 +352,8 @@ class ApiAutoTestExecuteView(APIView):
 
         suite_id = serializer.validated_data['suite_id']
         try:
+            suite = ApiAutoTestSuite.objects.select_related('project').get(id=suite_id, is_active=True)
+            ensure_project_id_access(request.user, suite.project_id)
             test_result = run_api_auto_test(suite_id, request.user)
             result_serializer = ApiAutoTestResultSerializer(test_result)
             return Response({
@@ -335,12 +367,12 @@ class ApiAutoTestExecuteView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class ApiAutoTestCaseResultViewSet(viewsets.ReadOnlyModelViewSet):
+class ApiAutoTestCaseResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyModelViewSet):
     queryset = ApiAutoTestCaseResult.objects.all()
     serializer_class = ApiAutoTestCaseResultSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(self._accessible_project_q('test_result__suite__project')).distinct()
         test_result_id = self.request.query_params.get('test_result')
         if test_result_id:
             queryset = queryset.filter(test_result_id=test_result_id)

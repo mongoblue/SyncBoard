@@ -206,13 +206,15 @@ class TestResultViewSet(viewsets.ModelViewSet):
 
         # 按类型统计
         type_stats = {}
-        for test_type, _ in TestResult.TEST_TYPE_CHOICES:
+        test_type_choices = TestResult._meta.get_field('test_type').choices or []
+        for test_type, _ in test_type_choices:
             type_count = queryset.filter(test_type=test_type).count()
             type_stats[test_type] = type_count
 
         # 按状态统计
         status_stats = {}
-        for status_code, _ in TestResult.STATUS_CHOICES:
+        status_choices = TestResult._meta.get_field('status').choices or []
+        for status_code, _ in status_choices:
             status_count = queryset.filter(status=status_code).count()
             status_stats[status_code] = status_count
 

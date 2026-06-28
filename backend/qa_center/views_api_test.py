@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from django.test import Client
 from django.urls import resolve
 from django.http import HttpRequest
@@ -24,6 +25,7 @@ from .serializers import (
 from .assertion_engine import AssertionEngine  # 保留以兼容外部 import；新代码请用 unified_assertions
 from . import unified_assertions as ua
 from . import template_engine as te
+from room.project_access import ensure_project_id_access, project_access_q, user_can_access_project
 
 
 class ApiTestCaseViewSet(viewsets.ModelViewSet):
@@ -38,15 +40,18 @@ class ApiTestCaseViewSet(viewsets.ModelViewSet):
         return ApiTestCaseSerializer
     
     def get_queryset(self):
-        """根据项目ID筛选"""
-        queryset = ApiTestCase.objects.all()
+        """根据当前用户可访问项目和项目ID筛选"""
         project_id = self.request.query_params.get('project')
+        if project_id:
+            ensure_project_id_access(self.request.user, project_id)
+        queryset = ApiTestCase.objects.filter(project_access_q('project', self.request.user)).distinct()
         if project_id:
             queryset = queryset.filter(project_id=project_id)
         return queryset
     
     def perform_create(self, serializer):
         """创建时自动设置创建者"""
+        ensure_project_id_access(self.request.user, serializer.validated_data['project'].id)
         serializer.save(created_by=self.request.user)
     
     @action(detail=True, methods=['post'])
@@ -706,14 +711,37 @@ class ApiTestCaseBatchRunView(APIView):
         name = request.data.get('name') or f"批量执行 {timezone.now().strftime('%Y-%m-%d %H:%M')}"
         max_workers = int(request.data.get('max_workers', 4))
 
-        cases = list(ApiTestCase.objects.filter(id__in=case_ids))
-        if not cases:
+        cases_by_id = {
+            case.id: case
+            for case in ApiTestCase.objects.filter(id__in=case_ids).select_related('project')
+        }
+        cases = []
+        missing_ids = []
+        for case_id in case_ids:
+            try:
+                normalized_id = int(case_id)
+            except (TypeError, ValueError):
+                missing_ids.append(case_id)
+                continue
+            case = cases_by_id.get(normalized_id)
+            if not case:
+                missing_ids.append(case_id)
+                continue
+            if not user_can_access_project(request.user, case.project):
+                raise PermissionDenied('无权访问此项目')
+            cases.append(case)
+        if missing_ids:
             return Response(
-                {'error': '未找到任何 case'},
+                {'error': '部分 case 不存在', 'case_ids': missing_ids},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         project = cases[0].project
+        if any(case.project_id != project.id for case in cases):
+            return Response(
+                {'error': 'case_ids 必须属于同一项目'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         run = TestRun.objects.create(
             project=project,
             name=name,

@@ -11,9 +11,13 @@ from django.utils import timezone
 from django.db import close_old_connections
 
 from .models import TestRun, TestRunCaseResult, ApiTestCase
+from room.project_access import ensure_project_id_access, project_access_q, user_can_access_project
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_run_project_access(request, run):
+    ensure_project_id_access(request.user, run.project_id)
 
 def _parse_pagination(request, default_size=20, max_size=100):
     """解析 page / page_size,失败返回 400 Response。"""
@@ -40,9 +44,10 @@ def cancel_test_run(request, run_id):
     - 跑完后 TestRun.status 变 cancelled
     """
     try:
-        run = TestRun.objects.get(id=run_id)
+        run = TestRun.objects.select_related('project').get(id=run_id)
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    _ensure_run_project_access(request, run)
 
     if run.status not in ('pending', 'running'):
         return Response(
@@ -68,9 +73,12 @@ def cancel_test_run(request, run_id):
 @permission_classes([IsAuthenticated])
 def list_test_runs(request):
     """GET /api/qa/runs/?project=&status=&test_type=&page=&page_size="""
-    qs = TestRun.objects.select_related('project', 'triggered_by')
+    qs = TestRun.objects.select_related('project', 'triggered_by').filter(
+        project_access_q('project', request.user)
+    ).distinct()
     project_id = request.query_params.get('project')
     if project_id:
+        ensure_project_id_access(request.user, project_id)
         qs = qs.filter(project_id=project_id)
     status_filter = request.query_params.get('status')
     if status_filter:
@@ -101,6 +109,7 @@ def test_run_detail(request, run_id):
         run = TestRun.objects.select_related('project', 'triggered_by').get(id=run_id)
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    _ensure_run_project_access(request, run)
     data = _serialize_run(run)
     data['case_count'] = run.case_results.count()
     data['summary'] = run.summary
@@ -111,9 +120,10 @@ def test_run_detail(request, run_id):
 @permission_classes([IsAuthenticated])
 def test_run_cases(request, run_id):
     try:
-        run = TestRun.objects.get(id=run_id)
+        run = TestRun.objects.select_related('project').get(id=run_id)
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    _ensure_run_project_access(request, run)
 
     qs = run.case_results.select_related('api_test_case', 'ui_test_case').order_by('sequence')
     status_filter = request.query_params.get('status')
@@ -140,10 +150,11 @@ def test_run_cases(request, run_id):
 def test_run_case_detail(request, run_id, case_result_id):
     try:
         case_result = TestRunCaseResult.objects.select_related(
-            'test_run', 'api_test_case', 'ui_test_case'
+            'test_run__project', 'api_test_case', 'ui_test_case'
         ).get(id=case_result_id, test_run_id=run_id)
     except TestRunCaseResult.DoesNotExist:
         return Response({'error': 'CaseResult 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    _ensure_run_project_access(request, case_result.test_run)
     return Response(_serialize_case_result(case_result, full=True))
 
 
@@ -207,9 +218,10 @@ def rerun_test_run(request, run_id):
     from .views_api_test import execute_single_api_case
 
     try:
-        old_run = TestRun.objects.get(id=run_id)
+        old_run = TestRun.objects.select_related('project').get(id=run_id)
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
+    _ensure_run_project_access(request, old_run)
 
     if old_run.status not in ('passed', 'failed', 'error', 'cancelled'):
         return Response(
@@ -231,12 +243,27 @@ def rerun_test_run(request, run_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    cases = list(ApiTestCase.objects.filter(id__in=case_ids))
+    cases_by_id = {
+        case.id: case
+        for case in ApiTestCase.objects.filter(id__in=case_ids).select_related('project')
+    }
+    cases = []
+    for case_id in case_ids:
+        case = cases_by_id.get(int(case_id))
+        if case:
+            cases.append(case)
     if not cases:
         return Response(
             {'error': '原 case 已被删除,无法重跑'},
             status=status.HTTP_400_BAD_REQUEST,
         )
+    if len(cases) != len(case_ids) or any(case.project_id != old_run.project_id for case in cases):
+        return Response(
+            {'error': '原 case 已被删除或不属于原项目,无法重跑'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if any(not user_can_access_project(request.user, case.project) for case in cases):
+        return Response({'detail': '无权访问此项目'}, status=status.HTTP_403_FORBIDDEN)
 
     max_workers = int(config.get('max_workers', 4))
     triggered_user = request.user

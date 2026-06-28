@@ -6,10 +6,22 @@
 import pytest
 from unittest.mock import patch
 
+from django.contrib.auth.models import User
 from django.utils import timezone
 
+from room.models import Project
 from qa_center.models import PerformanceTestCase, PerformanceTestResult, TestResult
 from qa_center.tasks import run_performance_test
+
+
+@pytest.fixture
+def test_user(db):
+    return User.objects.create_user(username='perfuser', password='testpass123')
+
+
+@pytest.fixture
+def test_project(db, test_user):
+    return Project.objects.create(name='Perf Project', owner=test_user)
 
 
 FINAL_STATS = {
@@ -101,12 +113,13 @@ def test_run_performance_test_persists_result(test_project, test_user):
         )
 
     assert result['ok'] is True
-    assert result['status'] == 'completed'
+    assert result['status'] == 'passed'
 
     tr.refresh_from_db()
-    assert tr.status == 'completed'
+    assert tr.status == 'passed'
+    assert tr.status in dict(TestResult._meta.get_field('status').choices)
     assert tr.throughput == pytest.approx(40.0)
-    assert tr.response_time_ms == pytest.approx(123.45)
+    assert tr.response_time_ms == 123
     assert tr.error_rate == pytest.approx(1.6)
     assert tr.duration_ms is not None
 
@@ -157,4 +170,80 @@ def test_run_performance_test_marks_failed_when_error_rate_exceeds(test_project,
     assert result['status'] == 'failed'
     tr.refresh_from_db()
     assert tr.status == 'failed'
+    assert tr.status in dict(TestResult._meta.get_field('status').choices)
     assert PerformanceTestResult.objects.filter(test_result=tr).exists()
+
+
+@pytest.mark.django_db
+def test_should_stop_uses_aborted_flag_not_stopped_status(test_project, test_user):
+    from qa_center.tasks import _should_stop
+
+    tr = TestResult.objects.create(
+        test_type='performance',
+        name='stop-signal',
+        project=test_project,
+        status='running',
+        executed_by=test_user,
+        started_at=timezone.now(),
+        aborted=True,
+    )
+
+    assert _should_stop(tr.id) is True
+
+    tr.refresh_from_db()
+    assert tr.status == 'running'
+    assert tr.status in dict(TestResult._meta.get_field('status').choices)
+
+
+class _StoppedRunner(_FakeRunner):
+    def __init__(self, execution_id=None):
+        super().__init__(execution_id=execution_id)
+        self._running = True
+        self._checks = 0
+
+    def is_running(self):
+        self._checks += 1
+        return self._checks == 1
+
+    def stop_test(self):
+        self._running = False
+
+
+@pytest.mark.django_db
+def test_run_performance_test_marks_user_stopped_run_as_error_and_aborted(test_project, test_user):
+    case = PerformanceTestCase.objects.create(
+        name='stopped-case',
+        url='https://example.com/api/stop',
+        method='GET',
+        project=test_project,
+        created_by=test_user,
+        concurrent_users=5,
+        duration_seconds=5,
+        expected_error_rate=5.0,
+    )
+    tr = TestResult.objects.create(
+        test_type='performance',
+        name=case.name,
+        project=test_project,
+        status='running',
+        executed_by=test_user,
+        started_at=timezone.now(),
+        aborted=True,
+    )
+
+    with patch('qa_center.tasks.LocustRunner', _StoppedRunner):
+        result = run_performance_test(
+            execution_id=tr.id,
+            test_case_id=case.id,
+            host='https://example.com',
+            users=5,
+            spawn_rate=1,
+            run_time='5s',
+        )
+
+    assert result['status'] == 'error'
+    tr.refresh_from_db()
+    assert tr.status == 'error'
+    assert tr.aborted is True
+    assert tr.status in dict(TestResult._meta.get_field('status').choices)
+    assert '用户停止' in tr.error_message

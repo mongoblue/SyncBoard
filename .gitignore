@@ -29,9 +29,24 @@ locust_run_*.py
 locust_stats_*.csv
 __pycache__/locustfile_*.pyc
 __pycache__/locust_run_*.pyc
+backend/test_output_*.csv
 
 # 调试截图（开发时生成的临时文件）
 debug_*.png
+
+# Django 运行时上传/索引文件
+backend/media/
+backend/avatars/
+backend/whoosh_index/
+
+# 测试/报告产物
+api_auto_test_skeleton/reports/
+
+# 本地 AI 工具状态（不进入版本库）
+.claude/worktrees/
+.claude/projects/
+.claude/settings.local.json
+.trae/documents/
 
 # Vim 临时文件
 *.swp

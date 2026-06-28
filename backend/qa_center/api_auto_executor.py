@@ -42,6 +42,7 @@ from .bug_utils import create_bug_from_test_failure
 from . import unified_assertions as ua
 from . import template_engine as te
 from . import request_builder as rb
+from . import extractors as ex_engine
 
 
 class JsonPathExtractor:
@@ -187,14 +188,36 @@ class ApiAutoTestExecutor:
         self._environment_id = environment_id
         self._variables: Dict[str, Any] = {}
 
+    def _load_suite(self) -> ApiAutoTestSuite:
+        if self.suite is None:
+            self.suite = ApiAutoTestSuite.objects.select_related('project').get(id=self.suite_id)
+        return self.suite
+
+    def _initialize_variables(self) -> None:
+        suite = self._load_suite()
+        env = te.resolve_project_environment(suite.project, env_id=self._environment_id)
+        globals_ = te.load_project_globals(suite.project)
+        self._variables = te.build_variable_pool(environment=env, global_vars=globals_)
+
+    def execute_single_case(self, case: ApiAutoTestCase, test_result: Optional[ApiAutoTestResult] = None) -> ApiAutoTestCaseResult:
+        self.suite = case.suite
+        self.suite_id = case.suite_id
+        self._initialize_variables()
+        if test_result is not None:
+            self.test_result = test_result
+        return self._execute_case(case)
+
     def execute(self) -> ApiAutoTestResult:
-        self.suite = ApiAutoTestSuite.objects.get(id=self.suite_id)
-        active_cases = self.suite.test_cases.filter(is_active=True).order_by('sort_order', 'created_at')
+        self.suite = ApiAutoTestSuite.objects.select_related('project').get(id=self.suite_id)
+        active_cases = (
+            self.suite.test_cases
+            .filter(is_active=True)
+            .prefetch_related('assertions', 'extractors')
+            .order_by('sort_order', 'created_at')
+        )
 
         # M3.2: 解析变量池（环境 + 项目全局变量）
-        env = te.resolve_project_environment(self.suite.project, env_id=self._environment_id)
-        globals_ = te.load_project_globals(self.suite.project)
-        self._variables = te.build_variable_pool(environment=env, global_vars=globals_)
+        self._initialize_variables()
 
         execution_name = f"{self.suite.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -342,6 +365,18 @@ class ApiAutoTestExecutor:
                     'passed': False,
                     'error_message': f"Expected status {case.expected_status}, got {status_code}"
                 })
+
+            active_extractors = list(case.extractors.filter(is_active=True).order_by('sort_order', 'id'))
+            if active_extractors:
+                extracted = ex_engine.run_extractors(
+                    active_extractors,
+                    response_json=response_data,
+                    response_headers=response_headers,
+                    status_code=status_code,
+                    cookies=dict(getattr(response, 'cookies', {}) or {}),
+                    response_time_ms=response_time_ms,
+                )
+                self._variables.update(extracted)
 
             passed = all_passed
 
