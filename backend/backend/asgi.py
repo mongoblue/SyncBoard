@@ -23,6 +23,7 @@ django_asgi_app = get_asgi_application()
 # 3. 然后再导入你的路由 (因为 routing 需要用到加载好的环境)
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
+from channels.security.websocket import AllowedHostsOriginValidator
 import room.routing
 
 application = ProtocolTypeRouter({
@@ -30,9 +31,11 @@ application = ProtocolTypeRouter({
     "http": django_asgi_app,
 
     # WebSocket 请求走 Channels 处理
-    "websocket": AuthMiddlewareStack(
-        URLRouter(
-            room.routing.websocket_urlpatterns
+    "websocket": AllowedHostsOriginValidator(
+        AuthMiddlewareStack(
+            URLRouter(
+                room.routing.websocket_urlpatterns
+            )
         )
     ),
 })

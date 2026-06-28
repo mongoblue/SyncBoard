@@ -2,14 +2,72 @@ import json
 import re
 import asyncio
 import logging
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from room.models import Project
+from .models import PerformanceTestResult, TestResult, TestRun
 from .workers.recorder_supervisor import RecorderSession
 
 logger = logging.getLogger('django')
 
 
+async def _close_if_anonymous(consumer):
+    user = consumer.scope.get('user')
+    if not user or not user.is_authenticated:
+        await consumer.close(code=4003)
+        return True
+    return False
+
+
+@database_sync_to_async
+def _user_can_access_project(user, project):
+    return user == project.owner or project.members.filter(id=user.id).exists()
+
+
+@database_sync_to_async
+def _get_test_run_project(run_id):
+    try:
+        return TestRun.objects.select_related('project__owner').prefetch_related(
+            'project__members'
+        ).get(id=run_id).project
+    except TestRun.DoesNotExist:
+        return None
+
+
+@database_sync_to_async
+def _get_performance_result_project(execution_id):
+    try:
+        return PerformanceTestResult.objects.select_related(
+            'test_case__project__owner'
+        ).prefetch_related(
+            'test_case__project__members'
+        ).get(test_result_id=execution_id).test_case.project
+    except PerformanceTestResult.DoesNotExist:
+        return None
+
+
+@database_sync_to_async
+def _get_ui_result_project(task_id):
+    try:
+        test_result = TestResult.objects.get(task_id=task_id)
+    except TestResult.DoesNotExist:
+        return None
+
+    project_id = (test_result.test_params or {}).get('project_id')
+    if not project_id:
+        return None
+
+    try:
+        return Project.objects.select_related('owner').prefetch_related('members').get(id=project_id)
+    except (Project.DoesNotExist, ValueError, TypeError):
+        return None
+
+
 class QAConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        if await _close_if_anonymous(self):
+            return
+
         # 所有打开 QA 面板的用户都加入这个组
         self.group_name = "qa_dashboard"
         await self.channel_layer.group_add(
@@ -17,6 +75,7 @@ class QAConsumer(AsyncWebsocketConsumer):
             self.channel_name
         )
         await self.accept()
+        await self.send(text_data=json.dumps({'type': 'connected'}))
 
     async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
@@ -41,6 +100,9 @@ class RecorderConsumer(AsyncWebsocketConsumer):
     """UI 测试录制器 WebSocket Consumer（委托给 RecorderSession 子进程）"""
 
     async def connect(self):
+        if await _close_if_anonymous(self):
+            return
+
         # 生成简单的组名（channel_name 可能包含特殊字符）
         safe_name = re.sub(r'[^a-zA-Z0-9\-_]', '', self.channel_name[:50])
         self.group_name = f"recorder_{safe_name}"
@@ -166,7 +228,15 @@ class PerformanceTestConsumer(AsyncWebsocketConsumer):
     """性能测试实时数据 WebSocket Consumer"""
     
     async def connect(self):
+        if await _close_if_anonymous(self):
+            return
+
         self.execution_id = self.scope['url_route']['kwargs'].get('execution_id')
+        project = await _get_performance_result_project(self.execution_id)
+        if project is None or not await _user_can_access_project(self.scope['user'], project):
+            await self.close(code=4003)
+            return
+
         self.group_name = f"performance_test_{self.execution_id}"
         
         await self.channel_layer.group_add(
@@ -198,7 +268,15 @@ class TestRunProgressConsumer(AsyncWebsocketConsumer):
     消息: {type: 'case_done', sequence, status, passed_count, ...}
     """
     async def connect(self):
+        if await _close_if_anonymous(self):
+            return
+
         self.run_id = self.scope['url_route']['kwargs'].get('run_id')
+        project = await _get_test_run_project(self.run_id)
+        if project is None or not await _user_can_access_project(self.scope['user'], project):
+            await self.close(code=4003)
+            return
+
         self.group_name = f"test_run_{self.run_id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
@@ -222,7 +300,15 @@ class UiRunConsumer(AsyncWebsocketConsumer):
     URL: /ws/qa/run/{task_id}/
     """
     async def connect(self):
+        if await _close_if_anonymous(self):
+            return
+
         self.task_id = self.scope["url_route"]["kwargs"].get("task_id")
+        project = await _get_ui_result_project(self.task_id)
+        if project is None or not await _user_can_access_project(self.scope['user'], project):
+            await self.close(code=4003)
+            return
+
         self.group_name = f"ui_run_{self.task_id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
