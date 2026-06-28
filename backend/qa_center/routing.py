@@ -2,7 +2,8 @@
 QA Center WebSocket 路由 —— 5 条 WS。
 
 路径列表：
-  ws/qa/dashboard/              QAConsumer               测试计划执行进度（每用例完成时广播）
+  ws/qa/dashboard/              QAConsumer               兼容旧版全局测试进度通道（仅认证）
+  ws/qa/dashboard/<project_id>/ QAConsumer               项目作用域测试计划执行进度
   ws/qa/recorder/               RecorderConsumer          UI 录制器（双向通信）
   ws/qa/performance/<id>/       PerformanceTestConsumer   性能测试实时指标
   ws/qa/test-run/<id>/          TestRunProgressConsumer   旧版测试运行进度
@@ -16,6 +17,7 @@ from django.urls import re_path
 from . import consumers
 
 websocket_urlpatterns = [
+    re_path(r'ws/qa/dashboard/(?P<project_id>[-\w]+)/$', consumers.QAConsumer.as_asgi()),
     re_path(r'ws/qa/dashboard/$', consumers.QAConsumer.as_asgi()),
     re_path(r'ws/qa/recorder/$', consumers.RecorderConsumer.as_asgi()),
     re_path(r'ws/qa/performance/(?P<execution_id>\d+)/$', consumers.PerformanceTestConsumer.as_asgi()),

@@ -200,6 +200,65 @@ async def test_qa_dashboard_accepts_authenticated_user():
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.anyio
+async def test_project_dashboard_rejects_outsider():
+    owner = await _create_user('qa-project-dashboard-owner')
+    outsider = await _create_user('qa-project-dashboard-outsider')
+    project = await _create_project(owner, name='QA Project Dashboard')
+
+    communicator = await _communicator(f'/ws/qa/dashboard/{project.id}/', outsider)
+    connected, code = await communicator.connect()
+
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_dashboard_accepts_project_member():
+    owner = await _create_user('qa-project-dashboard-owner-member')
+    member = await _create_user('qa-project-dashboard-member')
+    project = await _create_project(owner, member=member, name='QA Project Dashboard Member')
+
+    communicator = await _communicator(f'/ws/qa/dashboard/{project.id}/', member)
+    connected, _ = await communicator.connect()
+
+    assert connected is True
+    message = await communicator.receive_json_from()
+    assert message['type'] == 'connected'
+    assert message['project_id'] == str(project.id)
+    await communicator.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_dashboard_accepts_project_owner():
+    owner = await _create_user('qa-project-dashboard-owner-access')
+    project = await _create_project(owner, name='QA Project Dashboard Owner')
+
+    communicator = await _communicator(f'/ws/qa/dashboard/{project.id}/', owner)
+    connected, _ = await communicator.connect()
+
+    assert connected is True
+    message = await communicator.receive_json_from()
+    assert message['type'] == 'connected'
+    assert message['project_id'] == str(project.id)
+    await communicator.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_dashboard_rejects_invalid_project_id():
+    user = await _create_user('qa-project-dashboard-invalid')
+
+    communicator = await _communicator('/ws/qa/dashboard/abc/', user)
+    connected, code = await communicator.connect()
+
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
 async def test_recorder_rejects_anonymous_user():
     communicator = await _communicator('/ws/qa/recorder/', AnonymousUser())
     connected, code = await communicator.connect()

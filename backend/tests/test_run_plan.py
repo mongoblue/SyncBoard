@@ -1,6 +1,6 @@
 """TestRunPlan 测试 - 模型 / 序列化器校验 / 执行器并发与进度。"""
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import call, patch, MagicMock
 
 import pytest
 from django.contrib.auth.models import User
@@ -206,6 +206,35 @@ class TestRunPlanExecutor:
             assert 'case_error' in e
             assert 'completed' in e and 'total' in e
             assert e['type'] == 'run_plan_progress'
+
+    def test_broadcast_sends_run_plan_progress_to_project_dashboard_group(self, test_project):
+        from qa_center.run_plan_executor import _broadcast
+
+        with patch('qa_center.run_plan_executor.get_channel_layer') as get_layer, \
+             patch('qa_center.run_plan_executor.async_to_sync') as to_sync:
+            layer = MagicMock()
+            get_layer.return_value = layer
+            sender = MagicMock()
+            to_sync.return_value = sender
+
+            _broadcast({'type': 'run_plan_progress', 'phase': 'started'}, project_id=test_project.id)
+
+        to_sync.assert_called_once_with(layer.group_send)
+        sender.assert_called_once_with(
+            f'qa_dashboard_{test_project.id}',
+            {'type': 'run_plan_progress', 'phase': 'started'},
+        )
+
+    def test_progress_broadcast_includes_plan_project_id(self, test_project, test_user, cases):
+        from qa_center.run_plan_executor import TestRunPlanExecutor
+
+        plan = self._make_plan(test_project, test_user, [c.id for c in cases])
+        with patch('qa_center.run_plan_executor._broadcast') as bc, \
+             patch('requests.Session.request', return_value=_mock_response()):
+            TestRunPlanExecutor(plan, user=test_user).execute()
+
+        assert bc.call_count == 5
+        assert all(call.kwargs['project_id'] == test_project.id for call in bc.call_args_list)
 
     def test_timeout_marks_error(self, test_project, test_user, cases):
         import requests as _rq

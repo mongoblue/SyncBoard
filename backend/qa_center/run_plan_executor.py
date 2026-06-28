@@ -6,7 +6,7 @@
 特性：
 - 串行 / 并发（ThreadPoolExecutor）
 - 所有用例共享一个 requests.Session（cookie/连接复用）
-- 每完成一条用例通过 WebSocket 推送进度到 group `qa_dashboard`
+- 每完成一条用例通过 WebSocket 推送进度到项目作用域 group `qa_dashboard_<project_id>`
 - 支持 stop_on_failure：遇到失败立刻取消后续未开始的任务
 - 单用例独立 timeout（用例级 timeout_seconds，可被 plan.case_timeout_seconds 覆盖）
 
@@ -23,6 +23,8 @@ from threading import Event, Lock
 from typing import Any, Dict, Optional, List
 
 import requests
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
 from django.contrib.auth.models import User
 from django.utils import timezone
 
@@ -43,15 +45,13 @@ from . import request_builder as rb
 logger = logging.getLogger(__name__)
 
 
-def _broadcast(event: dict) -> None:
-    """向 qa_dashboard 组广播一条进度事件。channels 不可用时静默忽略。"""
+def _broadcast(event: dict, *, project_id: int) -> None:
+    """向项目作用域 QA dashboard 组广播一条进度事件。channels 不可用时静默忽略。"""
     try:
-        from asgiref.sync import async_to_sync
-        from channels.layers import get_channel_layer
         layer = get_channel_layer()
         if layer is None:
             return
-        async_to_sync(layer.group_send)('qa_dashboard', event)
+        async_to_sync(layer.group_send)(f'qa_dashboard_{project_id}', event)
     except Exception as e:  # pragma: no cover
         logger.debug('[RunPlan] broadcast failed: %s', e)
 
@@ -139,7 +139,7 @@ class TestRunPlanExecutor:
             'passed': 0,
             'failed': 0,
             'error': 0,
-        })
+        }, project_id=self.plan.project_id)
 
         self._session = requests.Session()
         try:
@@ -389,7 +389,7 @@ class TestRunPlanExecutor:
         }
         if extracted:
             event['extracted'] = ex_engine.summarize_extractions(extracted)
-        _broadcast(event)
+        _broadcast(event, project_id=self.plan.project_id)
 
     def _finalize(self) -> None:
         assert self.test_result is not None
@@ -423,7 +423,7 @@ class TestRunPlanExecutor:
             'failed': self._failed,
             'error': self._error,
             'duration_ms': duration,
-        })
+        }, project_id=self.plan.project_id)
 
     def _auto_create_bugs(self) -> None:
         if not self.test_result or self.test_result.status not in ('failed', 'error'):

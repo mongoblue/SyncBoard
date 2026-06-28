@@ -35,6 +35,14 @@ def _user_can_access_project(user, project):
 
 
 @database_sync_to_async
+def _get_dashboard_project(project_id):
+    try:
+        return Project.objects.select_related('owner').prefetch_related('members').get(id=project_id)
+    except (Project.DoesNotExist, ValueError, TypeError, ValidationError):
+        return None
+
+
+@database_sync_to_async
 def _get_test_run_project(run_id):
     try:
         return TestRun.objects.select_related('project__owner').prefetch_related(
@@ -78,14 +86,26 @@ class QAConsumer(AsyncWebsocketConsumer):
         if await _close_if_anonymous(self):
             return
 
-        # 所有打开 QA 面板的用户都加入这个组
-        self.group_name = "qa_dashboard"
+        self.project_id = self.scope.get('url_route', {}).get('kwargs', {}).get('project_id')
+        if self.project_id:
+            project = await _get_dashboard_project(self.project_id)
+            if project is None or not await _user_can_access_project(self.scope['user'], project):
+                await self.close(code=4003)
+                return
+            self.group_name = f"qa_dashboard_{project.id}"
+        else:
+            self.group_name = "qa_dashboard"
+
         await self.channel_layer.group_add(
             self.group_name,
             self.channel_name
         )
         await self.accept()
-        await self.send(text_data=json.dumps({'type': 'connected'}))
+
+        message = {'type': 'connected'}
+        if self.project_id:
+            message['project_id'] = str(self.project_id)
+        await self.send(text_data=json.dumps(message))
 
     async def disconnect(self, close_code):
         await _discard_group_if_joined(self)
