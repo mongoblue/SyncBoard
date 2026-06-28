@@ -72,7 +72,7 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
 
         return Response(
             {
-                'detail': '已开始执行，请通过 WebSocket /ws/qa/dashboard/ 订阅 run_plan_progress 事件',
+                'detail': '已开始执行，请通过 WebSocket /ws/qa/dashboard/<project_id>/ 订阅 run_plan_progress 事件',
                 'plan_id': plan.id,
             },
             status=status.HTTP_202_ACCEPTED,

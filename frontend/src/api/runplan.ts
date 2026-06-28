@@ -2,7 +2,7 @@
  * TestRunPlan（批量执行计划）API 封装。
  *
  * 后端映射：/api/qa/run-plans/
- * 核心操作：获取计划列表/详情 → 触发执行 → 监听 ws/qa/dashboard/ 进度
+ * 核心操作：获取计划列表/详情 → 触发执行 → 监听 ws/qa/dashboard/<project_id>/ 进度
  *
  * 与 BatchRunExecuteDialog.vue 配合使用。
  * 执行结果详情跳转到 AutoResultDetail.vue 查看。

@@ -198,6 +198,7 @@ import {
   type RunPlanCaseBrief,
   type RunPlanProgressEvent,
 } from '@/api/runplan';
+import { buildWsUrl } from '@/composables/wsHost';
 
 const props = defineProps<{
   modelValue: boolean;
@@ -380,10 +381,7 @@ const startExecution = async () => {
 
 const connectWebSocket = () => {
   if (ws) { try { ws.close(); } catch { /* noop */ } }
-  const host = window.location.hostname;
-  const port = host === 'localhost' || host === '127.0.0.1' ? ':8000' : '';
-  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${host}${port}/ws/qa/dashboard/`);
+  ws = new WebSocket(buildWsUrl(`/ws/qa/dashboard/${props.projectId}/`));
 
   ws.onmessage = (ev) => {
     try {
