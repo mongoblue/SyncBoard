@@ -784,8 +784,16 @@ class TestRunPlanSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        if self.instance and 'project' in attrs and attrs['project'].id != self.instance.project_id:
+            raise serializers.ValidationError({'project': '不允许修改计划所属项目'})
+
         project = attrs.get('project') or getattr(self.instance, 'project', None)
-        case_ids = attrs.get('case_ids')
+        case_ids = attrs.get('case_ids', getattr(self.instance, 'case_ids', None))
+        environment = attrs.get('environment', getattr(self.instance, 'environment', None))
+
+        if project and environment and environment.project_id != project.id:
+            raise serializers.ValidationError({'environment': '运行环境不属于本项目'})
+
         if project and case_ids:
             existing = set(
                 ApiAutoTestCase.objects

@@ -3,14 +3,16 @@ import threading
 import logging
 
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import TestRunPlan, ApiAutoTestCase
+from .models import TestRunPlan, ApiAutoTestCase, TestEnvironment
 from .serializers import TestRunPlanSerializer, TestRunPlanExecuteSerializer
 from .run_plan_executor import run_plan
+from room.project_access import ensure_project_id_access, project_access_q
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +32,26 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
     serializer_class = TestRunPlanSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            TestRunPlan.objects.select_related('project', 'created_by', 'environment'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
-        qs = TestRunPlan.objects.select_related('project', 'created_by').all()
+        qs = (
+            TestRunPlan.objects
+            .select_related('project', 'created_by', 'environment')
+            .filter(project_access_q('project', self.request.user))
+            .distinct()
+        )
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             qs = qs.filter(project_id=project_id)
         search = self.request.query_params.get('search')
         if search:
@@ -41,6 +59,8 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
         return qs.order_by('-created_at')
 
     def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        ensure_project_id_access(self.request.user, project.id)
         serializer.save(created_by=self.request.user)
 
     @action(detail=True, methods=['post'])
@@ -49,6 +69,16 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
         ser = TestRunPlanExecuteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         overrides = ser.validated_data
+
+        environment_id = overrides.get('environment_id')
+        if environment_id is not None and not TestEnvironment.objects.filter(
+            id=environment_id,
+            project=plan.project,
+        ).exists():
+            return Response(
+                {'environment_id': '环境不存在或不属于当前项目'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # 异步执行，立即返回 result_id 占位会比较复杂；这里同步创建 ApiAutoTestResult，
         # 然后在线程里跑实际请求。前端通过 WebSocket 跟进进度。
@@ -84,6 +114,7 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
         project_id = request.query_params.get('project')
         if not project_id:
             return Response({'detail': 'project 必填'}, status=400)
+        ensure_project_id_access(request.user, project_id)
         search = request.query_params.get('search', '').strip()
         qs = (
             ApiAutoTestCase.objects

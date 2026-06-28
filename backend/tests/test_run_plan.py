@@ -118,6 +118,72 @@ class TestRunPlanCrud:
         ids = [c['id'] for c in resp.data['results']]
         assert cases[0].id not in ids
         assert cases[1].id in ids
+    def test_patch_rejects_changing_project(self, auth_client, test_project, test_user, cases):
+        other_owner = User.objects.create_user(username='runplan-other-owner', password='pw')
+        from room.models import Project
+        other_project = Project.objects.create(name='Other Project', owner=other_owner)
+        plan = TestRunPlan.objects.create(
+            project=test_project,
+            name='immutable-project',
+            case_ids=[cases[0].id],
+            created_by=test_user,
+        )
+
+        resp = auth_client.patch(
+            f'/api/qa/run-plans/{plan.id}/',
+            data={'project': str(other_project.id)},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+        plan.refresh_from_db()
+        assert plan.project_id == test_project.id
+
+    def test_create_rejects_environment_from_other_project(self, auth_client, test_project, cases):
+        from room.models import Project
+        from qa_center.models import TestEnvironment
+        other_owner = User.objects.create_user(username='runplan-env-owner', password='pw')
+        other_project = Project.objects.create(name='Other Env Project', owner=other_owner)
+        foreign_env = TestEnvironment.objects.create(
+            project=other_project,
+            name='foreign env',
+        )
+
+        resp = auth_client.post('/api/qa/run-plans/', data={
+            'project': test_project.id,
+            'name': 'plan-foreign-env',
+            'case_ids': [cases[0].id],
+            'environment': foreign_env.id,
+        }, content_type='application/json')
+
+        assert resp.status_code == 400
+        assert not TestRunPlan.objects.filter(name='plan-foreign-env').exists()
+
+    def test_execute_rejects_environment_from_other_project(self, auth_client, test_project, test_user, cases):
+        from room.models import Project
+        from qa_center.models import TestEnvironment
+        other_owner = User.objects.create_user(username='runplan-exec-env-owner', password='pw')
+        other_project = Project.objects.create(name='Other Exec Env Project', owner=other_owner)
+        foreign_env = TestEnvironment.objects.create(
+            project=other_project,
+            name='foreign exec env',
+        )
+        plan = TestRunPlan.objects.create(
+            project=test_project,
+            name='exec-foreign-env',
+            case_ids=[cases[0].id],
+            created_by=test_user,
+        )
+
+        with patch('qa_center.views_run_plan.threading.Thread') as thread_cls:
+            resp = auth_client.post(
+                f'/api/qa/run-plans/{plan.id}/execute/',
+                data={'environment_id': foreign_env.id},
+                content_type='application/json',
+            )
+
+        assert resp.status_code == 400
+        thread_cls.assert_not_called()
 
 
 # ---------- 执行器：串行 / 并发 / 进度 / 中止 ----------
