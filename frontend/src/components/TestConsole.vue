@@ -63,6 +63,11 @@ import { ref, computed, nextTick, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 import { Loading, VideoPlay } from '@element-plus/icons-vue';
 import service from '@/utils/request';
+import { buildWsUrl } from '@/composables/wsHost';
+
+const props = defineProps<{
+  projectId?: string | number;
+}>();
 
 const visible = ref(false);
 const testing = ref(false);
@@ -109,10 +114,11 @@ const handleClose = () => {
 // WebSocket 连接
 const connectSocket = () => {
   if (qaSocket && qaSocket.readyState === WebSocket.OPEN) return;
-  const host = window.location.host;
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const path = props.projectId
+    ? `/ws/qa/dashboard/${props.projectId}/`
+    : '/ws/qa/dashboard/';
 
-  qaSocket = new WebSocket(`${protocol}://${host}/ws/qa/dashboard/`);
+  qaSocket = new WebSocket(buildWsUrl(path));
 
   qaSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -172,7 +178,10 @@ const startTest = async (type: string = 'default') => {
     logs.value = [];
     testing.value = true;
     currentStatus.value = "启动中...";
-    await service.post('/qa/run-test/', { test_type: type });
+    await service.post('/qa/run-test/', {
+      test_type: type,
+      ...(props.projectId ? { project_id: props.projectId } : {}),
+    });
   } catch (e) {
     testing.value = false;
     currentStatus.value = "启动失败";

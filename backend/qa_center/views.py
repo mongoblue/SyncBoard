@@ -12,6 +12,7 @@ from rest_framework import status
 from django.db import transaction
 from faker import Faker
 from room.models import Task, Column, DEFAULT_POSITION
+from room.project_access import ensure_project_id_access
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
@@ -71,6 +72,9 @@ class RunTestView(APIView):
 
     def post(self, request):
         test_type = request.data.get('test_type', 'api')
+        project_id = request.data.get('project_id') or request.data.get('project')
+        project = ensure_project_id_access(request.user, project_id) if project_id else None
+        scoped_project_id = str(project.id) if project else None
         python_exec = sys.executable
 
         # ✨ 最终逻辑：统一使用 python -m 启动，确保环境一致
@@ -104,15 +108,15 @@ class RunTestView(APIView):
             cmd = base_cmd + args
 
         # 启动流式线程
-        thread = threading.Thread(target=self.stream_command_output, args=(cmd, test_type))
+        thread = threading.Thread(target=self.stream_command_output, args=(cmd, test_type, scoped_project_id))
         thread.daemon = True
         thread.start()
 
         return Response({"msg": f"测试已启动: {test_type}"}, status=200)
 
-    def stream_command_output(self, cmd, test_type='default'):
+    def stream_command_output(self, cmd, test_type='default', project_id=None):
         channel_layer = get_channel_layer()
-        group_name = "qa_dashboard"
+        group_name = f"qa_dashboard_{project_id}" if project_id else "qa_dashboard"
         cwd = settings.BASE_DIR
 
         # 注入环境变量 (E2E需要)

@@ -165,6 +165,7 @@ import { ElMessage } from 'element-plus';
 import { Loading, VideoPlay, Delete, MagicStick, Connection, Monitor, Odometer, DataAnalysis } from '@element-plus/icons-vue';
 import service from '@/utils/request';
 import { useBoardStore } from '@/stores/board';
+import { buildWsUrl } from '@/composables/wsHost';
 
 const route = useRoute();
 const router = useRouter();
@@ -179,6 +180,11 @@ const currentStatus = ref('Ready');
 const terminalRef = ref<HTMLElement | null>(null);
 const showE2EWarning = ref(false);
 let qaSocket: WebSocket | null = null;
+
+const currentProjectId = computed(() => {
+  const routeProjectId = route.params.projectId;
+  return String(Array.isArray(routeProjectId) ? routeProjectId[0] : routeProjectId || boardStore.currentProject?.id || '');
+});
 
 // 数据工厂相关
 const showDataFactoryDialog = ref(false);
@@ -207,7 +213,7 @@ const generateTestData = async () => {
     ElMessage.success(response.msg || '测试数据生成成功');
     showDataFactoryDialog.value = false;
     // 刷新看板数据
-    const projectId = route.params.projectId as string;
+    const projectId = currentProjectId.value;
     if (projectId) {
       await boardStore.fetchColumns(projectId);
     }
@@ -242,10 +248,11 @@ const progressStatus = computed(() => {
 // WebSocket 连接
 const connectSocket = () => {
   if (qaSocket && qaSocket.readyState === WebSocket.OPEN) return;
-  const host = window.location.host;
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const path = currentProjectId.value
+    ? `/ws/qa/dashboard/${currentProjectId.value}/`
+    : '/ws/qa/dashboard/';
 
-  qaSocket = new WebSocket(`${protocol}://${host}/ws/qa/dashboard/`);
+  qaSocket = new WebSocket(buildWsUrl(path));
 
   qaSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -306,7 +313,10 @@ const startTest = async (type: string = 'default') => {
     logs.value = [];
     testing.value = true;
     currentStatus.value = '启动中...';
-    await service.post('/qa/run-test/', { test_type: type });
+    await service.post('/qa/run-test/', {
+      test_type: type,
+      ...(currentProjectId.value ? { project_id: currentProjectId.value } : {}),
+    });
   } catch (e) {
     testing.value = false;
     currentStatus.value = '启动失败';
