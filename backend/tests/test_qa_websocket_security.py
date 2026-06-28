@@ -8,6 +8,7 @@ from channels.routing import URLRouter
 from django.contrib.auth.models import AnonymousUser, User
 from django.utils import timezone
 
+from qa_center import consumers
 from qa_center.models import (
     PerformanceTestCase,
     PerformanceTestResult,
@@ -46,6 +47,14 @@ class WebsocketCommunicator(ApplicationCommunicator):
     async def disconnect(self, code=1000, timeout=1):
         await self.send_input({'type': 'websocket.disconnect', 'code': code})
         await self.wait(timeout)
+
+
+class _DiscardRecorder:
+    def __init__(self):
+        self.discarded = []
+
+    async def group_discard(self, group_name, channel_name):
+        self.discarded.append((group_name, channel_name))
 
 
 application = URLRouter(websocket_urlpatterns)
@@ -137,6 +146,26 @@ def _create_ui_result(project, task_id):
 
 
 @database_sync_to_async
+def _create_duplicate_ui_results(project, other_project, task_id):
+    QaTestResult.objects.create(
+        test_type='ui',
+        name='UI Result One',
+        status='running',
+        task_id=task_id,
+        started_at=timezone.now(),
+        test_params={'project_id': str(project.id)},
+    )
+    QaTestResult.objects.create(
+        test_type='ui',
+        name='UI Result Two',
+        status='running',
+        task_id=task_id,
+        started_at=timezone.now(),
+        test_params={'project_id': str(other_project.id)},
+    )
+
+
+@database_sync_to_async
 def _create_ui_result_without_project(task_id):
     return QaTestResult.objects.create(
         test_type='ui',
@@ -152,8 +181,9 @@ def _create_ui_result_without_project(task_id):
 @pytest.mark.anyio
 async def test_qa_dashboard_rejects_anonymous_user():
     communicator = await _communicator('/ws/qa/dashboard/', AnonymousUser())
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)
@@ -172,8 +202,33 @@ async def test_qa_dashboard_accepts_authenticated_user():
 @pytest.mark.anyio
 async def test_recorder_rejects_anonymous_user():
     communicator = await _communicator('/ws/qa/recorder/', AnonymousUser())
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_test_run_progress_rejects_anonymous_user():
+    owner = await _create_user('run-anonymous-owner')
+    project = await _create_project(owner, name='Run Anonymous Project')
+    run = await _create_test_run(project, owner)
+
+    communicator = await _communicator(f'/ws/qa/test-run/{run.id}/', AnonymousUser())
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_test_run_progress_rejects_invalid_run_id():
+    user = await _create_user('run-invalid-user')
+
+    communicator = await _communicator('/ws/qa/test-run/abc/', user)
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)
@@ -185,8 +240,9 @@ async def test_test_run_progress_rejects_outsider():
     run = await _create_test_run(project, owner)
 
     communicator = await _communicator(f'/ws/qa/test-run/{run.id}/', outsider)
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)
@@ -208,6 +264,19 @@ async def test_test_run_progress_accepts_project_member():
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.anyio
+async def test_performance_socket_rejects_anonymous_user():
+    owner = await _create_user('perf-anonymous-owner')
+    project = await _create_project(owner, name='Perf Anonymous Project')
+    result = await _create_performance_result(project, owner)
+
+    communicator = await _communicator(f'/ws/qa/performance/{result.id}/', AnonymousUser())
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
 async def test_performance_socket_rejects_outsider():
     owner = await _create_user('perf-owner')
     outsider = await _create_user('perf-outsider')
@@ -215,8 +284,9 @@ async def test_performance_socket_rejects_outsider():
     result = await _create_performance_result(project, owner)
 
     communicator = await _communicator(f'/ws/qa/performance/{result.id}/', outsider)
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)
@@ -237,6 +307,19 @@ async def test_performance_socket_accepts_project_member():
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.anyio
+async def test_ui_run_socket_rejects_anonymous_user():
+    owner = await _create_user('ui-anonymous-owner')
+    project = await _create_project(owner, name='UI Anonymous Project')
+    await _create_ui_result(project, 'abc-anonymous')
+
+    communicator = await _communicator('/ws/qa/run/abc-anonymous/', AnonymousUser())
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
 async def test_ui_run_socket_rejects_outsider_for_hyphenated_task_id():
     owner = await _create_user('ui-owner')
     outsider = await _create_user('ui-outsider')
@@ -244,8 +327,9 @@ async def test_ui_run_socket_rejects_outsider_for_hyphenated_task_id():
     await _create_ui_result(project, 'abc-123')
 
     communicator = await _communicator('/ws/qa/run/abc-123/', outsider)
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)
@@ -272,8 +356,42 @@ async def test_ui_run_socket_rejects_result_without_project_scope():
     await _create_ui_result_without_project('abc-noscope')
 
     communicator = await _communicator('/ws/qa/run/abc-noscope/', user)
-    connected, _ = await communicator.connect()
+    connected, code = await communicator.connect()
     assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_ui_run_socket_rejects_duplicate_task_id():
+    owner = await _create_user('ui-duplicate-owner')
+    other_owner = await _create_user('ui-duplicate-other-owner')
+    project = await _create_project(owner, name='UI Duplicate Project')
+    other_project = await _create_project(other_owner, name='UI Duplicate Other Project')
+    await _create_duplicate_ui_results(project, other_project, 'abc-duplicate')
+
+    communicator = await _communicator('/ws/qa/run/abc-duplicate/', owner)
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.anyio
+async def test_denied_consumers_disconnect_without_initialized_group_name():
+    for consumer_class in (
+        consumers.QAConsumer,
+        consumers.RecorderConsumer,
+        consumers.PerformanceTestConsumer,
+        consumers.TestRunProgressConsumer,
+        consumers.UiRunConsumer,
+    ):
+        consumer = consumer_class()
+        consumer.channel_layer = _DiscardRecorder()
+        consumer.channel_name = 'test-channel'
+
+        await consumer.disconnect(4003)
+
+        assert consumer.channel_layer.discarded == []
 
 
 def test_asgi_websocket_uses_allowed_hosts_origin_validator():

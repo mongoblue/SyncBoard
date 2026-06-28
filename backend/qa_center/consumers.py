@@ -4,6 +4,7 @@ import asyncio
 import logging
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.core.exceptions import ValidationError
 from room.models import Project
 from .models import PerformanceTestResult, TestResult, TestRun
 from .workers.recorder_supervisor import RecorderSession
@@ -19,6 +20,15 @@ async def _close_if_anonymous(consumer):
     return False
 
 
+async def _discard_group_if_joined(consumer):
+    group_name = getattr(consumer, 'group_name', None)
+    if group_name:
+        await consumer.channel_layer.group_discard(
+            group_name,
+            consumer.channel_name
+        )
+
+
 @database_sync_to_async
 def _user_can_access_project(user, project):
     return user == project.owner or project.members.filter(id=user.id).exists()
@@ -30,7 +40,7 @@ def _get_test_run_project(run_id):
         return TestRun.objects.select_related('project__owner').prefetch_related(
             'project__members'
         ).get(id=run_id).project
-    except TestRun.DoesNotExist:
+    except (TestRun.DoesNotExist, ValueError, TypeError, ValidationError):
         return None
 
 
@@ -50,7 +60,7 @@ def _get_performance_result_project(execution_id):
 def _get_ui_result_project(task_id):
     try:
         test_result = TestResult.objects.get(task_id=task_id)
-    except TestResult.DoesNotExist:
+    except (TestResult.DoesNotExist, TestResult.MultipleObjectsReturned):
         return None
 
     project_id = (test_result.test_params or {}).get('project_id')
@@ -78,10 +88,7 @@ class QAConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({'type': 'connected'}))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            self.group_name,
-            self.channel_name
-        )
+        await _discard_group_if_joined(self)
 
     # 处理从 conftest.py 发过来的 "test_start" 消息
     async def test_start(self, event):
@@ -120,14 +127,12 @@ class RecorderConsumer(AsyncWebsocketConsumer):
         }))
 
     async def disconnect(self, close_code):
-        if self.session:
-            self.session.stop()
+        session = getattr(self, 'session', None)
+        if session:
+            session.stop()
             self.session = None
 
-        await self.channel_layer.group_discard(
-            self.group_name,
-            self.channel_name
-        )
+        await _discard_group_if_joined(self)
 
     async def receive(self, text_data):
         """接收前端消息"""
@@ -251,10 +256,7 @@ class PerformanceTestConsumer(AsyncWebsocketConsumer):
         }))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            self.group_name,
-            self.channel_name
-        )
+        await _discard_group_if_joined(self)
 
     async def test_update(self, event):
         """接收测试数据更新"""
@@ -286,7 +288,7 @@ class TestRunProgressConsumer(AsyncWebsocketConsumer):
         }))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        await _discard_group_if_joined(self)
 
     async def case_done(self, event):
         await self.send(text_data=json.dumps(event['data']))
@@ -315,7 +317,7 @@ class UiRunConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({"type": "connected", "task_id": self.task_id}))
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        await _discard_group_if_joined(self)
 
     async def run_event(self, event):
         await self.send(text_data=json.dumps(event["data"]))
