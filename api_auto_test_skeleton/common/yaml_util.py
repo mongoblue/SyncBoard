@@ -200,10 +200,10 @@ class YamlUtil:
             return re.sub(pattern, replacer, data)
 
         elif isinstance(data, dict):
-            return {k: cls.replace_env_vars(v) for k, v in data.items()}
+            return {k: YamlUtil.replace_env_vars(v) for k, v in data.items()}
 
         elif isinstance(data, list):
-            return [cls.replace_env_vars(item) for item in data]
+            return [YamlUtil.replace_env_vars(item) for item in data]
 
         return data
 
