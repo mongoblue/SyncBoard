@@ -136,32 +136,45 @@ def _create_performance_result(project, user):
 @database_sync_to_async
 def _create_ui_result(project, task_id):
     return QaTestResult.objects.create(
+        project=project,
         test_type='ui',
         name='UI Result',
         status='running',
         task_id=task_id,
         started_at=timezone.now(),
-        test_params={'project_id': str(project.id)},
+    )
+
+
+@database_sync_to_async
+def _create_spoofed_ui_result(secret_project, spoofed_project, task_id):
+    return QaTestResult.objects.create(
+        project=secret_project,
+        test_type='ui',
+        name='Spoofed UI Result',
+        status='running',
+        task_id=task_id,
+        started_at=timezone.now(),
+        test_params={'project_id': str(spoofed_project.id)},
     )
 
 
 @database_sync_to_async
 def _create_duplicate_ui_results(project, other_project, task_id):
     QaTestResult.objects.create(
+        project=project,
         test_type='ui',
         name='UI Result One',
         status='running',
         task_id=task_id,
         started_at=timezone.now(),
-        test_params={'project_id': str(project.id)},
     )
     QaTestResult.objects.create(
+        project=other_project,
         test_type='ui',
         name='UI Result Two',
         status='running',
         task_id=task_id,
         started_at=timezone.now(),
-        test_params={'project_id': str(other_project.id)},
     )
 
 
@@ -406,6 +419,22 @@ async def test_ui_run_socket_accepts_member_for_hyphenated_task_id():
     assert message['type'] == 'connected'
     assert message['task_id'] == 'abc-456'
     await communicator.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_ui_run_socket_rejects_spoofed_test_params_project():
+    victim = await _create_user('ui-spoofed-victim')
+    attacker = await _create_user('ui-spoofed-attacker')
+    secret_project = await _create_project(victim, name='UI Spoofed Secret Project')
+    attacker_project = await _create_project(attacker, name='UI Spoofed Attacker Project')
+    await _create_spoofed_ui_result(secret_project, attacker_project, 'abc-spoofed')
+
+    communicator = await _communicator('/ws/qa/run/abc-spoofed/', attacker)
+    connected, code = await communicator.connect()
+
+    assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)

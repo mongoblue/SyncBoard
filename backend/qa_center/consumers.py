@@ -6,6 +6,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.core.exceptions import ValidationError
 from room.models import Project
+from room.project_access import user_can_access_project as _sync_user_can_access_project
 from .models import PerformanceTestResult, TestResult, TestRun
 from .workers.recorder_supervisor import RecorderSession
 
@@ -31,7 +32,7 @@ async def _discard_group_if_joined(consumer):
 
 @database_sync_to_async
 def _user_can_access_project(user, project):
-    return user == project.owner or project.members.filter(id=user.id).exists()
+    return _sync_user_can_access_project(user, project)
 
 
 @database_sync_to_async
@@ -67,18 +68,25 @@ def _get_performance_result_project(execution_id):
 @database_sync_to_async
 def _get_ui_result_project(task_id):
     try:
-        test_result = TestResult.objects.get(task_id=task_id)
-    except (TestResult.DoesNotExist, TestResult.MultipleObjectsReturned):
+        test_result = (
+            TestResult.objects.select_related(
+                'project__owner',
+                'ui_test_case__project__owner',
+            )
+            .prefetch_related(
+                'project__members',
+                'ui_test_case__project__members',
+            )
+            .get(task_id=task_id)
+        )
+    except (TestResult.DoesNotExist, TestResult.MultipleObjectsReturned, ValueError, TypeError, ValidationError):
         return None
 
-    project_id = (test_result.test_params or {}).get('project_id')
-    if not project_id:
-        return None
-
-    try:
-        return Project.objects.select_related('owner').prefetch_related('members').get(id=project_id)
-    except (Project.DoesNotExist, ValueError, TypeError):
-        return None
+    if test_result.project_id:
+        return test_result.project
+    if test_result.ui_test_case_id:
+        return test_result.ui_test_case.project
+    return None
 
 
 class QAConsumer(AsyncWebsocketConsumer):
