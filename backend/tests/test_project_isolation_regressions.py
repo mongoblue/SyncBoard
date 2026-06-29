@@ -7,6 +7,8 @@ from qa_center.models import (
     ApiAutoTestCase,
     ApiAutoTestSuite,
     ApiTestCase,
+    TestEnvironment as QaTestEnvironment,
+    TestGlobalVar as QaTestGlobalVar,
     TestRun as QaTestRun,
     TestRunPlan as QaTestRunPlan,
 )
@@ -256,3 +258,162 @@ class TestProjectIsolationRegressions:
         assert cases.status_code == 200
         assert execute.status_code == 202
         thread_cls.return_value.start.assert_called_once()
+
+    def _create_environment_fixture(self):
+        default_env = QaTestEnvironment.objects.create(
+            project=self.project,
+            name='secret-default-env',
+            base_url='https://secret.example.com',
+            variables={'token': 'secret-token'},
+            is_default=True,
+            created_by=self.owner,
+        )
+        staging_env = QaTestEnvironment.objects.create(
+            project=self.project,
+            name='secret-staging-env',
+            base_url='https://staging.secret.example.com',
+            variables={'token': 'staging-token'},
+            is_default=False,
+            created_by=self.owner,
+        )
+        return default_env, staging_env
+
+    def _create_global_var_fixture(self):
+        return QaTestGlobalVar.objects.create(
+            project=self.project,
+            key='SECRET_TOKEN',
+            value='super-secret-token',
+            is_secret=True,
+            created_by=self.owner,
+        )
+
+    def test_environment_list_rejects_outsider_project_filter(self, client):
+        self._create_environment_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/environments/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_environment_list_without_project_does_not_leak_foreign_envs(self, client):
+        default_env, _ = self._create_environment_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/environments/')
+
+        assert resp.status_code == 200
+        names = [env['name'] for env in resp.data['results']]
+        assert default_env.name not in names
+
+    def test_environment_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/environments/',
+            data={
+                'project': self.project.id,
+                'name': 'injected-env',
+                'variables': {'token': 'injected'},
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not QaTestEnvironment.objects.filter(name='injected-env').exists()
+
+    def test_environment_detail_update_delete_set_default_reject_outsider(self, client):
+        default_env, staging_env = self._create_environment_fixture()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/environments/{staging_env.id}/')
+        update = client.patch(
+            f'/api/qa/environments/{staging_env.id}/',
+            data={'name': 'updated-by-outsider', 'is_default': True},
+            content_type='application/json',
+        )
+        set_default = client.post(f'/api/qa/environments/{staging_env.id}/set_default/')
+        delete = client.delete(f'/api/qa/environments/{staging_env.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert set_default.status_code == 403
+        assert delete.status_code == 403
+        default_env.refresh_from_db()
+        staging_env.refresh_from_db()
+        assert default_env.is_default is True
+        assert staging_env.is_default is False
+        assert staging_env.name == 'secret-staging-env'
+
+    def test_global_var_list_rejects_outsider_project_filter(self, client):
+        self._create_global_var_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/global-vars/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_global_var_list_without_project_does_not_leak_foreign_vars(self, client):
+        global_var = self._create_global_var_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/global-vars/')
+
+        assert resp.status_code == 200
+        items = resp.data['results']
+        assert global_var.key not in [item['key'] for item in items]
+        assert global_var.value not in [item['value'] for item in items]
+
+    def test_global_var_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/global-vars/',
+            data={
+                'project': self.project.id,
+                'key': 'INJECTED_TOKEN',
+                'value': 'injected-secret',
+                'is_secret': True,
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not QaTestGlobalVar.objects.filter(key='INJECTED_TOKEN').exists()
+
+    def test_global_var_detail_update_delete_reject_outsider(self, client):
+        global_var = self._create_global_var_fixture()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/global-vars/{global_var.id}/')
+        update = client.patch(
+            f'/api/qa/global-vars/{global_var.id}/',
+            data={'value': 'updated-by-outsider'},
+            content_type='application/json',
+        )
+        delete = client.delete(f'/api/qa/global-vars/{global_var.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert delete.status_code == 403
+        global_var.refresh_from_db()
+        assert global_var.value == 'super-secret-token'
+
+    def test_environment_and_global_var_member_can_access_project_resources(self, client):
+        _, staging_env = self._create_environment_fixture()
+        global_var = self._create_global_var_fixture()
+        member = User.objects.create_user(username='iso_env_member', password='pass')
+        self.project.members.add(member)
+        client.force_login(member)
+
+        env_list = client.get(f'/api/qa/environments/?project={self.project.id}')
+        env_detail = client.get(f'/api/qa/environments/{staging_env.id}/')
+        env_set_default = client.post(f'/api/qa/environments/{staging_env.id}/set_default/')
+        var_list = client.get(f'/api/qa/global-vars/?project={self.project.id}')
+        var_detail = client.get(f'/api/qa/global-vars/{global_var.id}/')
+
+        assert env_list.status_code == 200
+        assert env_detail.status_code == 200
+        assert env_set_default.status_code == 200
+        assert var_list.status_code == 200
+        assert var_detail.status_code == 200
+        assert var_detail.data['value'] == 'super-secret-token'

@@ -843,6 +843,9 @@ class TestEnvironmentSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        if self.instance and 'project' in attrs and attrs['project'].id != self.instance.project_id:
+            raise serializers.ValidationError({'project': '不允许修改环境所属项目'})
+
         # 同一项目同名环境去重
         project = attrs.get('project') or getattr(self.instance, 'project', None)
         name = attrs.get('name') or getattr(self.instance, 'name', None)
@@ -884,6 +887,9 @@ class TestGlobalVarSerializer(serializers.ModelSerializer):
         return v
 
     def validate(self, attrs):
+        if self.instance and 'project' in attrs and attrs['project'].id != self.instance.project_id:
+            raise serializers.ValidationError({'project': '不允许修改全局变量所属项目'})
+
         project = attrs.get('project') or getattr(self.instance, 'project', None)
         key = attrs.get('key') or getattr(self.instance, 'key', None)
         if project and key:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from django.db import transaction
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +11,7 @@ from rest_framework.response import Response
 
 from .models import TestEnvironment, TestGlobalVar
 from .serializers import TestEnvironmentSerializer, TestGlobalVarSerializer
+from room.project_access import ensure_project_id_access, project_access_q
 
 
 class TestEnvironmentViewSet(viewsets.ModelViewSet):
@@ -26,10 +28,26 @@ class TestEnvironmentViewSet(viewsets.ModelViewSet):
     serializer_class = TestEnvironmentSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            TestEnvironment.objects.select_related('project', 'created_by'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
-        qs = TestEnvironment.objects.select_related('project', 'created_by').all()
+        qs = (
+            TestEnvironment.objects
+            .select_related('project', 'created_by')
+            .filter(project_access_q('project', self.request.user))
+            .distinct()
+        )
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             qs = qs.filter(project_id=project_id)
         search = self.request.query_params.get('search', '').strip()
         if search:
@@ -38,6 +56,8 @@ class TestEnvironmentViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        ensure_project_id_access(self.request.user, project.id)
         instance = serializer.save(created_by=self.request.user)
         # 项目下还没有默认环境时，自动把第一条设为默认
         if not TestEnvironment.objects.filter(
@@ -84,10 +104,26 @@ class TestGlobalVarViewSet(viewsets.ModelViewSet):
     serializer_class = TestGlobalVarSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            TestGlobalVar.objects.select_related('project', 'created_by'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
-        qs = TestGlobalVar.objects.select_related('project', 'created_by').all()
+        qs = (
+            TestGlobalVar.objects
+            .select_related('project', 'created_by')
+            .filter(project_access_q('project', self.request.user))
+            .distinct()
+        )
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             qs = qs.filter(project_id=project_id)
         search = self.request.query_params.get('search', '').strip()
         if search:
@@ -95,4 +131,6 @@ class TestGlobalVarViewSet(viewsets.ModelViewSet):
         return qs.order_by('key')
 
     def perform_create(self, serializer):
+        project = serializer.validated_data['project']
+        ensure_project_id_access(self.request.user, project.id)
         serializer.save(created_by=self.request.user)

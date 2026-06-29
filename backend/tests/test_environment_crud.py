@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import pytest
+from django.contrib.auth.models import User
 
 from qa_center.models import TestEnvironment, TestGlobalVar
 
@@ -105,6 +106,22 @@ class TestEnvironmentCrud:
         names = [e['name'] for e in items]
         assert names == ['dev']  # 只看到本项目
 
+    def test_patch_rejects_changing_environment_project(self, auth_client, test_project):
+        from room.models import Project
+        other_owner = User.objects.create_user(username='env-other-owner', password='pw')
+        other_project = Project.objects.create(name='Other Env Project', owner=other_owner)
+        env = TestEnvironment.objects.create(project=test_project, name='dev')
+
+        resp = auth_client.patch(
+            f'/api/qa/environments/{env.id}/',
+            data={'project': other_project.id},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+        env.refresh_from_db()
+        assert env.project_id == test_project.id
+
 
 # ---------- TestGlobalVar ----------
 
@@ -158,6 +175,26 @@ class TestGlobalVarCrud:
         )
         resp = auth_client.get(f'/api/qa/global-vars/{gv.id}/')
         assert resp.json()['value_display'] == 'visible'
+
+    def test_patch_rejects_changing_global_var_project(self, auth_client, test_project):
+        from room.models import Project
+        other_owner = User.objects.create_user(username='global-var-other-owner', password='pw')
+        other_project = Project.objects.create(name='Other Global Var Project', owner=other_owner)
+        gv = TestGlobalVar.objects.create(
+            project=test_project,
+            key='token',
+            value='secret',
+        )
+
+        resp = auth_client.patch(
+            f'/api/qa/global-vars/{gv.id}/',
+            data={'project': other_project.id},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+        gv.refresh_from_db()
+        assert gv.project_id == test_project.id
 
 
 # ---------- 集成：run-plans 接受 environment 字段 ----------
