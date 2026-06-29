@@ -4,6 +4,7 @@ DevOps 测试平台 API 视图
 """
 
 import json
+import hmac
 import threading
 import random
 import time
@@ -880,9 +881,14 @@ class PipelineRunWebhookView(APIView):
         except CiCdConfig.DoesNotExist:
             return Response({'error': '配置不存在'}, status=status.HTTP_404_NOT_FOUND)
 
-        # 简单 token 验证
-        token = request.headers.get('X-CI-Token', '') or request.data.get('token', '')
-        if config.api_token and token != config.api_token:
+        # webhook 公开暴露，必须 fail closed：仅接受 header token，且用常量时间比较。
+        expected_token = (config.api_token or '').strip()
+        provided_token = request.headers.get('X-CI-Token', '').strip()
+        if (
+            not expected_token or
+            not provided_token or
+            not hmac.compare_digest(provided_token, expected_token)
+        ):
             return Response({'error': 'token 无效'}, status=status.HTTP_403_FORBIDDEN)
 
         status_val = request.data.get('status', 'running')

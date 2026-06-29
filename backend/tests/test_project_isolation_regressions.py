@@ -1521,6 +1521,71 @@ class TestProjectIsolationRegressions:
         thread_cls.assert_not_called()
         assert PipelineRun.objects.count() == initial_run_count
 
+    def test_cicd_webhook_rejects_config_without_api_token_before_side_effects(self, client):
+        config = CiCdConfig.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Tokenless CI Config',
+            ci_type='jenkins',
+            webhook_url='https://ci.example.com/tokenless',
+            api_token='',
+            branch='main',
+        )
+        initial_run_count = PipelineRun.objects.count()
+
+        resp = client.post(
+            f'/api/qa/devops/cicd-config/{config.id}/webhook/',
+            data={'status': 'passed', 'branch': 'main', 'log_output': 'injected log'},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert PipelineRun.objects.count() == initial_run_count
+
+    def test_cicd_webhook_rejects_missing_or_wrong_token_before_side_effects(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        initial_run_count = PipelineRun.objects.count()
+
+        missing = client.post(
+            f'/api/qa/devops/cicd-config/{config.id}/webhook/',
+            data={'status': 'passed', 'branch': 'main', 'log_output': 'missing token log'},
+            content_type='application/json',
+        )
+        wrong = client.post(
+            f'/api/qa/devops/cicd-config/{config.id}/webhook/',
+            data={'status': 'failed', 'branch': 'main', 'log_output': 'wrong token log'},
+            content_type='application/json',
+            HTTP_X_CI_TOKEN='wrong-token',
+        )
+
+        assert missing.status_code == 403
+        assert wrong.status_code == 403
+        assert PipelineRun.objects.count() == initial_run_count
+
+    def test_cicd_webhook_accepts_valid_x_ci_token(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        initial_run_count = PipelineRun.objects.count()
+
+        resp = client.post(
+            f'/api/qa/devops/cicd-config/{config.id}/webhook/',
+            data={
+                'status': 'passed',
+                'branch': 'main',
+                'commit_sha': 'def456',
+                'log_output': 'valid webhook log',
+                'test_results_summary': {'total': 2, 'passed': 2},
+            },
+            content_type='application/json',
+            HTTP_X_CI_TOKEN='secret-token',
+        )
+
+        assert resp.status_code == 201
+        assert PipelineRun.objects.count() == initial_run_count + 1
+        new_run = PipelineRun.objects.get(id=resp.data['run_id'])
+        assert new_run.project_id == config.project_id
+        assert new_run.cicd_config_id == config.id
+        assert new_run.commit_sha == 'def456'
+
     def test_cicd_pipeline_member_can_access_project_resources(self, client):
         config, run = self._create_cicd_pipeline_fixture()
         member = User.objects.create_user(username='iso_cicd_member', password='pass')
