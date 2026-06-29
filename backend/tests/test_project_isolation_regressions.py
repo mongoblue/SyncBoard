@@ -8,8 +8,10 @@ from qa_center.models import (
     ApiAutoTestSuite,
     ApiTestCase,
     ApiTestResult,
+    CiCdConfig,
     PerformanceTestCase,
     PerformanceTestResult,
+    PipelineRun,
     TestEnvironment as QaTestEnvironment,
     TestGlobalVar as QaTestGlobalVar,
     TestResult as QaTestResult,
@@ -855,3 +857,168 @@ class TestProjectIsolationRegressions:
         assert status_resp.status_code == 200
         assert history_resp.status_code == 200
         assert history.id in [item['id'] for item in history_resp.data]
+
+    def _create_cicd_pipeline_fixture(self):
+        config = CiCdConfig.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret CI Config',
+            ci_type='jenkins',
+            webhook_url='https://ci.example.com/hook',
+            api_token='secret-token',
+            branch='main',
+            headers={'Authorization': 'Bearer secret'},
+            test_suite_ids=[],
+        )
+        run = PipelineRun.objects.create(
+            project=self.project,
+            cicd_config=config,
+            status='failed',
+            branch='main',
+            commit_sha='abc123',
+            log_output='secret pipeline log',
+            test_results_summary={'total': 1, 'failed': 1},
+        )
+        return config, run
+
+    def test_cicd_config_list_rejects_outsider_project_filter(self, client):
+        self._create_cicd_pipeline_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/cicd-config/?project_id={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_cicd_config_list_without_project_does_not_leak_foreign_configs(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/devops/cicd-config/')
+
+        assert resp.status_code == 200
+        assert config.id not in [item['id'] for item in resp.data]
+        assert config.name not in [item['name'] for item in resp.data]
+
+    def test_cicd_config_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/devops/cicd-config/',
+            data={
+                'project_id': self.project.id,
+                'name': 'Injected CI Config',
+                'type': 'jenkins',
+                'webhook_url': 'https://ci.example.com/injected',
+                'api_token': 'injected-token',
+                'headers': {'Authorization': 'Bearer injected'},
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not CiCdConfig.objects.filter(name='Injected CI Config').exists()
+
+    def test_cicd_config_detail_update_delete_reject_outsider(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/devops/cicd-config/{config.id}/')
+        update = client.put(
+            f'/api/qa/devops/cicd-config/{config.id}/',
+            data={
+                'name': 'Tampered CI Config',
+                'api_token': 'tampered-token',
+                'headers': {'Authorization': 'Bearer tampered'},
+            },
+            content_type='application/json',
+        )
+        delete = client.delete(f'/api/qa/devops/cicd-config/{config.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert delete.status_code == 403
+        config.refresh_from_db()
+        assert config.name == 'Secret CI Config'
+        assert config.api_token == 'secret-token'
+        assert config.headers == {'Authorization': 'Bearer secret'}
+        assert config.is_active is True
+
+    def test_pipeline_runs_reject_outsider_project_and_config_filters(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        client.force_login(self.outsider)
+
+        by_project = client.get(f'/api/qa/devops/pipeline-runs/?project_id={self.project.id}')
+        by_config = client.get(f'/api/qa/devops/pipeline-runs/?cicd_config_id={config.id}')
+
+        assert by_project.status_code == 403
+        assert by_config.status_code == 403
+
+    def test_pipeline_run_detail_rejects_outsider(self, client):
+        _, run = self._create_cicd_pipeline_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/pipeline-runs/{run.id}/')
+
+        assert resp.status_code == 403
+
+    def test_pipeline_trigger_rejects_outsider_before_side_effects(self, client):
+        config, _ = self._create_cicd_pipeline_fixture()
+        initial_run_count = PipelineRun.objects.count()
+        client.force_login(self.outsider)
+
+        with patch('qa_center.views_devops.threading.Thread') as thread_cls:
+            resp = client.post(f'/api/qa/devops/cicd-config/{config.id}/trigger/')
+
+        assert resp.status_code == 403
+        thread_cls.assert_not_called()
+        assert PipelineRun.objects.count() == initial_run_count
+
+    def test_cicd_pipeline_member_can_access_project_resources(self, client):
+        config, run = self._create_cicd_pipeline_fixture()
+        member = User.objects.create_user(username='iso_cicd_member', password='pass')
+        self.project.members.add(member)
+        other_owner = User.objects.create_user(username='iso_cicd_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other CI Project', owner=other_owner)
+        foreign_config = CiCdConfig.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Other CI Config',
+            ci_type='gitlab',
+            webhook_url='https://ci.example.com/other',
+            branch='main',
+        )
+        foreign_run = PipelineRun.objects.create(
+            project=other_project,
+            cicd_config=foreign_config,
+            status='passed',
+            branch='main',
+        )
+        client.force_login(member)
+
+        config_list = client.get(f'/api/qa/devops/cicd-config/?project_id={self.project.id}')
+        config_detail = client.get(f'/api/qa/devops/cicd-config/{config.id}/')
+        runs_by_project = client.get(f'/api/qa/devops/pipeline-runs/?project_id={self.project.id}')
+        runs_by_config = client.get(f'/api/qa/devops/pipeline-runs/?cicd_config_id={config.id}')
+        run_detail = client.get(f'/api/qa/devops/pipeline-runs/{run.id}/')
+        with patch('qa_center.views_devops.threading.Thread') as thread_cls:
+            trigger = client.post(f'/api/qa/devops/cicd-config/{config.id}/trigger/')
+
+        assert config_list.status_code == 200
+        listed_config_ids = [item['id'] for item in config_list.data]
+        assert config.id in listed_config_ids
+        assert foreign_config.id not in listed_config_ids
+        assert config_detail.status_code == 200
+        assert runs_by_project.status_code == 200
+        project_run_ids = [item['id'] for item in runs_by_project.data['results']]
+        assert run.id in project_run_ids
+        assert foreign_run.id not in project_run_ids
+        assert runs_by_config.status_code == 200
+        config_run_ids = [item['id'] for item in runs_by_config.data['results']]
+        assert run.id in config_run_ids
+        assert foreign_run.id not in config_run_ids
+        assert run_detail.status_code == 200
+        assert trigger.status_code == 201
+        thread_cls.return_value.start.assert_called_once()
+        new_run_id = trigger.data['run_id']
+        new_run = PipelineRun.objects.get(id=new_run_id)
+        assert new_run.project_id == self.project.id

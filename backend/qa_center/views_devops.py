@@ -66,6 +66,38 @@ def _get_accessible_test_task(user, task_id):
     return task
 
 
+def _accessible_cicd_configs(user):
+    return CiCdConfig.objects.filter(project_access_q('project', user)).distinct()
+
+
+def _get_accessible_cicd_config(user, config_id, active_only=False):
+    queryset = CiCdConfig.objects.select_related('project', 'created_by')
+    if active_only:
+        queryset = queryset.filter(is_active=True)
+
+    try:
+        config = queryset.get(pk=config_id)
+    except CiCdConfig.DoesNotExist:
+        return None
+
+    ensure_project_id_access(user, config.project_id)
+    return config
+
+
+def _accessible_pipeline_runs(user):
+    return PipelineRun.objects.filter(project_access_q('project', user)).distinct()
+
+
+def _get_accessible_pipeline_run(user, run_id):
+    try:
+        run = PipelineRun.objects.select_related('cicd_config', 'project').get(pk=run_id)
+    except PipelineRun.DoesNotExist:
+        return None
+
+    ensure_project_id_access(user, run.project_id)
+    return run
+
+
 def _send_notification(project, ntype, message):
     """广播通知到 WebSocket 并保存到数据库"""
     try:
@@ -224,15 +256,15 @@ class CiCdIntegrationView(APIView):
 
     def get(self, request, config_id=None):
         if config_id:
-            try:
-                config = CiCdConfig.objects.get(pk=config_id)
-            except CiCdConfig.DoesNotExist:
+            config = _get_accessible_cicd_config(request.user, config_id)
+            if config is None:
                 return Response({'error': '配置不存在'}, status=status.HTTP_404_NOT_FOUND)
             return Response(self._serialize_config(config))
 
         project_id = request.query_params.get('project_id')
-        queryset = CiCdConfig.objects.filter(is_active=True)
+        queryset = _accessible_cicd_configs(request.user).filter(is_active=True)
         if project_id:
+            ensure_project_id_access(request.user, project_id)
             queryset = queryset.filter(project_id=project_id)
         configs = [self._serialize_config(c) for c in queryset]
         return Response(configs)
@@ -242,6 +274,7 @@ class CiCdIntegrationView(APIView):
         if not project_id:
             return Response({'error': '缺少 project_id'}, status=status.HTTP_400_BAD_REQUEST)
 
+        ensure_project_id_access(request.user, project_id)
         config = CiCdConfig.objects.create(
             project_id=project_id,
             name=request.data.get('name', ''),
@@ -257,9 +290,8 @@ class CiCdIntegrationView(APIView):
         return Response(self._serialize_config(config), status=status.HTTP_201_CREATED)
 
     def put(self, request, config_id):
-        try:
-            config = CiCdConfig.objects.get(pk=config_id)
-        except CiCdConfig.DoesNotExist:
+        config = _get_accessible_cicd_config(request.user, config_id)
+        if config is None:
             return Response({'error': '配置不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         updatable = ['name', 'webhook_url', 'api_token', 'branch', 'auto_trigger']
@@ -274,9 +306,8 @@ class CiCdIntegrationView(APIView):
         return Response(self._serialize_config(config))
 
     def delete(self, request, config_id):
-        try:
-            config = CiCdConfig.objects.get(pk=config_id)
-        except CiCdConfig.DoesNotExist:
+        config = _get_accessible_cicd_config(request.user, config_id)
+        if config is None:
             return Response({'error': '配置不存在'}, status=status.HTTP_404_NOT_FOUND)
         config.is_active = False
         config.save()
@@ -722,14 +753,19 @@ class PipelineRunListView(APIView):
     def get(self, request):
         project_id = request.query_params.get('project_id')
         cicd_config_id = request.query_params.get('cicd_config_id')
-        queryset = PipelineRun.objects.all()
-
-        if project_id:
-            queryset = queryset.filter(project_id=project_id)
-        if cicd_config_id:
-            queryset = queryset.filter(cicd_config_id=cicd_config_id)
         if not project_id and not cicd_config_id:
             return Response({'error': '需要 project_id 或 cicd_config_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+        queryset = _accessible_pipeline_runs(request.user).select_related('cicd_config', 'project')
+
+        if project_id:
+            ensure_project_id_access(request.user, project_id)
+            queryset = queryset.filter(project_id=project_id)
+        if cicd_config_id:
+            config = _get_accessible_cicd_config(request.user, cicd_config_id)
+            if config is None:
+                return Response({'error': 'CI/CD配置不存在'}, status=status.HTTP_404_NOT_FOUND)
+            queryset = queryset.filter(cicd_config_id=cicd_config_id)
 
         queryset = queryset.order_by('-created_at')[:50]
 
@@ -757,9 +793,8 @@ class PipelineRunDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, run_id):
-        try:
-            run = PipelineRun.objects.select_related('cicd_config', 'project').get(pk=run_id)
-        except PipelineRun.DoesNotExist:
+        run = _get_accessible_pipeline_run(request.user, run_id)
+        if run is None:
             return Response({'error': '执行记录不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         return Response({
@@ -786,9 +821,8 @@ class PipelineRunTriggerView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, config_id):
-        try:
-            config = CiCdConfig.objects.select_related('project').get(pk=config_id, is_active=True)
-        except CiCdConfig.DoesNotExist:
+        config = _get_accessible_cicd_config(request.user, config_id, active_only=True)
+        if config is None:
             return Response({'error': 'CI/CD配置不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         run = PipelineRun.objects.create(
