@@ -200,6 +200,7 @@ class TestBugAssign:
         self, auth_client, test_project, test_user, test_password
     ):
         dev = User.objects.create_user(username='dev', password=test_password)
+        test_project.members.add(dev)
         bug = Bug.objects.create(project=test_project, title='X', reporter=test_user)
         resp = auth_client.post(
             f'/api/bugs/{bug.id}/assign/',
@@ -225,6 +226,24 @@ class TestBugAssign:
         )
         bug.refresh_from_db()
         assert bug.status == 'fixing'  # 状态不变
+    def test_assign_rejects_user_outside_bug_project(
+        self, auth_client, test_project, test_user, test_password
+    ):
+        outsider = User.objects.create_user(username='outside_dev', password=test_password)
+        bug = Bug.objects.create(project=test_project, title='X', reporter=test_user)
+        initial_transition_count = BugTransition.objects.count()
+
+        resp = auth_client.post(
+            f'/api/bugs/{bug.id}/assign/',
+            data={'user_id': outsider.id},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        bug.refresh_from_db()
+        assert bug.assignee is None
+        assert bug.status == 'new'
+        assert BugTransition.objects.count() == initial_transition_count
 
 
 @pytest.mark.django_db

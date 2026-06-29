@@ -179,6 +179,8 @@ class BugViewSet(viewsets.ModelViewSet):
         target = User.objects.filter(pk=user_id).first()
         if not target:
             return Response({'error': '用户不存在'}, status=status.HTTP_404_NOT_FOUND)
+        if not user_can_access_project(target, bug.project):
+            raise PermissionDenied('指派用户不属于此项目')
 
         old_assignee = bug.assignee
         bug.assignee = target
