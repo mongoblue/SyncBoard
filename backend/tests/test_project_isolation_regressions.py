@@ -7,10 +7,15 @@ from qa_center.models import (
     ApiAutoTestCase,
     ApiAutoTestSuite,
     ApiTestCase,
+    ApiTestResult,
+    PerformanceTestCase,
+    PerformanceTestResult,
     TestEnvironment as QaTestEnvironment,
     TestGlobalVar as QaTestGlobalVar,
+    TestResult as QaTestResult,
     TestRun as QaTestRun,
     TestRunPlan as QaTestRunPlan,
+    UiTestCase,
 )
 from room.models import Column, Project
 
@@ -417,3 +422,196 @@ class TestProjectIsolationRegressions:
         assert var_list.status_code == 200
         assert var_detail.status_code == 200
         assert var_detail.data['value'] == 'super-secret-token'
+
+    def _create_result_fixture(self):
+        ui_case = UiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret UI Case',
+            url='/secret-ui/',
+            steps=[{'action': 'click', 'selector': '#secret'}],
+        )
+        api_case = ApiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret API Case',
+            url='/api/secret/',
+            method='GET',
+            expected_status=200,
+        )
+        result = QaTestResult.objects.create(
+            project=self.project,
+            test_type='ui',
+            name='Secret Result',
+            status='failed',
+            ui_test_case=ui_case,
+            executed_by=self.owner,
+            test_log='secret log',
+            error_message='secret error',
+        )
+        api_result = ApiTestResult.objects.create(
+            test_case=api_case,
+            status_code=200,
+            response_body='secret response body',
+            response_headers={'X-Secret': 'yes'},
+            response_time_ms=12,
+            passed=True,
+            executed_by=self.owner,
+        )
+        perf_case = PerformanceTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret Perf Case',
+            url='https://secret.example.com/path',
+            method='GET',
+        )
+        perf_result = PerformanceTestResult.objects.create(
+            test_case=perf_case,
+            test_result=result,
+            executed_by=self.owner,
+            total_requests=10,
+            failed_requests=1,
+            avg_response_time=120,
+            min_response_time=80,
+            max_response_time=300,
+            requests_per_second=2.5,
+        )
+        return result, ui_case, api_case, api_result, perf_case, perf_result
+
+    def test_test_result_list_rejects_outsider_project_filter(self, client):
+        self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/test-results/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_test_result_list_without_project_does_not_leak_foreign_results(self, client):
+        result, *_ = self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/test-results/')
+
+        assert resp.status_code == 200
+        items = resp.data['results']
+        assert result.name not in [item['name'] for item in items]
+
+    def test_test_result_detail_update_delete_complete_upload_reject_outsider(self, client):
+        result, *_ = self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/test-results/{result.id}/')
+        update = client.patch(
+            f'/api/qa/test-results/{result.id}/',
+            data={'status': 'passed', 'test_log': 'tampered'},
+            content_type='application/json',
+        )
+        complete = client.post(
+            f'/api/qa/test-results/{result.id}/complete/',
+            data={'status': 'passed', 'test_log': 'tampered'},
+            content_type='application/json',
+        )
+        upload = client.post(
+            f'/api/qa/test-results/{result.id}/upload_screenshot/',
+            data={'base64_image': 'data:image/png;base64,aGVsbG8='},
+            content_type='application/json',
+        )
+        delete = client.delete(f'/api/qa/test-results/{result.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert complete.status_code == 403
+        assert upload.status_code == 403
+        assert delete.status_code == 403
+        result.refresh_from_db()
+        assert result.status == 'failed'
+        assert result.test_log == 'secret log'
+
+    def test_test_result_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/test-results/',
+            data={
+                'project': self.project.id,
+                'test_type': 'api',
+                'name': 'Injected Result',
+                'status': 'passed',
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not QaTestResult.objects.filter(name='Injected Result').exists()
+
+    def test_create_from_ui_test_rejects_outsider_case(self, client):
+        _, ui_case, *_ = self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/test-results/create_from_ui_test/',
+            data={'ui_test_case_id': ui_case.id, 'run_result': {'success': True}},
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert QaTestResult.objects.filter(ui_test_case=ui_case).count() == 1
+
+    def test_test_result_statistics_rejects_outsider_project_filter(self, client):
+        self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/test-results/statistics/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_test_result_statistics_without_project_does_not_count_foreign_results(self, client):
+        self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/test-results/statistics/')
+
+        assert resp.status_code == 200
+        assert resp.data['total'] == 0
+
+    def test_api_results_reject_outsider_project_data(self, client):
+        _, _, api_case, api_result, *_ = self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        list_resp = client.get('/api/qa/api-results/')
+        filtered = client.get(f'/api/qa/api-results/?test_case={api_case.id}')
+        detail = client.get(f'/api/qa/api-results/{api_result.id}/')
+
+        assert list_resp.status_code == 200
+        assert api_result.id not in [item['id'] for item in list_resp.data['results']]
+        assert filtered.status_code == 403
+        assert detail.status_code == 403
+
+    def test_performance_results_reject_outsider_project_data(self, client):
+        _, _, _, _, perf_case, perf_result = self._create_result_fixture()
+        client.force_login(self.outsider)
+
+        list_resp = client.get('/api/qa/performance-results/')
+        by_project = client.get(f'/api/qa/performance-results/?project={self.project.id}')
+        by_case = client.get(f'/api/qa/performance-results/?test_case={perf_case.id}')
+        detail = client.get(f'/api/qa/performance-results/{perf_result.id}/')
+
+        assert list_resp.status_code == 200
+        assert perf_result.id not in [item['id'] for item in list_resp.data['results']]
+        assert by_project.status_code == 403
+        assert by_case.status_code == 403
+        assert detail.status_code == 403
+
+    def test_result_member_can_access_project_results(self, client):
+        result, _, _, api_result, _, perf_result = self._create_result_fixture()
+        member = User.objects.create_user(username='iso_result_member', password='pass')
+        self.project.members.add(member)
+        client.force_login(member)
+
+        result_detail = client.get(f'/api/qa/test-results/{result.id}/')
+        api_detail = client.get(f'/api/qa/api-results/{api_result.id}/')
+        perf_detail = client.get(f'/api/qa/performance-results/{perf_result.id}/')
+
+        assert result_detail.status_code == 200
+        assert api_detail.status_code == 200
+        assert perf_detail.status_code == 200

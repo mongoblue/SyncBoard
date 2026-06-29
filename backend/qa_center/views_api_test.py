@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404
 from django.test import Client
 from django.urls import resolve
 from django.http import HttpRequest
@@ -507,12 +508,29 @@ class ApiTestResultViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = ApiTestResultSerializer
     queryset = ApiTestResult.objects.all()
+
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            ApiTestResult.objects.select_related('test_case', 'test_case__project', 'executed_by'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.test_case.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
     
     def get_queryset(self):
         """根据测试用例ID筛选"""
-        queryset = ApiTestResult.objects.all()
+        queryset = (
+            ApiTestResult.objects
+            .select_related('test_case', 'test_case__project', 'executed_by')
+            .filter(project_access_q('test_case__project', self.request.user))
+            .distinct()
+        )
         test_case_id = self.request.query_params.get('test_case')
         if test_case_id:
+            test_case = get_object_or_404(ApiTestCase, id=test_case_id)
+            ensure_project_id_access(self.request.user, test_case.project_id)
             queryset = queryset.filter(test_case_id=test_case_id)
         return queryset
 

@@ -7,6 +7,7 @@ execute 仅创建 TestResult 行并投递 Celery 任务（qa_center.tasks.run_pe
 
 from urllib.parse import urlparse
 
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -21,6 +22,7 @@ from .serializers import (
     PerformanceTestResultListSerializer,
 )
 from .tasks import run_performance_test
+from room.project_access import ensure_project_id_access, project_access_q
 
 
 class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
@@ -160,15 +162,35 @@ class PerformanceTestResultViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = PerformanceTestResultSerializer
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            PerformanceTestResult.objects.select_related(
+                'test_case', 'test_case__project', 'executed_by', 'test_result'
+            ),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.test_case.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
-        queryset = PerformanceTestResult.objects.all()
+        queryset = (
+            PerformanceTestResult.objects
+            .select_related('test_case', 'test_case__project', 'executed_by', 'test_result')
+            .filter(project_access_q('test_case__project', self.request.user))
+            .distinct()
+        )
 
         test_case_id = self.request.query_params.get('test_case')
         if test_case_id:
+            test_case = get_object_or_404(PerformanceTestCase, id=test_case_id)
+            ensure_project_id_access(self.request.user, test_case.project_id)
             queryset = queryset.filter(test_case_id=test_case_id)
 
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             queryset = queryset.filter(test_case__project_id=project_id)
 
-        return queryset.select_related('test_case', 'executed_by')
+        return queryset

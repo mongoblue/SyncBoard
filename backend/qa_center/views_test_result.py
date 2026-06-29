@@ -8,9 +8,12 @@ import os
 import uuid
 from datetime import datetime
 from django.conf import settings
+from django.db.models import Q
 from django.http import FileResponse
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
@@ -22,6 +25,7 @@ from .serializers import (
     TestResultCreateSerializer,
     TestScreenshotSerializer
 )
+from room.project_access import ensure_project_id_access, project_access_q
 
 
 class TestResultViewSet(viewsets.ModelViewSet):
@@ -29,9 +33,31 @@ class TestResultViewSet(viewsets.ModelViewSet):
 
     permission_classes = [IsAuthenticated]
 
+    def _ensure_result_access(self, test_result):
+        if test_result.project_id:
+            ensure_project_id_access(self.request.user, test_result.project_id)
+            return
+        if test_result.executed_by_id != self.request.user.id:
+            raise PermissionDenied('无权访问该测试结果')
+
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            TestResult.objects.select_related(
+                'project', 'executed_by', 'api_test_case', 'ui_test_case'
+            ).prefetch_related('screenshots'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        self._ensure_result_access(obj)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_queryset(self):
         """根据条件过滤"""
-        queryset = TestResult.objects.all()
+        queryset = TestResult.objects.filter(
+            project_access_q('project', self.request.user) |
+            Q(project__isnull=True, executed_by=self.request.user)
+        ).distinct()
 
         # 按测试类型筛选
         test_type = self.request.query_params.get('test_type')
@@ -46,6 +72,7 @@ class TestResultViewSet(viewsets.ModelViewSet):
         # 按项目筛选
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             queryset = queryset.filter(project_id=project_id)
 
         # 按状态筛选
@@ -75,7 +102,27 @@ class TestResultViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """创建时设置执行者"""
-        serializer.save(executed_by=self.request.user)
+        project = serializer.validated_data.get('project')
+        api_case = serializer.validated_data.get('api_test_case')
+        ui_case = serializer.validated_data.get('ui_test_case')
+        effective_project = project
+
+        if api_case:
+            ensure_project_id_access(self.request.user, api_case.project_id)
+            if effective_project and effective_project.id != api_case.project_id:
+                raise ValidationError({'api_test_case': 'API用例不属于当前项目'})
+            effective_project = api_case.project
+
+        if ui_case:
+            ensure_project_id_access(self.request.user, ui_case.project_id)
+            if effective_project and effective_project.id != ui_case.project_id:
+                raise ValidationError({'ui_test_case': 'UI用例不属于当前项目'})
+            effective_project = ui_case.project
+
+        if effective_project:
+            ensure_project_id_access(self.request.user, effective_project.id)
+
+        serializer.save(executed_by=self.request.user, project=effective_project)
 
     @action(detail=True, methods=['post'])
     def upload_screenshot(self, request, pk=None):
@@ -259,6 +306,7 @@ class TestResultViewSet(viewsets.ModelViewSet):
                 {'error': 'UI测试用例不存在'},
                 status=status.HTTP_404_NOT_FOUND
             )
+        ensure_project_id_access(request.user, ui_case.project_id)
 
         # 创建测试结果记录
         test_result = TestResult.objects.create(
