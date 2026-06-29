@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth.models import User
+from django.utils import timezone
 from unittest.mock import patch
 
 from bug_tracker.models import Bug
@@ -20,7 +21,7 @@ from qa_center.models import (
     TestTask as QaTestTask,
     UiTestCase,
 )
-from room.models import Column, Project
+from room.models import Column, Project, Task
 
 
 @pytest.mark.django_db
@@ -473,11 +474,17 @@ class TestProjectIsolationRegressions:
             test_result=result,
             executed_by=self.owner,
             total_requests=10,
+            successful_requests=9,
             failed_requests=1,
-            avg_response_time=120,
-            min_response_time=80,
-            max_response_time=300,
-            requests_per_second=2.5,
+            avg_response_time_ms=120,
+            min_response_time_ms=80,
+            max_response_time_ms=300,
+            p50_response_time_ms=110,
+            p90_response_time_ms=220,
+            p95_response_time_ms=260,
+            p99_response_time_ms=300,
+            throughput=2.5,
+            error_rate=10.0,
         )
         return result, ui_case, api_case, api_result, perf_case, perf_result
 
@@ -604,6 +611,149 @@ class TestProjectIsolationRegressions:
         assert by_project.status_code == 403
         assert by_case.status_code == 403
         assert detail.status_code == 403
+
+    def _create_performance_case_fixture(self):
+        perf_case = PerformanceTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret Performance Case',
+            url='https://secret.example.com/perf',
+            method='GET',
+            headers={'Authorization': 'Bearer perf-secret'},
+            body='secret body',
+        )
+        linked_task = Task.objects.create(
+            column=self.column,
+            title='Secret Linked Task',
+            content='hidden task details',
+            position=1,
+        )
+        perf_case.related_tasks.add(linked_task)
+        running_result = QaTestResult.objects.create(
+            project=self.project,
+            test_type='performance',
+            name='Secret Performance Run',
+            status='running',
+            executed_by=self.owner,
+            started_at=timezone.now(),
+            test_params={'test_case_id': perf_case.id},
+            response_time_ms=123,
+            throughput=45.6,
+            error_rate=1.2,
+        )
+        return perf_case, linked_task, running_result
+
+    def test_performance_case_list_rejects_outsider_project_filter(self, client):
+        self._create_performance_case_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/performance-cases/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_performance_case_list_without_project_does_not_leak_foreign_cases(self, client):
+        perf_case, _, _ = self._create_performance_case_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/performance-cases/')
+
+        assert resp.status_code == 200
+        items = resp.data['results']
+        assert perf_case.id not in [item['id'] for item in items]
+        assert perf_case.name not in [item['name'] for item in items]
+
+    def test_performance_case_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/performance-cases/',
+            data={
+                'project': self.project.id,
+                'name': 'Injected Performance Case',
+                'url': 'https://example.com/load',
+                'method': 'GET',
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not PerformanceTestCase.objects.filter(name='Injected Performance Case').exists()
+
+    def test_performance_case_actions_reject_outsider_before_side_effects(self, client):
+        perf_case, linked_task, running_result = self._create_performance_case_fixture()
+        initial_result_count = QaTestResult.objects.count()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/performance-cases/{perf_case.id}/')
+        update = client.patch(
+            f'/api/qa/performance-cases/{perf_case.id}/',
+            data={'name': 'Tampered Performance Case'},
+            content_type='application/json',
+        )
+        results = client.get(f'/api/qa/performance-cases/{perf_case.id}/results/')
+        linked_tasks = client.get(f'/api/qa/performance-cases/{perf_case.id}/linked-tasks/')
+        status_resp = client.get(
+            f'/api/qa/performance-cases/{perf_case.id}/status/?execution_id={running_result.id}'
+        )
+        stop_resp = client.post(
+            f'/api/qa/performance-cases/{perf_case.id}/stop/',
+            data={'execution_id': running_result.id},
+            content_type='application/json',
+        )
+        with patch('qa_center.views_performance.run_performance_test.delay') as delay:
+            execute = client.post(f'/api/qa/performance-cases/{perf_case.id}/execute/')
+        delete = client.delete(f'/api/qa/performance-cases/{perf_case.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert results.status_code == 403
+        assert linked_tasks.status_code == 403
+        assert status_resp.status_code == 403
+        assert stop_resp.status_code == 403
+        assert execute.status_code == 403
+        assert delete.status_code == 403
+        delay.assert_not_called()
+        perf_case.refresh_from_db()
+        running_result.refresh_from_db()
+        assert perf_case.name == 'Secret Performance Case'
+        assert running_result.status == 'running'
+        assert running_result.aborted is False
+        assert QaTestResult.objects.count() == initial_result_count
+        assert Task.objects.filter(id=linked_task.id).exists()
+
+    def test_performance_case_member_can_access_project_case(self, client):
+        perf_case, linked_task, running_result = self._create_performance_case_fixture()
+        member = User.objects.create_user(username='iso_perf_member', password='pass')
+        self.project.members.add(member)
+        other_owner = User.objects.create_user(username='iso_perf_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other Performance Project', owner=other_owner)
+        foreign_case = PerformanceTestCase.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Other Performance Case',
+            url='https://other.example.com/perf',
+            method='GET',
+        )
+        client.force_login(member)
+
+        list_resp = client.get('/api/qa/performance-cases/')
+        detail = client.get(f'/api/qa/performance-cases/{perf_case.id}/')
+        results = client.get(f'/api/qa/performance-cases/{perf_case.id}/results/')
+        linked_tasks = client.get(f'/api/qa/performance-cases/{perf_case.id}/linked-tasks/')
+        status_resp = client.get(
+            f'/api/qa/performance-cases/{perf_case.id}/status/?execution_id={running_result.id}'
+        )
+
+        assert list_resp.status_code == 200
+        returned_ids = [item['id'] for item in list_resp.data['results']]
+        assert perf_case.id in returned_ids
+        assert foreign_case.id not in returned_ids
+        assert detail.status_code == 200
+        assert results.status_code == 200
+        assert linked_tasks.status_code == 200
+        assert str(linked_task.id) in [str(item['id']) for item in linked_tasks.data]
+        assert status_resp.status_code == 200
+        assert status_resp.data['state'] == 'running'
 
     def test_result_member_can_access_project_results(self, client):
         result, _, _, api_result, _, perf_result = self._create_result_fixture()
@@ -741,6 +891,38 @@ class TestProjectIsolationRegressions:
         assert foreign_result.id not in returned_ids
         assert all(str(item['project']) == str(self.project.id) for item in recent.data)
         assert api_case.project_id == self.project.id
+
+    def test_devops_quality_report_rejects_outsider_project(self, client):
+        self._create_devops_dashboard_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/quality-report/?project_id={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_devops_quality_report_member_can_access_project_report(self, client):
+        self._create_devops_dashboard_fixture()
+        member = User.objects.create_user(username='iso_quality_member', password='pass')
+        self.project.members.add(member)
+        Task.objects.create(
+            column=self.column,
+            title='Quality Report Task',
+            content='visible only to project members',
+            position=2,
+        )
+        other_owner = User.objects.create_user(username='iso_quality_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other Quality Project', owner=other_owner)
+        other_column = Column.objects.create(project=other_project, title='Todo', position=1)
+        Task.objects.create(column=other_column, title='Other Quality Task', position=1)
+        Bug.objects.create(project=other_project, title='Other Quality Bug', reporter=other_owner)
+        client.force_login(member)
+
+        resp = client.get(f'/api/qa/devops/quality-report/?project_id={self.project.id}')
+
+        assert resp.status_code == 200
+        assert resp.data['project_id'] == str(self.project.id)
+        assert resp.data['summary']['total_tasks'] == 1
+        assert resp.data['summary']['bug_count'] == 0
 
     def _create_devops_task_fixture(self):
         task = QaTestTask.objects.create(

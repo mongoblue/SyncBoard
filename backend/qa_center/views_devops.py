@@ -909,6 +909,7 @@ class ProjectQualityReportView(APIView):
         project_id = request.query_params.get('project_id')
         if not project_id:
             return Response({'error': '缺少 project_id'}, status=status.HTTP_400_BAD_REQUEST)
+        ensure_project_id_access(request.user, project_id)
 
         # 1. 测试覆盖率：有关联测试用例的任务数 / 总任务数
         from room.models import Task

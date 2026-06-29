@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 
@@ -29,10 +30,13 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        queryset = PerformanceTestCase.objects.all()
+        queryset = PerformanceTestCase.objects.filter(
+            project_access_q('project', self.request.user)
+        ).distinct()
 
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             queryset = queryset.filter(project_id=project_id)
 
         keyword = self.request.query_params.get('keyword')
@@ -41,13 +45,42 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
 
         return queryset.select_related('project', 'created_by')
 
+    def get_object(self):
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            PerformanceTestCase.objects.select_related('project', 'created_by'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
+
     def get_serializer_class(self):
         if self.action == 'list':
             return PerformanceTestCaseListSerializer
         return PerformanceTestCaseSerializer
 
     def perform_create(self, serializer):
+        project = serializer.validated_data.get('project')
+        if project:
+            ensure_project_id_access(self.request.user, project.id)
         serializer.save(created_by=self.request.user)
+
+    def _get_case_execution(self, test_case, execution_id):
+        try:
+            test_result = TestResult.objects.get(id=execution_id)
+        except TestResult.DoesNotExist:
+            return None
+
+        if test_result.test_type != 'performance' or test_result.project_id != test_case.project_id:
+            raise PermissionDenied('无权访问该性能测试执行记录')
+
+        test_params = test_result.test_params or {}
+        test_case_id = test_params.get('test_case_id')
+        if test_case_id is not None and str(test_case_id) != str(test_case.id):
+            raise PermissionDenied('无权访问该性能测试执行记录')
+
+        return test_result
 
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
@@ -69,6 +102,7 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
             started_at=timezone.now(),
             concurrent_users=users,
             test_params={
+                'test_case_id': test_case.id,
                 'users': users,
                 'spawn_rate': spawn_rate,
                 'run_time': run_time,
@@ -95,13 +129,13 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def stop(self, request, pk=None):
+        test_case = self.get_object()
         execution_id = request.data.get('execution_id')
         if not execution_id:
             return Response({'error': '缺少 execution_id'}, status=status.HTTP_400_BAD_REQUEST)
 
-        try:
-            test_result = TestResult.objects.get(id=execution_id)
-        except TestResult.DoesNotExist:
+        test_result = self._get_case_execution(test_case, execution_id)
+        if test_result is None:
             return Response({'error': '未找到测试记录'}, status=status.HTTP_404_NOT_FOUND)
 
         if test_result.status in ('passed', 'failed', 'error') or test_result.aborted:
@@ -117,13 +151,13 @@ class PerformanceTestCaseViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def status(self, request, pk=None):
+        test_case = self.get_object()
         execution_id = request.query_params.get('execution_id')
         if not execution_id:
             return Response({'state': 'not_found', 'is_running': False})
 
-        try:
-            test_result = TestResult.objects.get(id=execution_id)
-        except TestResult.DoesNotExist:
+        test_result = self._get_case_execution(test_case, execution_id)
+        if test_result is None:
             return Response({
                 'execution_id': execution_id,
                 'state': 'not_found',
