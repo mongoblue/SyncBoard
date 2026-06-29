@@ -504,6 +504,154 @@ class TestProjectIsolationRegressions:
         screenshot.image.save('secret-ui.png', ContentFile(b'secret screenshot'), save=True)
         return result, ui_case, screenshot
 
+    def _create_ui_case_fixture(self):
+        ui_case = UiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret UI Isolation Case',
+            url='/secret-ui-isolation/',
+            steps=[{'action': 'click', 'selector': '#secret-ui'}],
+        )
+        linked_task = Task.objects.create(
+            column=self.column,
+            title='Secret UI Linked Task',
+            content='hidden ui task details',
+            position=1,
+        )
+        ui_case.related_tasks.add(linked_task)
+        running_result = QaTestResult.objects.create(
+            project=self.project,
+            test_type='ui',
+            name='Secret UI Running Result',
+            status='running',
+            ui_test_case=ui_case,
+            executed_by=self.owner,
+            started_at=timezone.now(),
+            task_id='secret-ui-task',
+        )
+        return ui_case, linked_task, running_result
+
+    def test_ui_case_list_rejects_outsider_project_filter(self, client):
+        self._create_ui_case_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/ui-cases/?project={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_ui_case_list_without_project_does_not_leak_foreign_cases(self, client):
+        ui_case, _, _ = self._create_ui_case_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/ui-cases/')
+
+        assert resp.status_code == 200
+        items = resp.data['results']
+        assert ui_case.id not in [item['id'] for item in items]
+        assert ui_case.name not in [item['name'] for item in items]
+
+    def test_ui_case_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/ui-cases/',
+            data={
+                'project': self.project.id,
+                'name': 'Injected UI Case',
+                'url': '/injected-ui/',
+                'steps': [{'action': 'click', 'selector': '#inject'}],
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not UiTestCase.objects.filter(name='Injected UI Case').exists()
+
+    def test_ui_case_detail_update_delete_reject_outsider(self, client):
+        ui_case, _, _ = self._create_ui_case_fixture()
+        client.force_login(self.outsider)
+
+        detail = client.get(f'/api/qa/ui-cases/{ui_case.id}/')
+        update = client.patch(
+            f'/api/qa/ui-cases/{ui_case.id}/',
+            data={'name': 'Tampered UI Case'},
+            content_type='application/json',
+        )
+        delete = client.delete(f'/api/qa/ui-cases/{ui_case.id}/')
+
+        assert detail.status_code == 403
+        assert update.status_code == 403
+        assert delete.status_code == 403
+        ui_case.refresh_from_db()
+        assert ui_case.name == 'Secret UI Isolation Case'
+
+    def test_ui_case_run_and_linked_tasks_reject_outsider_before_side_effects(self, client):
+        ui_case, linked_task, _ = self._create_ui_case_fixture()
+        initial_result_count = QaTestResult.objects.count()
+        client.force_login(self.outsider)
+
+        with patch('qa_center.views_ui_test.execute_ui_case') as execute_ui_case:
+            run_resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+        linked_tasks = client.get(f'/api/qa/ui-cases/{ui_case.id}/linked-tasks/')
+
+        assert run_resp.status_code == 403
+        assert linked_tasks.status_code == 403
+        execute_ui_case.assert_not_called()
+        assert QaTestResult.objects.count() == initial_result_count
+        assert Task.objects.filter(id=linked_task.id).exists()
+
+    def test_ui_run_abort_events_reject_outsider_bound_task_before_side_effects(self, client):
+        _, _, running_result = self._create_ui_case_fixture()
+        client.force_login(self.outsider)
+
+        with patch('qa_center.views_ui_test.runner_supervisor.is_runner_alive') as is_alive, \
+                patch('qa_center.views_ui_test.runner_supervisor.abort_runner') as abort_runner, \
+                patch('qa_center.views_ui_test.runner_supervisor.get_events') as get_events:
+            abort_resp = client.post(f'/api/qa/ui-cases/runs/{running_result.task_id}/abort/')
+            events_resp = client.get(f'/api/qa/ui-cases/runs/{running_result.task_id}/events/')
+
+        assert abort_resp.status_code == 403
+        assert events_resp.status_code == 403
+        is_alive.assert_not_called()
+        abort_runner.assert_not_called()
+        get_events.assert_not_called()
+        running_result.refresh_from_db()
+        assert running_result.status == 'running'
+        assert running_result.aborted is False
+
+    def test_ui_case_member_can_access_project_case(self, client):
+        ui_case, linked_task, _ = self._create_ui_case_fixture()
+        member = User.objects.create_user(username='iso_ui_member', password='pass')
+        self.project.members.add(member)
+        other_owner = User.objects.create_user(username='iso_ui_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other UI Project', owner=other_owner)
+        foreign_case = UiTestCase.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Other UI Case',
+            url='/other-ui/',
+            steps=[],
+        )
+        initial_result_count = QaTestResult.objects.count()
+        client.force_login(member)
+
+        list_resp = client.get('/api/qa/ui-cases/')
+        detail = client.get(f'/api/qa/ui-cases/{ui_case.id}/')
+        linked_tasks = client.get(f'/api/qa/ui-cases/{ui_case.id}/linked-tasks/')
+        with patch('qa_center.views_ui_test.execute_ui_case', return_value={'success': True, 'summary': {}}):
+            run_resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+
+        assert list_resp.status_code == 200
+        returned_ids = [item['id'] for item in list_resp.data['results']]
+        assert ui_case.id in returned_ids
+        assert foreign_case.id not in returned_ids
+        assert detail.status_code == 200
+        assert linked_tasks.status_code == 200
+        assert str(linked_task.id) in [str(item['id']) for item in linked_tasks.data]
+        assert run_resp.status_code == 200
+        assert run_resp.data['success'] is True
+        assert QaTestResult.objects.count() == initial_result_count + 1
+
     def test_ui_run_screenshot_by_index_rejects_outsider(self, client, tmp_path):
         with override_settings(MEDIA_ROOT=tmp_path):
             result, _, _ = self._create_ui_screenshot_fixture()

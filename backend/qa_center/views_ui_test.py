@@ -25,7 +25,7 @@ from .models import UiTestCase, TestResult, TestScreenshot
 from .serializers import UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseRunSerializer
 from .workers import runner_supervisor
 from .workers.runner_supervisor import execute_ui_case
-from room.project_access import ensure_project_id_access
+from room.project_access import ensure_project_id_access, project_access_q
 
 
 logger = logging.getLogger("qa_center.runner")
@@ -45,11 +45,15 @@ def _path_is_under(path, root):
 
 
 def _ensure_test_result_screenshot_access(user, test_result):
+    _ensure_test_result_access(user, test_result, '无权访问该截图')
+
+
+def _ensure_test_result_access(user, test_result, message='无权访问该测试结果'):
     if test_result.project_id:
         ensure_project_id_access(user, test_result.project_id)
         return
     if test_result.executed_by_id != user.id:
-        raise PermissionDenied('无权访问该截图')
+        raise PermissionDenied(message)
 
 
 def _get_latest_ui_result_for_task(task_id):
@@ -59,6 +63,14 @@ def _get_latest_ui_result_for_task(task_id):
         .order_by('-started_at', '-created_at')
         .first()
     )
+
+
+def _get_authorized_ui_result_for_task(user, task_id):
+    test_result = _get_latest_ui_result_for_task(task_id)
+    if test_result is None:
+        raise Http404()
+    _ensure_test_result_access(user, test_result)
+    return test_result
 
 
 def _open_png_response(path):
@@ -73,11 +85,25 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """根据项目过滤"""
-        queryset = UiTestCase.objects.all()
+        queryset = UiTestCase.objects.filter(
+            project_access_q('project', self.request.user)
+        ).distinct()
         project_id = self.request.query_params.get('project')
         if project_id:
+            ensure_project_id_access(self.request.user, project_id)
             queryset = queryset.filter(project_id=project_id)
-        return queryset.select_related('created_by')
+        return queryset.select_related('project', 'created_by')
+
+    def get_object(self):
+        """按原始 ID 获取对象后显式校验项目访问权限。"""
+        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+        obj = get_object_or_404(
+            UiTestCase.objects.select_related('project', 'created_by'),
+            **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
+        )
+        ensure_project_id_access(self.request.user, obj.project_id)
+        self.check_object_permissions(self.request, obj)
+        return obj
 
     def get_serializer_class(self):
         """根据动作选择序列化器"""
@@ -87,7 +113,17 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """创建时设置创建者"""
+        project = serializer.validated_data.get('project')
+        if project:
+            ensure_project_id_access(self.request.user, project.id)
         serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        """更新时校验目标项目访问权限"""
+        project = serializer.validated_data.get('project')
+        if project:
+            ensure_project_id_access(self.request.user, project.id)
+        serializer.save()
 
     @action(detail=True, methods=["post"])
     def run(self, request, pk=None):
@@ -226,6 +262,8 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         if not task_id:
             return Response({"error": "task_id 必填"}, status=status.HTTP_400_BAD_REQUEST)
 
+        tr = _get_authorized_ui_result_for_task(request.user, task_id)
+
         alive = runner_supervisor.is_runner_alive(task_id)
         if not alive:
             return Response(
@@ -242,8 +280,7 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
 
         # 标记已存在的 TestResult（如果有）为 aborted
         try:
-            tr = TestResult.objects.filter(task_id=task_id).order_by("-started_at").first()
-            if tr is not None and tr.status not in ("passed", "failed"):
+            if tr.status not in ("passed", "failed"):
                 tr.aborted = True
                 tr.save(update_fields=["aborted"])
         except Exception:
@@ -256,6 +293,7 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         """返回 task 的历史事件。供前端 WS 晚于 worker 启动时回放。"""
         if not task_id:
             return Response({"error": "task_id 必填"}, status=status.HTTP_400_BAD_REQUEST)
+        _get_authorized_ui_result_for_task(request.user, task_id)
         evs = runner_supervisor.get_events(task_id)
         return Response({
             "task_id": task_id,
