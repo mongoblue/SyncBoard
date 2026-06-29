@@ -248,11 +248,9 @@ const progressStatus = computed(() => {
 // WebSocket 连接
 const connectSocket = () => {
   if (qaSocket && qaSocket.readyState === WebSocket.OPEN) return;
-  const path = currentProjectId.value
-    ? `/ws/qa/dashboard/${currentProjectId.value}/`
-    : '/ws/qa/dashboard/';
+  if (!currentProjectId.value) return;
 
-  qaSocket = new WebSocket(buildWsUrl(path));
+  qaSocket = new WebSocket(buildWsUrl(`/ws/qa/dashboard/${currentProjectId.value}/`));
 
   qaSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -307,6 +305,11 @@ const handleServerEvent = (data: any) => {
 };
 
 const startTest = async (type: string = 'default') => {
+  if (!currentProjectId.value) {
+    ElMessage.warning('请先选择项目');
+    return;
+  }
+
   // 显示 E2E 警告
   showE2EWarning.value = type === 'e2e' || type === 'regression';
   try {
@@ -315,7 +318,7 @@ const startTest = async (type: string = 'default') => {
     currentStatus.value = '启动中...';
     await service.post('/qa/run-test/', {
       test_type: type,
-      ...(currentProjectId.value ? { project_id: currentProjectId.value } : {}),
+      project_id: currentProjectId.value,
     });
   } catch (e) {
     testing.value = false;

@@ -139,14 +139,15 @@ class TestRunTestViewProjectScope:
         assert response.status_code == 200
         assert thread_cls.call_args.kwargs['args'][2] == str(test_project.id)
 
-    def test_run_test_without_project_keeps_legacy_global_stream(self, auth_client):
+    def test_run_test_requires_project_scope_without_starting_thread(self, auth_client):
         with patch('qa_center.views.threading.Thread') as thread_cls:
             response = auth_client.post('/api/qa/run-test/', {
                 'test_type': 'api',
             }, content_type='application/json')
 
-        assert response.status_code == 200
-        assert thread_cls.call_args.kwargs['args'][1:] == ('api', None)
+        assert response.status_code == 400
+        assert response.data['error'] == '请选择项目'
+        thread_cls.assert_not_called()
 
     def test_stream_command_output_uses_project_dashboard_group(self, test_project):
         from qa_center.views import RunTestView
@@ -158,7 +159,7 @@ class TestRunTestViewProjectScope:
 
         with patch('qa_center.views.get_channel_layer') as get_layer, \
              patch('qa_center.views.async_to_sync') as to_sync, \
-             patch('qa_center.views.subprocess.Popen', return_value=process):
+             patch('qa_center.views.subprocess.Popen', return_value=process) as popen:
             layer = MagicMock()
             get_layer.return_value = layer
             sender = MagicMock()
@@ -169,23 +170,13 @@ class TestRunTestViewProjectScope:
         to_sync.assert_called_with(layer.group_send)
         assert sender.call_args_list[0].args[0] == f'qa_dashboard_{test_project.id}'
         assert all(call.args[0] == f'qa_dashboard_{test_project.id}' for call in sender.call_args_list)
+        assert popen.call_args.kwargs['env']['QA_DASHBOARD_PROJECT_ID'] == str(test_project.id)
 
-    def test_stream_command_output_without_project_keeps_global_group(self):
+    def test_stream_command_output_requires_project_scope(self):
         from qa_center.views import RunTestView
 
-        process = MagicMock()
-        process.stdout.readline.side_effect = ['']
-        process.stdout.close = MagicMock()
-        process.wait.return_value = 0
+        with patch('qa_center.views.subprocess.Popen') as popen:
+            with pytest.raises(ValueError, match='project_id is required'):
+                RunTestView().stream_command_output(['python', '-m', 'pytest'], 'api')
 
-        with patch('qa_center.views.get_channel_layer') as get_layer, \
-             patch('qa_center.views.async_to_sync') as to_sync, \
-             patch('qa_center.views.subprocess.Popen', return_value=process):
-            layer = MagicMock()
-            get_layer.return_value = layer
-            sender = MagicMock()
-            to_sync.return_value = sender
-
-            RunTestView().stream_command_output(['python', '-m', 'pytest'], 'api')
-
-        assert sender.call_args_list[0].args[0] == 'qa_dashboard'
+        popen.assert_not_called()

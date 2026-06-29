@@ -2,7 +2,7 @@
 QA Center WebSocket 路由。
 
 路径列表：
-  ws/qa/dashboard/              QAConsumer               兼容旧版全局测试进度通道（仅认证）
+  ws/qa/dashboard/              QAConsumer               兼容旧路径（consumer 会拒绝无项目作用域连接）
   ws/qa/dashboard/<project_id>/ QAConsumer               项目作用域测试计划执行进度
   ws/qa/recorder/<project_id>/  RecorderConsumer          项目作用域 UI 录制器（双向通信）
   ws/qa/recorder/               RecorderConsumer          兼容旧版 UI 录制器（仅认证）

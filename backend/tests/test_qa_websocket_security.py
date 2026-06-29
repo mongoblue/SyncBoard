@@ -201,14 +201,12 @@ async def test_qa_dashboard_rejects_anonymous_user():
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.anyio
-async def test_qa_dashboard_accepts_authenticated_user():
+async def test_qa_dashboard_rejects_authenticated_user_without_project_scope():
     user = await _create_user('qa-dashboard-member')
     communicator = await _communicator('/ws/qa/dashboard/', user)
-    connected, _ = await communicator.connect()
-    assert connected is True
-    message = await communicator.receive_json_from()
-    assert message['type'] == 'connected'
-    await communicator.disconnect()
+    connected, code = await communicator.connect()
+    assert connected is False
+    assert code == 4003
 
 
 @pytest.mark.django_db(transaction=True)

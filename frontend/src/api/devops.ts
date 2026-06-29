@@ -5,7 +5,7 @@
  * 接口范围：仪表盘统计、CI/CD 配置 CRUD、测试任务 CRUD + 执行 + 状态 + 历史、
  *          流水线记录、快速测试、质量报告
  *
- * 类型定义在 @/types/devops.ts 中。配合 ws/qa/dashboard/ WS 监听执行进度。
+ * 类型定义在 @/types/devops.ts 中。配合 ws/qa/dashboard/<project_id>/ WS 监听执行进度。
  */
 import service from '@/utils/request';
 import type {

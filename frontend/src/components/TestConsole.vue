@@ -114,11 +114,12 @@ const handleClose = () => {
 // WebSocket 连接
 const connectSocket = () => {
   if (qaSocket && qaSocket.readyState === WebSocket.OPEN) return;
-  const path = props.projectId
-    ? `/ws/qa/dashboard/${props.projectId}/`
-    : '/ws/qa/dashboard/';
+  if (!props.projectId) {
+    ElMessage.warning('请先选择项目');
+    return;
+  }
 
-  qaSocket = new WebSocket(buildWsUrl(path));
+  qaSocket = new WebSocket(buildWsUrl(`/ws/qa/dashboard/${props.projectId}/`));
 
   qaSocket.onmessage = (event) => {
     const data = JSON.parse(event.data);
@@ -174,13 +175,18 @@ const handleServerEvent = (data: any) => {
 };
 
 const startTest = async (type: string = 'default') => {
+  if (!props.projectId) {
+    ElMessage.warning('请先选择项目');
+    return;
+  }
+
   try {
     logs.value = [];
     testing.value = true;
     currentStatus.value = "启动中...";
     await service.post('/qa/run-test/', {
       test_type: type,
-      ...(props.projectId ? { project_id: props.projectId } : {}),
+      project_id: props.projectId,
     });
   } catch (e) {
     testing.value = false;

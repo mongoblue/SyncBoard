@@ -95,14 +95,16 @@ class QAConsumer(AsyncWebsocketConsumer):
             return
 
         self.project_id = self.scope.get('url_route', {}).get('kwargs', {}).get('project_id')
-        if self.project_id:
-            project = await _get_dashboard_project(self.project_id)
-            if project is None or not await _user_can_access_project(self.scope['user'], project):
-                await self.close(code=4003)
-                return
-            self.group_name = f"qa_dashboard_{project.id}"
-        else:
-            self.group_name = "qa_dashboard"
+        if not self.project_id:
+            await self.close(code=4003)
+            return
+
+        project = await _get_dashboard_project(self.project_id)
+        if project is None or not await _user_can_access_project(self.scope['user'], project):
+            await self.close(code=4003)
+            return
+        self.project_id = str(project.id)
+        self.group_name = f"qa_dashboard_{project.id}"
 
         await self.channel_layer.group_add(
             self.group_name,

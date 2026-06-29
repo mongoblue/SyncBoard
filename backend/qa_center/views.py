@@ -73,8 +73,10 @@ class RunTestView(APIView):
     def post(self, request):
         test_type = request.data.get('test_type', 'api')
         project_id = request.data.get('project_id') or request.data.get('project')
-        project = ensure_project_id_access(request.user, project_id) if project_id else None
-        scoped_project_id = str(project.id) if project else None
+        if not project_id:
+            return Response({"error": "请选择项目"}, status=status.HTTP_400_BAD_REQUEST)
+        project = ensure_project_id_access(request.user, project_id)
+        scoped_project_id = str(project.id)
         python_exec = sys.executable
 
         # ✨ 最终逻辑：统一使用 python -m 启动，确保环境一致
@@ -115,8 +117,11 @@ class RunTestView(APIView):
         return Response({"msg": f"测试已启动: {test_type}"}, status=200)
 
     def stream_command_output(self, cmd, test_type='default', project_id=None):
+        if not project_id:
+            raise ValueError('project_id is required')
+
         channel_layer = get_channel_layer()
-        group_name = f"qa_dashboard_{project_id}" if project_id else "qa_dashboard"
+        group_name = f"qa_dashboard_{project_id}"
         cwd = settings.BASE_DIR
 
         # 注入环境变量 (E2E需要)
@@ -124,6 +129,7 @@ class RunTestView(APIView):
         # 修复：优先使用环境变量，如果没有则默认为本地开发地址
         # 之前的 "http://frontend" 是硬编码的 Docker 内部地址，在非 Docker 网络下会报错
         env["E2E_BASE_URL"] = os.environ.get("E2E_BASE_URL", "http://localhost:5173")
+        env["QA_DASHBOARD_PROJECT_ID"] = str(project_id)
 
         # 修复：为 E2E 测试设置可写的临时目录（避免 Windows 权限问题）
         if test_type in ['e2e', 'regression']:
