@@ -15,18 +15,54 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.utils import timezone
 from django.http import FileResponse, HttpResponseBadRequest, Http404
 
-from .models import UiTestCase, TestResult
+from .models import UiTestCase, TestResult, TestScreenshot
 from .serializers import UiTestCaseSerializer, UiTestCaseListSerializer, UiTestCaseRunSerializer
 from .workers import runner_supervisor
 from .workers.runner_supervisor import execute_ui_case
+from room.project_access import ensure_project_id_access
 
 
 logger = logging.getLogger("qa_center.runner")
+
+
+def _playwright_temp_root():
+    return os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
+
+
+def _path_is_under(path, root):
+    abs_path = os.path.abspath(path)
+    abs_root = os.path.abspath(root)
+    try:
+        return os.path.commonpath([abs_path, abs_root]) == abs_root
+    except ValueError:
+        return False
+
+
+def _ensure_test_result_screenshot_access(user, test_result):
+    if test_result.project_id:
+        ensure_project_id_access(user, test_result.project_id)
+        return
+    if test_result.executed_by_id != user.id:
+        raise PermissionDenied('无权访问该截图')
+
+
+def _get_latest_ui_result_for_task(task_id):
+    return (
+        TestResult.objects.select_related('project', 'executed_by')
+        .filter(task_id=task_id)
+        .order_by('-started_at', '-created_at')
+        .first()
+    )
+
+
+def _open_png_response(path):
+    return FileResponse(open(path, "rb"), content_type="image/png")
 
 
 class UiTestCaseViewSet(viewsets.ModelViewSet):
@@ -290,22 +326,28 @@ def execute_ui_test_cases(case_ids):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def ui_run_screenshot(request):
-    # TODO(follow-up): 增加 TestResult 权限校验，确保 path 属于当前用户有权限的用例
     path = request.query_params.get("path", "")
+    task_id = request.query_params.get("task_id", "")
     if not path:
         return HttpResponseBadRequest("path required")
-    safe_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
+    if not task_id:
+        return HttpResponseBadRequest("task_id required")
+
+    tr = _get_latest_ui_result_for_task(task_id)
+    if tr is None:
+        raise Http404()
+    _ensure_test_result_screenshot_access(request.user, tr)
+
+    safe_root = _playwright_temp_root()
     abs_path = os.path.abspath(path)
-    try:
-        common = os.path.commonpath([abs_path, safe_root])
-    except ValueError:
+    temp_dir = os.path.abspath(tr.temp_dir_path) if tr.temp_dir_path else ''
+    if not _path_is_under(abs_path, safe_root):
         return HttpResponseBadRequest("invalid path")
-    if common != safe_root:
+    if not temp_dir or not _path_is_under(temp_dir, safe_root) or not _path_is_under(abs_path, temp_dir):
         return HttpResponseBadRequest("invalid path")
     if not os.path.exists(abs_path):
         raise Http404()
-    with open(abs_path, "rb") as f:
-        return FileResponse(f, content_type="image/png")
+    return _open_png_response(abs_path)
 
 
 @api_view(["GET"])
@@ -314,53 +356,47 @@ def ui_run_screenshot_by_index(request, task_id: str, index: int):
     """按 task_id + step_index 读取截图。
 
     优先尝试最新的 TestResult 关联的 TestScreenshot（持久化副本）；
-    若运行尚未结束，回退到 worker 的 temp_dir 中实时读取。
+    若运行尚未结束，回退到该 TestResult 的 temp_dir 中实时读取。
     """
-    # 1. 持久化副本（运行结束后父进程会清理 temp_dir）
-    try:
-        tr = TestResult.objects.filter(task_id=task_id).order_by("-started_at").first()
-        if tr is not None:
-            shot = tr.screenshots.filter(step_index=index).first()
-            if shot is None:
-                shot = tr.screenshots.filter(name=f"步骤 {index} 截图").first()
-            if shot is None:
-                shot = tr.screenshots.order_by("id").filter(name__icontains=str(index)).first()
-            if shot is not None and shot.image:
-                abs_path = os.path.join(settings.MEDIA_ROOT, shot.image.name)
-                if os.path.exists(abs_path):
-                    with open(abs_path, "rb") as f:
-                        return FileResponse(f, content_type="image/png")
-    except Exception:
-        logger.exception("读持久化截图失败: task=%s idx=%s", task_id, index)
+    tr = _get_latest_ui_result_for_task(task_id)
+    if tr is None:
+        raise Http404()
+    _ensure_test_result_screenshot_access(request.user, tr)
 
-    # 2. 实时回退：temp_dir 还在
-    safe_root = os.path.abspath(os.path.join(settings.BASE_DIR, ".playwright-temp"))
-    candidates = []
-    if os.path.isdir(safe_root):
-        for name in os.listdir(safe_root):
-            full = os.path.join(safe_root, name)
-            if not os.path.isdir(full):
-                continue
-            # 通过 task_id 关联：找最新 TestResult 残留的 temp_dir
-            # 简化：尝试匹配 screenshots/step_{index}.png
-            cand = os.path.join(full, "screenshots", f"step_{index}.png")
-            if os.path.exists(cand):
-                candidates.append(cand)
-            cand_fail = os.path.join(full, "screenshots", f"step_{index}_fail.png")
-            if os.path.exists(cand_fail):
-                candidates.append(cand_fail)
+    shot = tr.screenshots.filter(step_index=index).first()
+    if shot is not None and shot.image:
+        abs_path = os.path.abspath(os.path.join(settings.MEDIA_ROOT, shot.image.name))
+        media_root = os.path.abspath(settings.MEDIA_ROOT)
+        if _path_is_under(abs_path, media_root) and os.path.exists(abs_path):
+            return _open_png_response(abs_path)
 
-    for cand in candidates:
-        abs_path = os.path.abspath(cand)
-        try:
-            if os.path.commonpath([abs_path, safe_root]) != safe_root:
-                continue
-        except ValueError:
-            continue
-        try:
-            with open(abs_path, "rb") as f:
-                return FileResponse(f, content_type="image/png")
-        except OSError:
-            continue
+    safe_root = _playwright_temp_root()
+    if tr.temp_dir_path:
+        temp_dir = os.path.abspath(tr.temp_dir_path)
+        if _path_is_under(temp_dir, safe_root):
+            for filename in (f"step_{index}.png", f"step_{index}_fail.png"):
+                candidate = os.path.join(temp_dir, "screenshots", filename)
+                if _path_is_under(candidate, temp_dir) and os.path.exists(candidate):
+                    return _open_png_response(candidate)
 
     raise Http404()
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def test_screenshot_media(request, path: str):
+    image_name = os.path.normpath(os.path.join('test_screenshots', path)).replace('\\', '/')
+    if image_name.startswith('../') or image_name == '..':
+        raise Http404()
+
+    screenshot = get_object_or_404(
+        TestScreenshot.objects.select_related('test_result', 'test_result__project', 'test_result__executed_by'),
+        image=image_name,
+    )
+    _ensure_test_result_screenshot_access(request.user, screenshot.test_result)
+
+    abs_path = os.path.abspath(os.path.join(settings.MEDIA_ROOT, screenshot.image.name))
+    media_root = os.path.abspath(settings.MEDIA_ROOT)
+    if not _path_is_under(abs_path, media_root) or not os.path.exists(abs_path):
+        raise Http404()
+    return _open_png_response(abs_path)

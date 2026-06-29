@@ -17,6 +17,8 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.static import serve
 from django.http import JsonResponse
+from qa_center.views_ui_test import test_screenshot_media
+
 
 def health_check(request):
     return JsonResponse({'status': 'ok'})
@@ -28,6 +30,7 @@ urlpatterns = [
     path('api/qa/', include('qa_center.urls')),
     path('api/system/', include('system.urls')),
     path('api/', include('bug_tracker.urls')),
+    re_path(r'^media/test_screenshots/(?P<path>.*)$', test_screenshot_media),
     # 强制开启 media 文件服务，解决 uvicorn 下图片无法加载的问题
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ]

@@ -1,5 +1,7 @@
 import pytest
 from django.contrib.auth.models import User
+from django.core.files.base import ContentFile
+from django.test import override_settings
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -487,6 +489,107 @@ class TestProjectIsolationRegressions:
             error_rate=10.0,
         )
         return result, ui_case, api_case, api_result, perf_case, perf_result
+
+    def _create_ui_screenshot_fixture(self):
+        result, ui_case, *_ = self._create_result_fixture()
+        result.task_id = 'secret-ui-task'
+        result.temp_dir_path = ''
+        result.save(update_fields=['task_id', 'temp_dir_path'])
+        from qa_center.models import TestScreenshot
+        screenshot = TestScreenshot.objects.create(
+            test_result=result,
+            name='Secret UI Screenshot',
+            step_index=0,
+        )
+        screenshot.image.save('secret-ui.png', ContentFile(b'secret screenshot'), save=True)
+        return result, ui_case, screenshot
+
+    def test_ui_run_screenshot_by_index_rejects_outsider(self, client, tmp_path):
+        with override_settings(MEDIA_ROOT=tmp_path):
+            result, _, _ = self._create_ui_screenshot_fixture()
+            client.force_login(self.outsider)
+
+            resp = client.get(f'/api/qa/ui-run/{result.task_id}/screenshot/0/')
+
+            assert resp.status_code == 403
+
+    def test_ui_run_screenshot_by_index_member_can_access(self, client, tmp_path):
+        with override_settings(MEDIA_ROOT=tmp_path):
+            result, _, _ = self._create_ui_screenshot_fixture()
+            member = User.objects.create_user(username='iso_screenshot_member', password='pass')
+            self.project.members.add(member)
+            client.force_login(member)
+
+            resp = client.get(f'/api/qa/ui-run/{result.task_id}/screenshot/0/')
+
+            assert resp.status_code == 200
+            assert b''.join(resp.streaming_content) == b'secret screenshot'
+
+    def test_ui_run_screenshot_unknown_task_does_not_scan_global_temp_dir(self, client, tmp_path, settings):
+        safe_root = tmp_path / '.playwright-temp'
+        screenshot_dir = safe_root / 'foreign-run' / 'screenshots'
+        screenshot_dir.mkdir(parents=True)
+        (screenshot_dir / 'step_0.png').write_bytes(b'foreign temp screenshot')
+        settings.BASE_DIR = tmp_path
+        client.force_login(self.owner)
+
+        resp = client.get('/api/qa/ui-run/unknown-task/screenshot/0/')
+
+        assert resp.status_code == 404
+
+    def test_ui_run_raw_screenshot_requires_task_binding(self, client, tmp_path, settings):
+        safe_root = tmp_path / '.playwright-temp'
+        screenshot_dir = safe_root / 'secret-run' / 'screenshots'
+        screenshot_dir.mkdir(parents=True)
+        screenshot_path = screenshot_dir / 'step_0.png'
+        screenshot_path.write_bytes(b'secret temp screenshot')
+        settings.BASE_DIR = tmp_path
+        client.force_login(self.owner)
+
+        resp = client.get(f'/api/qa/ui-run/screenshot/?path={screenshot_path}')
+
+        assert resp.status_code == 400
+
+    def test_ui_run_raw_screenshot_rejects_outsider_bound_task(self, client, tmp_path, settings):
+        safe_root = tmp_path / '.playwright-temp'
+        temp_dir = safe_root / 'secret-run'
+        screenshot_dir = temp_dir / 'screenshots'
+        screenshot_dir.mkdir(parents=True)
+        screenshot_path = screenshot_dir / 'step_0.png'
+        screenshot_path.write_bytes(b'secret temp screenshot')
+        settings.BASE_DIR = tmp_path
+        result, _, _ = self._create_ui_screenshot_fixture()
+        result.temp_dir_path = str(temp_dir)
+        result.save(update_fields=['temp_dir_path'])
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/ui-run/screenshot/?task_id={result.task_id}&path={screenshot_path}')
+
+        assert resp.status_code == 403
+
+    def test_test_screenshot_media_rejects_outsider_and_anonymous(self, client, tmp_path):
+        with override_settings(MEDIA_ROOT=tmp_path):
+            _, _, screenshot = self._create_ui_screenshot_fixture()
+            url = f'/media/{screenshot.image.name}'
+
+            anonymous = client.get(url)
+            client.force_login(self.outsider)
+            outsider = client.get(url)
+
+            assert anonymous.status_code in (401, 403)
+            assert outsider.status_code == 403
+
+    def test_test_screenshot_media_member_can_access(self, client, tmp_path):
+        with override_settings(MEDIA_ROOT=tmp_path):
+            _, _, screenshot = self._create_ui_screenshot_fixture()
+            member = User.objects.create_user(username='iso_media_screenshot_member', password='pass')
+            self.project.members.add(member)
+            client.force_login(member)
+
+            resp = client.get(f'/media/{screenshot.image.name}')
+
+            assert resp.status_code == 200
+            assert b''.join(resp.streaming_content) == b'secret screenshot'
 
     def test_test_result_list_rejects_outsider_project_filter(self, client):
         self._create_result_fixture()
