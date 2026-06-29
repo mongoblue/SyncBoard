@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 
 from room.project_access import ensure_project_id_access, project_access_q
 from .models import TestResult, ApiTestCase, UiTestCase, TestTask, CiCdConfig, PipelineRun, PerformanceTestResult
@@ -45,6 +46,24 @@ def _apply_project_filter(request, queryset, project_path='project'):
         return queryset
     ensure_project_id_access(request.user, project_id)
     return queryset.filter(**{f'{project_path}_id': project_id})
+
+
+def _accessible_test_tasks(user):
+    return TestTask.objects.filter(project_access_q('project', user)).distinct()
+
+
+def _get_accessible_test_task(user, task_id):
+    try:
+        task = TestTask.objects.select_related(
+            'project', 'created_by', 'last_result'
+        ).get(id=task_id)
+    except TestTask.DoesNotExist:
+        return None
+
+    if not task.project_id:
+        raise PermissionDenied('无权访问该测试任务')
+    ensure_project_id_access(user, task.project_id)
+    return task
 
 
 def _send_notification(project, ntype, message):
@@ -297,19 +316,21 @@ class TestTaskView(APIView):
     def get(self, request, task_id=None):
         """获取测试任务列表或单个任务详情"""
         if task_id:
-            try:
-                task = TestTask.objects.get(id=task_id)
-                serializer = TestTaskDetailSerializer(task)
-                return Response(serializer.data)
-            except TestTask.DoesNotExist:
+            task = _get_accessible_test_task(request.user, task_id)
+            if task is None:
                 return Response(
                     {'error': '任务不存在'},
                     status=status.HTTP_404_NOT_FOUND
                 )
+            serializer = TestTaskDetailSerializer(task)
+            return Response(serializer.data)
 
         # 支持筛选
-        queryset = TestTask.objects.select_related(
-            'project', 'created_by', 'last_result'
+        queryset = _apply_project_filter(
+            request,
+            _accessible_test_tasks(request.user).select_related(
+                'project', 'created_by', 'last_result'
+            ),
         ).order_by('-created_at')
 
         task_type = request.query_params.get('type')
@@ -327,6 +348,9 @@ class TestTaskView(APIView):
         """创建测试任务"""
         serializer = TestTaskCreateSerializer(data=request.data, context={'request': request})
         if serializer.is_valid():
+            project = serializer.validated_data.get('project')
+            if project:
+                ensure_project_id_access(request.user, project.id)
             task = serializer.save()
             return Response(
                 TestTaskListSerializer(task).data,
@@ -336,9 +360,8 @@ class TestTaskView(APIView):
 
     def put(self, request, task_id):
         """更新测试任务"""
-        try:
-            task = TestTask.objects.get(id=task_id)
-        except TestTask.DoesNotExist:
+        task = _get_accessible_test_task(request.user, task_id)
+        if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
@@ -358,9 +381,8 @@ class TestTaskView(APIView):
 
     def delete(self, request, task_id):
         """删除测试任务"""
-        try:
-            task = TestTask.objects.get(id=task_id)
-        except TestTask.DoesNotExist:
+        task = _get_accessible_test_task(request.user, task_id)
+        if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
@@ -384,9 +406,8 @@ class TestTaskExecuteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, task_id):
-        try:
-            task = TestTask.objects.get(id=task_id)
-        except TestTask.DoesNotExist:
+        task = _get_accessible_test_task(request.user, task_id)
+        if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
@@ -558,9 +579,8 @@ class TestTaskStatusView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, task_id):
-        try:
-            task = TestTask.objects.get(id=task_id)
-        except TestTask.DoesNotExist:
+        task = _get_accessible_test_task(request.user, task_id)
+        if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
@@ -592,9 +612,8 @@ class TestTaskHistoryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, task_id):
-        try:
-            task = TestTask.objects.get(id=task_id)
-        except TestTask.DoesNotExist:
+        task = _get_accessible_test_task(request.user, task_id)
+        if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
@@ -603,7 +622,9 @@ class TestTaskHistoryView(APIView):
         # 获取该任务关联的所有测试结果
         from .models import TestResult
         results = TestResult.objects.filter(
-            name__startswith=task.name
+            project_id=task.project_id,
+            source='devops',
+            name__startswith=task.name,
         ).order_by('-created_at')[:20]
 
         history = []

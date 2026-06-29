@@ -15,6 +15,7 @@ from qa_center.models import (
     TestResult as QaTestResult,
     TestRun as QaTestRun,
     TestRunPlan as QaTestRunPlan,
+    TestTask as QaTestTask,
     UiTestCase,
 )
 from room.models import Column, Project
@@ -738,3 +739,119 @@ class TestProjectIsolationRegressions:
         assert foreign_result.id not in returned_ids
         assert all(str(item['project']) == str(self.project.id) for item in recent.data)
         assert api_case.project_id == self.project.id
+
+    def _create_devops_task_fixture(self):
+        task = QaTestTask.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret DevOps Task',
+            test_type='api',
+            trigger_type='manual',
+            test_config={'api_cases': [], 'ui_cases': []},
+            status='idle',
+        )
+        history = QaTestResult.objects.create(
+            project=self.project,
+            test_type='api',
+            name='Secret DevOps Task - 执行 #1',
+            source='devops',
+            status='passed',
+            executed_by=self.owner,
+            test_params={'task': 'history'},
+        )
+        return task, history
+
+    def test_devops_task_list_without_project_does_not_leak_foreign_tasks(self, client):
+        task, _ = self._create_devops_task_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/devops/tasks/')
+
+        assert resp.status_code == 200
+        assert task.id not in [item['id'] for item in resp.data]
+        assert task.name not in [item['name'] for item in resp.data]
+
+    def test_devops_task_detail_rejects_outsider(self, client):
+        task, _ = self._create_devops_task_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/tasks/{task.id}/')
+
+        assert resp.status_code == 403
+
+    def test_devops_task_create_rejects_outsider_project(self, client):
+        client.force_login(self.outsider)
+
+        resp = client.post(
+            '/api/qa/devops/tasks/',
+            data={
+                'project': self.project.id,
+                'name': 'Injected DevOps Task',
+                'test_type': 'api',
+                'trigger_type': 'manual',
+                'test_config': {'api_cases': [], 'ui_cases': []},
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 403
+        assert not QaTestTask.objects.filter(name='Injected DevOps Task').exists()
+
+    def test_devops_task_actions_reject_outsider_before_side_effects(self, client):
+        task, history = self._create_devops_task_fixture()
+        initial_result_count = QaTestResult.objects.count()
+        client.force_login(self.outsider)
+
+        status_resp = client.get(f'/api/qa/devops/tasks/{task.id}/status/')
+        history_resp = client.get(f'/api/qa/devops/tasks/{task.id}/history/')
+        update_resp = client.put(
+            f'/api/qa/devops/tasks/{task.id}/',
+            data={'name': 'Tampered DevOps Task'},
+            content_type='application/json',
+        )
+        with patch('qa_center.views_devops.threading.Thread') as thread_cls:
+            execute_resp = client.post(f'/api/qa/devops/tasks/{task.id}/execute/')
+        delete_resp = client.delete(f'/api/qa/devops/tasks/{task.id}/')
+
+        assert status_resp.status_code == 403
+        assert history_resp.status_code == 403
+        assert update_resp.status_code == 403
+        assert execute_resp.status_code == 403
+        assert delete_resp.status_code == 403
+        thread_cls.assert_not_called()
+        task.refresh_from_db()
+        assert task.name == 'Secret DevOps Task'
+        assert task.status == 'idle'
+        assert task.execution_count == 0
+        assert QaTestResult.objects.count() == initial_result_count
+        assert QaTestResult.objects.filter(id=history.id).exists()
+
+    def test_devops_task_member_can_access_project_task(self, client):
+        task, history = self._create_devops_task_fixture()
+        member = User.objects.create_user(username='iso_devops_task_member', password='pass')
+        self.project.members.add(member)
+        other_owner = User.objects.create_user(username='iso_devops_task_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other DevOps Task Project', owner=other_owner)
+        foreign_task = QaTestTask.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Other DevOps Task',
+            test_type='api',
+            trigger_type='manual',
+            test_config={},
+        )
+        client.force_login(member)
+
+        list_resp = client.get('/api/qa/devops/tasks/')
+        detail_resp = client.get(f'/api/qa/devops/tasks/{task.id}/')
+        status_resp = client.get(f'/api/qa/devops/tasks/{task.id}/status/')
+        history_resp = client.get(f'/api/qa/devops/tasks/{task.id}/history/')
+
+        assert list_resp.status_code == 200
+        returned_ids = [item['id'] for item in list_resp.data]
+        assert task.id in returned_ids
+        assert foreign_task.id not in returned_ids
+        assert detail_resp.status_code == 200
+        assert status_resp.status_code == 200
+        assert history_resp.status_code == 200
+        assert history.id in [item['id'] for item in history_resp.data]
