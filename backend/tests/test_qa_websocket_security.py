@@ -281,6 +281,65 @@ async def test_recorder_rejects_anonymous_user():
 
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.anyio
+async def test_project_recorder_rejects_outsider():
+    owner = await _create_user('qa-recorder-owner')
+    outsider = await _create_user('qa-recorder-outsider')
+    project = await _create_project(owner, name='QA Recorder Project')
+
+    communicator = await _communicator(f'/ws/qa/recorder/{project.id}/', outsider)
+    connected, code = await communicator.connect()
+
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_recorder_accepts_project_member():
+    owner = await _create_user('qa-recorder-owner-member')
+    member = await _create_user('qa-recorder-member')
+    project = await _create_project(owner, member=member, name='QA Recorder Member Project')
+
+    communicator = await _communicator(f'/ws/qa/recorder/{project.id}/', member)
+    connected, _ = await communicator.connect()
+
+    assert connected is True
+    message = await communicator.receive_json_from()
+    assert message['type'] == 'connected'
+    assert message['project_id'] == str(project.id)
+    await communicator.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_recorder_accepts_project_owner():
+    owner = await _create_user('qa-recorder-owner-access')
+    project = await _create_project(owner, name='QA Recorder Owner Project')
+
+    communicator = await _communicator(f'/ws/qa/recorder/{project.id}/', owner)
+    connected, _ = await communicator.connect()
+
+    assert connected is True
+    message = await communicator.receive_json_from()
+    assert message['type'] == 'connected'
+    assert message['project_id'] == str(project.id)
+    await communicator.disconnect()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
+async def test_project_recorder_rejects_invalid_project_id():
+    user = await _create_user('qa-recorder-invalid')
+
+    communicator = await _communicator('/ws/qa/recorder/abc/', user)
+    connected, code = await communicator.connect()
+
+    assert connected is False
+    assert code == 4003
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.anyio
 async def test_test_run_progress_rejects_anonymous_user():
     owner = await _create_user('run-anonymous-owner')
     project = await _create_project(owner, name='Run Anonymous Project')

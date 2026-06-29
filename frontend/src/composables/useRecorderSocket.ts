@@ -10,7 +10,7 @@
  * 被 UiCaseDetail.vue 中的 RecorderPanel.vue 使用。
  */
 import { ref, onUnmounted } from 'vue'
-import { getWsHost } from './wsHost'
+import { buildWsUrl } from './wsHost'
 
 export interface RecorderEvent {
   type: string
@@ -20,18 +20,24 @@ export interface RecorderEvent {
   success?: boolean
 }
 
-export function useRecorderSocket() {
+export interface RecorderSocketOptions {
+  projectId?: string | number | null
+}
+
+export function useRecorderSocket(options: RecorderSocketOptions = {}) {
   const events = ref<RecorderEvent[]>([])
   const status = ref<'idle' | 'connecting' | 'recording' | 'paused' | 'stopped' | 'error'>('idle')
   const lastError = ref<{ code: string; message: string } | null>(null)
   const lastStepRun = ref<RecorderEvent | null>(null)
   const ws = ref<WebSocket | null>(null)
+  const projectId = options.projectId == null || options.projectId === '' ? '' : String(options.projectId)
 
   function open() {
     if (ws.value) return
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const url = `${proto}://${getWsHost()}/ws/qa/recorder/`
-    const sock = new WebSocket(url)
+    const path = projectId
+      ? `/ws/qa/recorder/${encodeURIComponent(projectId)}/`
+      : '/ws/qa/recorder/'
+    const sock = new WebSocket(buildWsUrl(path))
     ws.value = sock
     status.value = 'connecting'
     sock.onmessage = (e) => {
@@ -58,14 +64,18 @@ export function useRecorderSocket() {
     ws.value?.send(JSON.stringify(msg))
   }
 
+  function withProject(payload: Record<string, any>) {
+    return projectId ? { ...payload, project_id: projectId } : payload
+  }
+
   function start(url: string, viewport?: { width: number; height: number }) {
     open()
-    setTimeout(() => send({ command: 'start_recording', url, viewport }), 100)
+    setTimeout(() => send(withProject({ command: 'start_recording', url, viewport })), 100)
   }
   function stop() { send({ command: 'stop_recording' }) }
   function pause() { send({ command: 'pause_recording' }) }
   function resume() { send({ command: 'resume_recording' }) }
-  function runStep(step: any) { send({ command: 'run_step', step }) }
+  function runStep(step: any) { send(withProject({ command: 'run_step', step })) }
   function close() {
     try { send({ command: 'stop_recording' }) } catch { /* ignore */ }
     ws.value?.close()

@@ -138,6 +138,14 @@ class RecorderConsumer(AsyncWebsocketConsumer):
         if await _close_if_anonymous(self):
             return
 
+        self.project_id = self.scope.get('url_route', {}).get('kwargs', {}).get('project_id')
+        if self.project_id:
+            project = await _get_dashboard_project(self.project_id)
+            if project is None or not await _user_can_access_project(self.scope['user'], project):
+                await self.close(code=4003)
+                return
+            self.project_id = str(project.id)
+
         # 生成简单的组名（channel_name 可能包含特殊字符）
         safe_name = re.sub(r'[^a-zA-Z0-9\-_]', '', self.channel_name[:50])
         self.group_name = f"recorder_{safe_name}"
@@ -149,10 +157,13 @@ class RecorderConsumer(AsyncWebsocketConsumer):
         )
         await self.accept()
 
-        await self.send(text_data=json.dumps({
+        message = {
             'type': 'connected',
             'message': '录制器 WebSocket 已连接'
-        }))
+        }
+        if self.project_id:
+            message['project_id'] = self.project_id
+        await self.send(text_data=json.dumps(message))
 
     async def disconnect(self, close_code):
         session = getattr(self, 'session', None)

@@ -75,11 +75,14 @@ interface PendingAssert {
   selector: string
 }
 
-const props = defineProps<{ defaultUrl?: string }>()
+const props = defineProps<{
+  defaultUrl?: string
+  projectId?: string | number | null
+}>()
 const emit = defineEmits(['append-step', 'replace-step', 'replace-all', 'append-all', 'panel-stopped'])
 
 const urlInput = ref(props.defaultUrl || '')
-const { events, status, lastError, start, stop, pause, resume, runStep } = useRecorderSocket()
+const { events, status, lastError, start, stop, pause, resume, runStep } = useRecorderSocket({ projectId: props.projectId })
 
 const recording = computed(() => status.value === 'recording' || status.value === 'paused')
 const statusTagType = computed(() => ({

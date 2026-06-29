@@ -1,10 +1,11 @@
 """
-QA Center WebSocket 路由 —— 5 条 WS。
+QA Center WebSocket 路由。
 
 路径列表：
   ws/qa/dashboard/              QAConsumer               兼容旧版全局测试进度通道（仅认证）
   ws/qa/dashboard/<project_id>/ QAConsumer               项目作用域测试计划执行进度
-  ws/qa/recorder/               RecorderConsumer          UI 录制器（双向通信）
+  ws/qa/recorder/<project_id>/  RecorderConsumer          项目作用域 UI 录制器（双向通信）
+  ws/qa/recorder/               RecorderConsumer          兼容旧版 UI 录制器（仅认证）
   ws/qa/performance/<id>/       PerformanceTestConsumer   性能测试实时指标
   ws/qa/test-run/<id>/          TestRunProgressConsumer   旧版测试运行进度
   ws/qa/run/<task_id>/          UiRunConsumer             UI 自动化执行进度
@@ -19,6 +20,7 @@ from . import consumers
 websocket_urlpatterns = [
     re_path(r'ws/qa/dashboard/(?P<project_id>[-\w]+)/$', consumers.QAConsumer.as_asgi()),
     re_path(r'ws/qa/dashboard/$', consumers.QAConsumer.as_asgi()),
+    re_path(r'ws/qa/recorder/(?P<project_id>[-\w]+)/$', consumers.RecorderConsumer.as_asgi()),
     re_path(r'ws/qa/recorder/$', consumers.RecorderConsumer.as_asgi()),
     re_path(r'ws/qa/performance/(?P<execution_id>\d+)/$', consumers.PerformanceTestConsumer.as_asgi()),
     re_path(r'ws/qa/test-run/(?P<run_id>\w+)/$', consumers.TestRunProgressConsumer.as_asgi()),

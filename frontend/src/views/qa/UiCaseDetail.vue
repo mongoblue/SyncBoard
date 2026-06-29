@@ -40,6 +40,7 @@ UI 用例编辑 + 录制面板。
     <RecorderPanel
       v-if="isRecording"
       :default-url="form.url"
+      :project-id="effectiveProjectId"
       @panel-stopped="isRecording = false"
       @append-step="onAppendStep"
       @replace-step="onReplaceStep"
@@ -354,12 +355,17 @@ const formRef = ref();
 const isEdit = computed(() => !!route.params.id);
 const caseId = computed(() => route.params.id as string);
 
+const routeProjectId = computed(() => String(route.params.projectId || ''));
+const queryProjectId = computed(() => String(route.query.project || ''));
+
 const form = ref({
   name: '',
-  project: route.query.project as string || '',
+  project: routeProjectId.value || queryProjectId.value,
   url: '',
   steps: [] as any[]
 });
+
+const effectiveProjectId = computed(() => routeProjectId.value || String(form.value.project || queryProjectId.value || ''));
 
 const projects = ref<any[]>([]);
 const saving = ref(false);
@@ -668,6 +674,10 @@ onMounted(async () => {
 const toggleRecording = async () => {
   if (!form.value.url) {
     ElMessage.warning('请先输入起始 URL');
+    return;
+  }
+  if (!effectiveProjectId.value) {
+    ElMessage.warning('请先选择项目');
     return;
   }
   isRecording.value = !isRecording.value;
