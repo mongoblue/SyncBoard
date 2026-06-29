@@ -7,6 +7,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate, login, logout
 from backend.throttles import LoginRateThrottle
 from ..serializers import UsersSerializer
@@ -18,6 +19,7 @@ class LoginView(APIView):
 
     POST /api/auth/login/
     """
+    permission_classes = [AllowAny]
     throttle_classes = [LoginRateThrottle]
 
     def post(self, request):
@@ -42,6 +44,7 @@ class LogoutView(APIView):
 
     POST /api/auth/logout/
     """
+    permission_classes = [AllowAny]
 
     def post(self, request):
         logout(request)
@@ -54,6 +57,7 @@ class CurrentUserView(APIView):
 
     GET /api/auth/me/
     """
+    permission_classes = [AllowAny]
 
     def get(self, request):
         if request.user.is_authenticated:

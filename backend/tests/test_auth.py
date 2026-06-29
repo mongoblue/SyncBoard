@@ -1,9 +1,15 @@
 """认证模块测试"""
 import pytest
+from django.conf import settings
 
 
 @pytest.mark.django_db
 class TestAuth:
+    def test_default_drf_permission_requires_authentication(self):
+        assert settings.REST_FRAMEWORK['DEFAULT_PERMISSION_CLASSES'] == (
+            'rest_framework.permissions.IsAuthenticated',
+        )
+
     def test_login_success(self, client, test_user, test_password):
         response = client.post('/api/auth/login/', {
             'username': test_user.username,
@@ -24,6 +30,11 @@ class TestAuth:
         assert response.status_code == 200
         assert response.data['detail'] == '注销成功'
 
+    def test_logout_unauthenticated_is_idempotent(self, client):
+        response = client.post('/api/auth/logout/')
+        assert response.status_code == 200
+        assert response.data['detail'] == '注销成功'
+
     def test_current_user_authenticated(self, auth_client, test_user):
         response = auth_client.get('/api/auth/me/')
         assert response.status_code == 200
@@ -32,3 +43,4 @@ class TestAuth:
     def test_current_user_unauthenticated(self, client):
         response = client.get('/api/auth/me/')
         assert response.status_code == 401
+        assert response.data['detail'] == '未登录'
