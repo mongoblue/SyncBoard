@@ -652,6 +652,59 @@ class TestProjectIsolationRegressions:
         assert run_resp.data['success'] is True
         assert QaTestResult.objects.count() == initial_result_count + 1
 
+    def test_ui_run_temp_requires_project_before_side_effects(self, client):
+        client.force_login(self.owner)
+
+        with patch('qa_center.views_ui_test.execute_ui_case') as execute_ui_case:
+            resp = client.post(
+                '/api/qa/ui-cases/run_temp/',
+                data={
+                    'url': '/secret-ui-isolation/',
+                    'steps': [{'action': 'click', 'selector': '#secret-ui'}],
+                },
+                content_type='application/json',
+            )
+
+        assert resp.status_code == 400
+        execute_ui_case.assert_not_called()
+
+    def test_ui_run_temp_rejects_outsider_project_before_side_effects(self, client):
+        client.force_login(self.outsider)
+
+        with patch('qa_center.views_ui_test.execute_ui_case') as execute_ui_case:
+            resp = client.post(
+                '/api/qa/ui-cases/run_temp/',
+                data={
+                    'project': self.project.id,
+                    'url': '/secret-ui-isolation/',
+                    'steps': [{'action': 'click', 'selector': '#secret-ui'}],
+                },
+                content_type='application/json',
+            )
+
+        assert resp.status_code == 403
+        execute_ui_case.assert_not_called()
+
+    def test_ui_run_temp_allows_project_member(self, client):
+        member = User.objects.create_user(username='iso_ui_temp_member', password='pass')
+        self.project.members.add(member)
+        client.force_login(member)
+
+        with patch('qa_center.views_ui_test.execute_ui_case', return_value={'success': True, 'summary': {}}) as execute_ui_case:
+            resp = client.post(
+                '/api/qa/ui-cases/run_temp/',
+                data={
+                    'project': self.project.id,
+                    'url': '/secret-ui-isolation/',
+                    'steps': [{'action': 'click', 'selector': '#secret-ui'}],
+                },
+                content_type='application/json',
+            )
+
+        assert resp.status_code == 200
+        assert resp.data['success'] is True
+        execute_ui_case.assert_called_once()
+
     def test_ui_run_screenshot_by_index_rejects_outsider(self, client, tmp_path):
         with override_settings(MEDIA_ROOT=tmp_path):
             result, _, _ = self._create_ui_screenshot_fixture()

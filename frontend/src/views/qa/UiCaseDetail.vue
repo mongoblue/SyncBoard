@@ -622,6 +622,7 @@ const handleRunTemp = async () => {
 
   try {
     const res = await service.post('/qa/ui-cases/run_temp/', {
+      project: form.value.project,
       url: form.value.url,
       steps: form.value.steps
     }, {

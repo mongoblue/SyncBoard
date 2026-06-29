@@ -305,8 +305,12 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
     def run_temp(self, request):
         url = request.data.get("url", "")
         steps = request.data.get("steps", [])
+        project_id = request.data.get("project") or request.data.get("project_id")
         if not url:
             return Response({"error": "请提供起始 URL"}, status=status.HTTP_400_BAD_REQUEST)
+        if not project_id:
+            return Response({"error": "请选择项目"}, status=status.HTTP_400_BAD_REQUEST)
+        ensure_project_id_access(request.user, project_id)
         case_data = {"case_id": None, "url": url, "steps": steps}
         events: list = []
         result = execute_ui_case(case_data, on_event=events.append)
