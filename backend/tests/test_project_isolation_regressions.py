@@ -615,3 +615,126 @@ class TestProjectIsolationRegressions:
         assert result_detail.status_code == 200
         assert api_detail.status_code == 200
         assert perf_detail.status_code == 200
+
+    def _create_devops_dashboard_fixture(self):
+        api_case = ApiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret DevOps API Case',
+            url='/api/devops-secret/',
+            method='GET',
+            expected_status=200,
+        )
+        ui_case = UiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Secret DevOps UI Case',
+            url='/devops-secret/',
+            steps=[{'action': 'click', 'selector': '#secret'}],
+        )
+        passed_result = QaTestResult.objects.create(
+            project=self.project,
+            api_test_case=api_case,
+            test_type='api',
+            name='Secret DevOps Passed Result',
+            status='passed',
+            executed_by=self.owner,
+            response_time_ms=45,
+        )
+        failed_result = QaTestResult.objects.create(
+            project=self.project,
+            ui_test_case=ui_case,
+            test_type='ui',
+            name='Secret DevOps Failed Result',
+            status='failed',
+            executed_by=self.owner,
+        )
+        return api_case, ui_case, passed_result, failed_result
+
+    def test_devops_stats_rejects_outsider_project_filter(self, client):
+        self._create_devops_dashboard_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/stats/?project_id={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_devops_stats_without_project_does_not_count_foreign_data(self, client):
+        self._create_devops_dashboard_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/devops/stats/')
+
+        assert resp.status_code == 200
+        assert resp.data['overview']['total_cases'] == 0
+        assert resp.data['overview']['api_cases'] == 0
+        assert resp.data['overview']['ui_cases'] == 0
+        assert resp.data['overview']['total_executions'] == 0
+        assert resp.data['overview']['today_executions'] == 0
+        assert resp.data['status_count']['passed'] == 0
+        assert resp.data['status_count']['failed'] == 0
+        assert resp.data['status_count']['error'] == 0
+        assert all(day['total'] == 0 for day in resp.data['daily_trend'])
+
+    def test_devops_recent_executions_rejects_outsider_project_filter(self, client):
+        self._create_devops_dashboard_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get(f'/api/qa/devops/recent-executions/?project_id={self.project.id}')
+
+        assert resp.status_code == 403
+
+    def test_devops_recent_executions_without_project_does_not_leak_foreign_results(self, client):
+        _, _, passed_result, failed_result = self._create_devops_dashboard_fixture()
+        client.force_login(self.outsider)
+
+        resp = client.get('/api/qa/devops/recent-executions/')
+
+        assert resp.status_code == 200
+        returned_ids = [item['id'] for item in resp.data]
+        returned_names = [item['name'] for item in resp.data]
+        assert passed_result.id not in returned_ids
+        assert failed_result.id not in returned_ids
+        assert passed_result.name not in returned_names
+        assert failed_result.name not in returned_names
+
+    def test_devops_dashboard_member_sees_only_accessible_project_data(self, client):
+        api_case, _, passed_result, _ = self._create_devops_dashboard_fixture()
+        member = User.objects.create_user(username='iso_devops_member', password='pass')
+        self.project.members.add(member)
+        other_owner = User.objects.create_user(username='iso_devops_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other DevOps Project', owner=other_owner)
+        other_case = ApiTestCase.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Other DevOps API Case',
+            url='/api/other-devops/',
+            method='GET',
+            expected_status=200,
+        )
+        foreign_result = QaTestResult.objects.create(
+            project=other_project,
+            api_test_case=other_case,
+            test_type='api',
+            name='Other DevOps Result',
+            status='failed',
+            executed_by=other_owner,
+        )
+        client.force_login(member)
+
+        stats = client.get(f'/api/qa/devops/stats/?project_id={self.project.id}')
+        recent = client.get(f'/api/qa/devops/recent-executions/?project_id={self.project.id}')
+
+        assert stats.status_code == 200
+        assert stats.data['overview']['total_cases'] == 2
+        assert stats.data['overview']['api_cases'] == 1
+        assert stats.data['overview']['ui_cases'] == 1
+        assert stats.data['overview']['total_executions'] == 2
+        assert stats.data['status_count']['passed'] == 1
+        assert stats.data['status_count']['failed'] == 1
+        assert recent.status_code == 200
+        returned_ids = [item['id'] for item in recent.data]
+        assert passed_result.id in returned_ids
+        assert foreign_result.id not in returned_ids
+        assert all(str(item['project']) == str(self.project.id) for item in recent.data)
+        assert api_case.project_id == self.project.id

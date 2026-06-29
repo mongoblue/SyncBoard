@@ -15,6 +15,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 
+from room.project_access import ensure_project_id_access, project_access_q
 from .models import TestResult, ApiTestCase, UiTestCase, TestTask, CiCdConfig, PipelineRun, PerformanceTestResult
 from .serializers import (
     TestResultListSerializer,
@@ -25,6 +26,25 @@ from .serializers import (
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _get_requested_project_id(request):
+    return request.query_params.get('project_id') or request.query_params.get('project')
+
+
+def _accessible_test_results(user):
+    return TestResult.objects.filter(
+        project_access_q('project', user) |
+        Q(project__isnull=True, executed_by=user)
+    ).distinct()
+
+
+def _apply_project_filter(request, queryset, project_path='project'):
+    project_id = _get_requested_project_id(request)
+    if not project_id:
+        return queryset
+    ensure_project_id_access(request.user, project_id)
+    return queryset.filter(**{f'{project_path}_id': project_id})
 
 
 def _send_notification(project, ntype, message):
@@ -70,13 +90,26 @@ class DashboardStatsView(APIView):
         days = int(request.query_params.get('days', 7))
         start_date = timezone.now() - timedelta(days=days)
 
+        api_cases = _apply_project_filter(
+            request,
+            ApiTestCase.objects.filter(project_access_q('project', request.user)).distinct(),
+        )
+        ui_cases = _apply_project_filter(
+            request,
+            UiTestCase.objects.filter(project_access_q('project', request.user)).distinct(),
+        )
+        results_queryset = _apply_project_filter(
+            request,
+            _accessible_test_results(request.user),
+        )
+
         # 基础统计
-        total_cases = ApiTestCase.objects.count() + UiTestCase.objects.count()
-        api_cases_count = ApiTestCase.objects.count()
-        ui_cases_count = UiTestCase.objects.count()
+        api_cases_count = api_cases.count()
+        ui_cases_count = ui_cases.count()
+        total_cases = api_cases_count + ui_cases_count
 
         # 测试结果统计
-        recent_results = TestResult.objects.filter(created_at__gte=start_date)
+        recent_results = results_queryset.filter(created_at__gte=start_date)
         total_executions = recent_results.count()
         passed_count = recent_results.filter(status='passed').count()
         failed_count = recent_results.filter(status='failed').count()
@@ -89,7 +122,7 @@ class DashboardStatsView(APIView):
 
         # 今日执行数
         today = timezone.now().date()
-        today_executions = TestResult.objects.filter(
+        today_executions = results_queryset.filter(
             created_at__date=today
         ).count()
 
@@ -103,7 +136,7 @@ class DashboardStatsView(APIView):
         daily_stats = []
         for i in range(days):
             date = (timezone.now() - timedelta(days=i)).date()
-            day_results = TestResult.objects.filter(created_at__date=date)
+            day_results = results_queryset.filter(created_at__date=date)
             daily_stats.append({
                 'date': date.isoformat(),
                 'total': day_results.count(),
@@ -150,8 +183,11 @@ class RecentExecutionsView(APIView):
         limit = int(request.query_params.get('limit', 10))
         test_type = request.query_params.get('test_type')
 
-        queryset = TestResult.objects.select_related(
-            'project', 'executed_by', 'api_test_case', 'ui_test_case'
+        queryset = _apply_project_filter(
+            request,
+            _accessible_test_results(request.user).select_related(
+                'project', 'executed_by', 'api_test_case', 'ui_test_case'
+            ),
         ).order_by('-created_at')
 
         if test_type:
