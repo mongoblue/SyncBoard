@@ -11,6 +11,40 @@ from .models import (
 )
 
 
+TEST_TASK_CASE_PROJECT_ERROR = '测试用例不存在或不属于本项目'
+
+
+def validate_test_task_config_cases(test_config, project):
+    if test_config is None:
+        return test_config
+    if not isinstance(test_config, dict):
+        raise serializers.ValidationError('测试配置格式无效')
+    if project is None:
+        return test_config
+
+    case_specs = (
+        ('api_cases', ApiTestCase),
+        ('ui_cases', UiTestCase),
+    )
+    for field_name, model_class in case_specs:
+        case_ids = test_config.get(field_name)
+        if case_ids is None:
+            continue
+        if not isinstance(case_ids, list):
+            raise serializers.ValidationError({field_name: '测试用例列表格式无效'})
+        if not case_ids:
+            continue
+
+        matching_count = model_class.objects.filter(
+            id__in=case_ids,
+            project=project,
+        ).values('id').distinct().count()
+        if matching_count != len(set(case_ids)):
+            raise serializers.ValidationError({field_name: TEST_TASK_CASE_PROJECT_ERROR})
+
+    return test_config
+
+
 class ApiTestCaseSerializer(serializers.ModelSerializer):
     """API 测试用例序列化器"""
 
@@ -315,6 +349,10 @@ class TestTaskCreateSerializer(serializers.ModelSerializer):
             'test_config', 'notify_on_success', 'notify_on_failure', 'notification_channels'
         ]
 
+    def validate(self, attrs):
+        validate_test_task_config_cases(attrs.get('test_config'), attrs.get('project'))
+        return attrs
+
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user
         validated_data['status'] = 'idle'
@@ -332,6 +370,11 @@ class TestTaskUpdateSerializer(serializers.ModelSerializer):
             'test_config', 'notify_on_success', 'notify_on_failure', 'notification_channels',
             'is_active'
         ]
+
+    def validate(self, attrs):
+        project = self.instance.project if self.instance else None
+        validate_test_task_config_cases(attrs.get('test_config'), project)
+        return attrs
 
 
 class TestTaskExecuteSerializer(serializers.Serializer):

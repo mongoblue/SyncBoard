@@ -1040,6 +1040,121 @@ class TestProjectIsolationRegressions:
         assert history_resp.status_code == 200
         assert history.id in [item['id'] for item in history_resp.data]
 
+    def _create_devops_task_case_config_fixture(self):
+        member = User.objects.create_user(username='iso_devops_task_case_member', password='pass')
+        self.project.members.add(member)
+        api_case = ApiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Project DevOps API Case',
+            url='/api/project-devops/',
+            method='GET',
+            expected_status=200,
+        )
+        ui_case = UiTestCase.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Project DevOps UI Case',
+            url='/project-devops/',
+            steps=[{'action': 'click', 'selector': '#project'}],
+        )
+        other_owner = User.objects.create_user(username='iso_devops_task_case_other_owner', password='pass')
+        other_project = Project.objects.create(name='Other DevOps Case Project', owner=other_owner)
+        foreign_api_case = ApiTestCase.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Foreign DevOps API Case',
+            url='/api/foreign-devops/',
+            method='GET',
+            expected_status=200,
+        )
+        foreign_ui_case = UiTestCase.objects.create(
+            project=other_project,
+            created_by=other_owner,
+            name='Foreign DevOps UI Case',
+            url='/foreign-devops/',
+            steps=[{'action': 'click', 'selector': '#foreign'}],
+        )
+        return member, api_case, ui_case, foreign_api_case, foreign_ui_case
+
+    def test_devops_task_create_rejects_foreign_api_ui_cases(self, client):
+        member, _, _, foreign_api_case, foreign_ui_case = self._create_devops_task_case_config_fixture()
+        client.force_login(member)
+
+        resp = client.post(
+            '/api/qa/devops/tasks/',
+            data={
+                'project': self.project.id,
+                'name': 'Poisoned DevOps Task',
+                'test_type': 'api',
+                'trigger_type': 'manual',
+                'test_config': {
+                    'api_cases': [foreign_api_case.id],
+                    'ui_cases': [foreign_ui_case.id],
+                },
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+        assert not QaTestTask.objects.filter(name='Poisoned DevOps Task').exists()
+
+    def test_devops_task_update_rejects_foreign_api_ui_cases_and_preserves_config(self, client):
+        member, api_case, ui_case, foreign_api_case, foreign_ui_case = self._create_devops_task_case_config_fixture()
+        original_config = {'api_cases': [api_case.id], 'ui_cases': [ui_case.id]}
+        task = QaTestTask.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Config Protected DevOps Task',
+            test_type='api',
+            trigger_type='manual',
+            test_config=original_config,
+            status='idle',
+        )
+        client.force_login(member)
+
+        resp = client.put(
+            f'/api/qa/devops/tasks/{task.id}/',
+            data={
+                'test_config': {
+                    'api_cases': [foreign_api_case.id],
+                    'ui_cases': [foreign_ui_case.id],
+                },
+            },
+            content_type='application/json',
+        )
+
+        assert resp.status_code == 400
+        task.refresh_from_db()
+        assert task.test_config == original_config
+
+    def test_devops_task_execute_rejects_poisoned_foreign_case_config_before_side_effects(self, client):
+        member, _, _, foreign_api_case, foreign_ui_case = self._create_devops_task_case_config_fixture()
+        task = QaTestTask.objects.create(
+            project=self.project,
+            created_by=self.owner,
+            name='Preexisting Poisoned DevOps Task',
+            test_type='api',
+            trigger_type='manual',
+            test_config={
+                'api_cases': [foreign_api_case.id],
+                'ui_cases': [foreign_ui_case.id],
+            },
+            status='idle',
+        )
+        initial_result_count = QaTestResult.objects.count()
+        client.force_login(member)
+
+        with patch('qa_center.views_devops.threading.Thread') as thread_cls:
+            resp = client.post(f'/api/qa/devops/tasks/{task.id}/execute/')
+
+        assert resp.status_code == 400
+        thread_cls.assert_not_called()
+        task.refresh_from_db()
+        assert task.status == 'idle'
+        assert task.execution_count == 0
+        assert QaTestResult.objects.count() == initial_result_count
+
     def _create_cicd_pipeline_fixture(self):
         config = CiCdConfig.objects.create(
             project=self.project,

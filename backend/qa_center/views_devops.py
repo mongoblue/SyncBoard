@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from room.project_access import ensure_project_id_access, project_access_q
 from .models import TestResult, ApiTestCase, UiTestCase, TestTask, CiCdConfig, PipelineRun, PerformanceTestResult
@@ -23,6 +23,7 @@ from .serializers import (
     TestTaskListSerializer, TestTaskDetailSerializer,
     TestTaskCreateSerializer, TestTaskUpdateSerializer,
     PerformanceTestResultSerializer, PerformanceTestResultListSerializer,
+    validate_test_task_config_cases,
 )
 import logging
 
@@ -449,6 +450,11 @@ class TestTaskExecuteView(APIView):
                 {'error': '任务已在执行中'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        try:
+            validate_test_task_config_cases(task.test_config, task.project)
+        except ValidationError as exc:
+            return Response({'error': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
 
         # 更新任务状态
         task.status = 'running'
