@@ -2,9 +2,8 @@
 import pytest
 from django.contrib.auth.models import User
 
-from bug_tracker.models import Bug, BugComment, BugTransition
+from bug_tracker.models import Bug, BugTransition
 from bug_tracker.state_machine import (
-    BUG_TRANSITIONS,
     TransitionError,
     allowed_next_statuses,
     can_transition,
@@ -226,6 +225,7 @@ class TestBugAssign:
         )
         bug.refresh_from_db()
         assert bug.status == 'fixing'  # 状态不变
+
     def test_assign_rejects_user_outside_bug_project(
         self, auth_client, test_project, test_user, test_password
     ):
@@ -398,10 +398,19 @@ class TestBugStatsNewFields:
         assert resp.data['verifying'] == 1
 
     def test_stats_high_risk(self, auth_client, test_project, test_user):
-        Bug.objects.create(project=test_project, title='A', reporter=test_user, severity='blocker', priority='p2', status='new')
-        Bug.objects.create(project=test_project, title='B', reporter=test_user, severity='minor', priority='p0', status='new')
-        Bug.objects.create(project=test_project, title='C', reporter=test_user, severity='major', priority='p2', status='new')
-        Bug.objects.create(project=test_project, title='D', reporter=test_user, severity='blocker', priority='p0', status='closed')  # closed → not in high_risk
+        Bug.objects.create(
+            project=test_project, title='A', reporter=test_user,
+            severity='blocker', priority='p2', status='new')
+        Bug.objects.create(
+            project=test_project, title='B', reporter=test_user,
+            severity='minor', priority='p0', status='new')
+        Bug.objects.create(
+            project=test_project, title='C', reporter=test_user,
+            severity='major', priority='p2', status='new')
+        # closed → not in high_risk
+        Bug.objects.create(
+            project=test_project, title='D', reporter=test_user,
+            severity='blocker', priority='p0', status='closed')
         resp = auth_client.get(f'/api/bugs/stats/?project={test_project.id}')
         assert resp.status_code == 200
         # high_risk counts only OPEN bugs with blocker/critical OR p0/p1
