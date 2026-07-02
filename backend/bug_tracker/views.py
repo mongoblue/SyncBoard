@@ -83,6 +83,13 @@ class BugViewSet(viewsets.ModelViewSet):
         if priority:
             qs = qs.filter(priority__in=priority.split(','))
 
+        # ── risk=high: OR query for blocker/critical severity OR p0/p1 priority ──
+        risk = params.get('risk')
+        if risk == 'high':
+            qs = qs.filter(
+                Q(severity__in=['blocker', 'critical']) | Q(priority__in=['p0', 'p1'])
+            )
+
         assignee = params.get('assignee')
         if assignee:
             qs = qs.filter(assignee_id=assignee)
@@ -98,6 +105,30 @@ class BugViewSet(viewsets.ModelViewSet):
         keyword = params.get('keyword')
         if keyword:
             qs = qs.filter(Q(title__icontains=keyword) | Q(description__icontains=keyword))
+
+        # ── Date range filters ──
+        created_after = params.get('created_after')
+        if created_after:
+            qs = qs.filter(created_at__gte=created_after)
+
+        created_before = params.get('created_before')
+        if created_before:
+            qs = qs.filter(created_at__lte=created_before)
+
+        updated_after = params.get('updated_after')
+        if updated_after:
+            qs = qs.filter(updated_at__gte=updated_after)
+
+        updated_before = params.get('updated_before')
+        if updated_before:
+            qs = qs.filter(updated_at__lte=updated_before)
+
+        # ── has_linked_task ──
+        has_linked_task = params.get('has_linked_task')
+        if has_linked_task == 'true':
+            qs = qs.filter(linked_task__isnull=False)
+        elif has_linked_task == 'false':
+            qs = qs.filter(linked_task__isnull=True)
 
         return qs
 
@@ -123,6 +154,17 @@ class BugViewSet(viewsets.ModelViewSet):
         if linked_task and linked_task.column.project_id != bug.project_id:
             raise PermissionDenied('关联任务不属于此项目')
         serializer.save()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        bug = Bug.objects.select_related(
+            'project', 'reporter', 'assignee', 'fixer', 'verifier'
+        ).get(pk=serializer.instance.pk)
+        output = BugDetailSerializer(bug, context=self.get_serializer_context())
+        headers = self.get_success_headers(output.data)
+        return Response(output.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @action(detail=True, methods=['post'])
     def transition(self, request, pk=None):
@@ -246,7 +288,7 @@ class BugViewSet(viewsets.ModelViewSet):
 
 
 class BugStatsView(APIView):
-    """项目级 Bug 看板统计：未关闭数 / 严重度分布 / 状态分布"""
+    """项目级 Bug 看板统计：未关闭数 / 严重度分布 / 状态分布 / 高风险 / 待我处理"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -266,12 +308,32 @@ class BugStatsView(APIView):
         for s, _ in Bug.SEVERITY_CHOICES:
             severity_counts[s] = open_qs.filter(severity=s).count()
 
+        # ── New fields for workbench stats cards ──
+        # my_pending: open bugs assigned to the current user
+        my_pending = open_qs.filter(assignee=request.user).count()
+
+        # my_reported_open: open bugs reported by the current user
+        my_reported_open = open_qs.filter(reporter=request.user).count()
+
+        # verifying: open bugs in verifying status
+        verifying = open_qs.filter(status='verifying').count()
+
+        # high_risk: open bugs with blocker/critical severity OR p0/p1 priority
+        high_risk = open_qs.filter(
+            Q(severity__in=['blocker', 'critical']) | Q(priority__in=['p0', 'p1'])
+        ).count()
+
         return Response({
             'total': qs.count(),
             'open': open_qs.count(),
             'closed': qs.filter(status='closed').count(),
             'by_status': status_counts,
             'by_severity_open': severity_counts,
+            # New fields (backward-compatible)
+            'my_pending': my_pending,
+            'my_reported_open': my_reported_open,
+            'verifying': verifying,
+            'high_risk': high_risk,
         })
 
 

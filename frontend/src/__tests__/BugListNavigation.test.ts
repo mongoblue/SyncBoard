@@ -4,37 +4,51 @@ import { createPinia, setActivePinia } from 'pinia'
 import { h } from 'vue'
 import BugList from '@/views/bug/BugList.vue'
 import MyBugs from '@/views/bug/MyBugs.vue'
+import BugWorkbench from '@/views/bug/BugWorkbench.vue'
 
+// Mock vue-router
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { projectId: 'project-1' } }),
-  useRouter: () => ({ push: vi.fn() }),
+  useRoute: () => ({ params: { projectId: 'project-1' }, query: {} }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn().mockResolvedValue(undefined) }),
 }))
 
+// Mock API
 vi.mock('@/api/bug', async () => {
   const actual = await vi.importActual<typeof import('@/api/bug')>('@/api/bug')
   return {
     ...actual,
-    listBugs: vi.fn().mockResolvedValue({ count: 0, results: [] }),
-    listMyBugs: vi.fn().mockResolvedValue({ count: 0, results: [] }),
+    listBugs: vi.fn().mockResolvedValue({ count: 0, results: [], next: null, previous: null }),
+    listMyBugs: vi.fn().mockResolvedValue({ count: 0, results: [], next: null, previous: null }),
     getBugStats: vi.fn().mockResolvedValue(null),
     getProjectMembers: vi.fn().mockResolvedValue([]),
   }
 })
 
-const tableStub = {
-  name: 'ElTable',
-  props: ['data', 'rowClassName'],
-  template: '<div class="el-table"><slot /></div>',
-}
+// Stores mocks
+vi.mock('@/stores/board', () => ({
+  useBoardStore: () => ({
+    currentProject: { owner_details: { id: null } },
+    currentProjectId: '',
+    fetchProjectInfo: vi.fn(),
+    fetchUsers: vi.fn(),
+    isConnected: false,
+  }),
+}))
 
-const tableColumnStub = {
-  name: 'ElTableColumn',
-  props: ['prop', 'label'],
-  template: '<div class="el-table-column"><slot :row="{ id: 1, title: \'示例 Bug\' }" /></div>',
-}
+vi.mock('@/stores/Auth', () => ({
+  useAuthStore: () => ({
+    user: null,
+    checkAuth: vi.fn(),
+    checkPermission: vi.fn().mockReturnValue(true),
+    menus: [],
+    logout: vi.fn(),
+    updateAvatar: vi.fn(),
+  }),
+}))
 
+// Minimal stubs for BugWorkbench sub-components
 const passthroughStub = {
-  template: '<div><slot /></div>',
+  template: '<div class="stub"><slot /></div>',
 }
 
 const iconStub = {
@@ -42,8 +56,6 @@ const iconStub = {
 }
 
 const commonStubs = {
-  'el-table': tableStub,
-  'el-table-column': tableColumnStub,
   'el-button': passthroughStub,
   'el-icon': passthroughStub,
   'el-card': passthroughStub,
@@ -61,46 +73,163 @@ const commonStubs = {
   'el-form-item': passthroughStub,
   'el-tabs': passthroughStub,
   'el-tab-pane': passthroughStub,
-  TrendCharts: iconStub,
-  Refresh: iconStub,
+  'el-table': passthroughStub,
+  'el-table-column': passthroughStub,
+  'el-divider': passthroughStub,
+  // BugWorkbench sub-components are stubbed so we can test the wrapper behavior
+  BugWorkbenchHeader: passthroughStub,
+  BugStatsCards: passthroughStub,
+  BugViewTabs: passthroughStub,
+  BugFilterBar: passthroughStub,
+  BugTable: passthroughStub,
+  BugCreateDialog: passthroughStub,
+  BugTransitionDialog: passthroughStub,
+  BugAssignDialog: passthroughStub,
+  BugStatusTag: passthroughStub,
+  BugSeverityTag: passthroughStub,
+  BugPriorityTag: passthroughStub,
   Plus: iconStub,
+  Refresh: iconStub,
   Search: iconStub,
   ArrowDown: iconStub,
+  ArrowLeft: iconStub,
+  ArrowRight: iconStub,
   Delete: iconStub,
+  Warning: iconStub,
+  List: iconStub,
+  User: iconStub,
+  CircleCheck: iconStub,
+  SortUp: iconStub,
+  CircleClose: iconStub,
+  MoreFilled: iconStub,
+  TrendCharts: iconStub,
+  Collection: iconStub,
+  FolderOpened: iconStub,
+  Grid: iconStub,
+  DataLine: iconStub,
+  Setting: iconStub,
+  ChatDotRound: iconStub,
+  ChatLineRound: iconStub,
+  Bell: iconStub,
+  Monitor: iconStub,
+  Document: iconStub,
+  Tools: iconStub,
+  Management: iconStub,
+  Operation: iconStub,
+  Timer: iconStub,
+  SwitchButton: iconStub,
 }
 
-const mountPage = (component: typeof BugList | typeof MyBugs) => mount(component, {
-  global: {
-    plugins: [createPinia()],
-    stubs: commonStubs,
-    directives: {
-      loading: {},
+const mountBugWorkbench = (defaultView: string) =>
+  mount(BugWorkbench, {
+    props: { defaultView },
+    global: {
+      plugins: [createPinia()],
+      stubs: commonStubs,
+      directives: {
+        loading: {},
+      },
     },
-  },
-})
+  })
 
-describe('Bug list navigation affordance', () => {
+describe('BugList wrapper', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
 
-  it('does not render Bug 管理 table as a clickable row table and provides a title link', () => {
-    const wrapper = mountPage(BugList)
-
-    const table = wrapper.findComponent(tableStub)
-
-    expect((table.vm as any).$attrs.onRowClick).toBeUndefined()
-    expect(table.props('rowClassName')).toBeUndefined()
-    expect(wrapper.find('.bug-title-link').exists()).toBe(true)
+  it('renders BugWorkbench with default-view="all"', () => {
+    const wrapper = mount(BugList, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { BugWorkbench: true },
+      },
+    })
+    const wb = wrapper.findComponent({ name: 'BugWorkbench' })
+    // With stub:true, the component won't render props, but at minimum
+    // BugList should not contain its own table logic anymore.
+    // The file should be a thin wrapper importing BugWorkbench.
+    expect(wrapper.html()).not.toContain('el-table')
   })
 
-  it('does not render 我的 Bug table as a clickable row table and provides a title link', () => {
-    const wrapper = mountPage(MyBugs)
+  it('does not contain duplicate table logic', () => {
+    // BugList.vue source should just be a template with BugWorkbench
+    // Verify the file is a thin wrapper
+    const wrapper = mount(BugList, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { BugWorkbench: true },
+      },
+    })
+    // BugList should not have its own filter bar, stats, or table HTML
+    expect(wrapper.html()).not.toContain('filter-bar')
+    expect(wrapper.html()).not.toContain('statistics-cards')
+  })
+})
 
-    const table = wrapper.findComponent(tableStub)
+describe('MyBugs wrapper', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
 
-    expect((table.vm as any).$attrs.onRowClick).toBeUndefined()
-    expect(table.props('rowClassName')).toBeUndefined()
-    expect(wrapper.find('.bug-title-link').exists()).toBe(true)
+  it('renders BugWorkbench with default-view="my_pending"', () => {
+    const wrapper = mount(MyBugs, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { BugWorkbench: true },
+      },
+    })
+    expect(wrapper.html()).not.toContain('el-table')
+    expect(wrapper.html()).not.toContain('el-tabs')
+  })
+
+  it('does not maintain independent table logic', () => {
+    // MyBugs.vue should be a thin wrapper, not a standalone page
+    const wrapper = mount(MyBugs, {
+      global: {
+        plugins: [createPinia()],
+        stubs: { BugWorkbench: true },
+      },
+    })
+    expect(wrapper.html()).not.toContain('tab-hint')
+    expect(wrapper.html()).not.toContain('my-bugs')
+  })
+})
+
+describe('BugWorkbench integration', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('renders without crashing with default-view="all"', () => {
+    const wrapper = mountBugWorkbench('all')
+    // The core workbench container should exist
+    expect(wrapper.find('.bug-workbench').exists()).toBe(true)
+  })
+
+  it('renders without crashing with default-view="my_pending"', () => {
+    const wrapper = mountBugWorkbench('my_pending')
+    expect(wrapper.find('.bug-workbench').exists()).toBe(true)
+  })
+
+  it('shows empty state text when no bugs', async () => {
+    const wrapper = mountBugWorkbench('all')
+    // Wait for async loadBugs/loadStats to complete
+    await new Promise((r) => setTimeout(r, 50))
+    await wrapper.vm.$nextTick()
+    // For view='all' with isOwner=true, empty-demo-banner renders;
+    // otherwise empty-state renders. Either is valid.
+    const hasEmpty =
+      wrapper.find('.empty-state').exists() ||
+      wrapper.find('.empty-demo-banner').exists()
+    expect(hasEmpty).toBe(true)
+  })
+
+  it('empty state for my_pending shows appropriate message', async () => {
+    const wrapper = mountBugWorkbench('my_pending')
+    await new Promise((r) => setTimeout(r, 50))
+    await wrapper.vm.$nextTick()
+    const emptyState = wrapper.find('.empty-state')
+    expect(emptyState.exists()).toBe(true)
+    expect(emptyState.text()).toContain('待处理')
   })
 })

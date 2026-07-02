@@ -90,10 +90,16 @@ export interface BugListParams {
   status?: string;       // comma-separated
   severity?: string;
   priority?: string;
+  risk?: 'high';          // OR query: severity=blocker,critical OR priority=p0,p1
   assignee?: number;
   reporter?: number;
   source_test_type?: BugSource;
   keyword?: string;
+  has_linked_task?: 'true' | 'false';
+  created_after?: string;
+  created_before?: string;
+  updated_after?: string;
+  updated_before?: string;
   page?: number;
   page_size?: number;
 }
@@ -111,6 +117,11 @@ export interface BugStats {
   closed: number;
   by_status: Record<BugStatus, number>;
   by_severity_open: Record<BugSeverity, number>;
+  // New fields (Phase 3)
+  my_pending?: number;
+  my_reported_open?: number;
+  verifying?: number;
+  high_risk?: number;
 }
 
 const BASE = '/bugs';
