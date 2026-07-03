@@ -114,11 +114,16 @@
         @row-click="openCaseDrawer"
         row-class-name="clickable-row"
       >
-        <el-table-column label="结果" width="80">
+        <el-table-column label="结果语义" min-width="220">
           <template #default="{ row }">
-            <el-tag :type="row.passed ? 'success' : 'danger'" size="small">
-              {{ row.passed ? '通过' : '失败' }}
-            </el-tag>
+            <div class="semantic-result-cell">
+              <el-tag :type="semanticTagType(row)" size="small">
+                {{ semanticLabel(row) }}
+              </el-tag>
+              <span v-if="row.expectation_type === 'error_response' && row.expected_status" class="semantic-hint">
+                期望 {{ row.expected_status }}
+              </span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="方法" width="80">
@@ -163,21 +168,44 @@
     <el-drawer v-model="drawerVisible" size="60%" :title="drawerTitle" destroy-on-close>
       <div v-if="currentDetail" v-loading="detailLoading" class="drawer-body">
         <el-tabs v-model="activeTab">
-          <!-- Overview -->
+          <!-- 概览 -->
           <el-tab-pane label="概览" name="overview">
             <el-descriptions :column="2" border size="small">
               <el-descriptions-item label="用例">{{ currentDetail.case_name }}</el-descriptions-item>
-              <el-descriptions-item label="结果">
-                <el-tag :type="currentDetail.passed ? 'success' : 'danger'" size="small">
-                  {{ currentDetail.passed ? '通过' : '失败' }}
-                </el-tag>
+              <el-descriptions-item label="结果语义">
+                <div class="semantic-result-cell">
+                  <el-tag :type="semanticTagType(currentDetail)" size="small">
+                    {{ semanticLabel(currentDetail) }}
+                  </el-tag>
+                  <span
+                    v-if="currentDetail.expectation_type === 'error_response' && currentDetail.expected_status"
+                    class="semantic-hint"
+                  >
+                    期望 {{ currentDetail.expected_status }}
+                  </span>
+                </div>
               </el-descriptions-item>
-              <el-descriptions-item label="方法">{{ currentDetail.case_method }}</el-descriptions-item>
+              <el-descriptions-item label="失败类型">
+                <el-tag v-if="currentDetail.failure_type" :type="failureTagType" size="small">
+                  {{ failureLabel }}
+                </el-tag>
+                <span v-else>-</span>
+              </el-descriptions-item>
               <el-descriptions-item label="状态码">{{ currentDetail.status_code }}</el-descriptions-item>
+              <el-descriptions-item label="方法">{{ currentDetail.case_method }}</el-descriptions-item>
               <el-descriptions-item label="耗时">{{ currentDetail.response_time_ms }}ms</el-descriptions-item>
               <el-descriptions-item label="执行时间">{{ formatDate(currentDetail.executed_at) }}</el-descriptions-item>
+              <el-descriptions-item v-if="currentDetail.trace_id" label="Trace ID">
+                <code class="trace-id">{{ currentDetail.trace_id }}</code>
+              </el-descriptions-item>
               <el-descriptions-item label="URL" :span="2">{{ currentDetail.case_url }}</el-descriptions-item>
             </el-descriptions>
+
+            <DiagnosisCard
+              v-if="currentDetail.result_metadata?.diagnosis"
+              :diagnosis="currentDetail.result_metadata.diagnosis"
+            />
+
             <el-alert
               v-if="currentDetail.error_message"
               :title="currentDetail.error_message"
@@ -190,43 +218,51 @@
 
           <!-- 断言 -->
           <el-tab-pane :label="`断言 (${currentDetail.assertion_details?.length || 0})`" name="assertions">
-            <el-empty v-if="!currentDetail.assertion_details?.length" description="无断言" />
-            <div v-else class="assertion-list">
-              <div
-                v-for="(a, i) in currentDetail.assertion_details"
-                :key="i"
-                class="assertion-row"
-                :class="{ failed: !a.passed }"
-              >
-                <div class="assertion-head">
-                  <el-tag :type="a.passed ? 'success' : 'danger'" size="small">
-                    {{ a.passed ? 'PASS' : 'FAIL' }}
-                  </el-tag>
-                  <code>{{ a.assertion_type }}{{ a.json_path ? ` @ ${a.json_path}` : '' }}</code>
-                </div>
-                <div class="assertion-diff">
-                  <div class="diff-col">
-                    <div class="diff-label">期望 ({{ a.operator || 'eq' }})</div>
-                    <pre class="diff-value expected">{{ formatValue(a.expected_value) }}</pre>
-                  </div>
-                  <div class="diff-col">
-                    <div class="diff-label">实际</div>
-                    <pre class="diff-value actual">{{ formatValue(a.actual_value) }}</pre>
-                  </div>
-                </div>
-                <div v-if="!a.passed && a.error_message" class="assertion-error">
-                  {{ a.error_message }}
-                </div>
-              </div>
-            </div>
+            <AssertionTable :assertions="currentDetail.assertion_details" />
+          </el-tab-pane>
+
+          <!-- 请求 -->
+          <el-tab-pane label="请求" name="request">
+            <RequestSnapshotPanel :snapshot="currentDetail.request_snapshot" />
           </el-tab-pane>
 
           <!-- 响应 -->
           <el-tab-pane label="响应" name="response">
-            <div class="section-title">响应头</div>
-            <pre class="code">{{ formatJson(currentDetail.response_headers) }}</pre>
-            <div class="section-title">响应体</div>
-            <pre class="code">{{ formatJson(currentDetail.response_body) }}</pre>
+            <ResponseSnapshotPanel :snapshot="currentDetail.response_snapshot" />
+          </el-tab-pane>
+
+          <!-- 提取变量 -->
+          <el-tab-pane
+            v-if="currentDetail.extracted_variables_preview && hasExtractedVars"
+            label="提取变量"
+            name="extracted"
+          >
+            <el-table :data="extractedVarRows" border size="small">
+              <el-table-column prop="name" label="变量名" />
+              <el-table-column label="预览">
+                <template #default="{ row }">
+                  <code class="extracted-preview">{{ row.preview }}</code>
+                </template>
+              </el-table-column>
+              <el-table-column label="脱敏" width="80">
+                <template #default="{ row }">
+                  <el-tag v-if="row.redacted" type="info" size="small">是</el-tag>
+                  <span v-else>否</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="截断" width="80">
+                <template #default="{ row }">
+                  <el-tag v-if="row.truncated" type="warning" size="small">是</el-tag>
+                  <span v-else>否</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- cURL -->
+          <el-tab-pane v-if="currentDetail.curl?.preview" label="cURL" name="curl">
+            <div class="curl-hint">可直接复制到终端复现请求：</div>
+            <pre class="code"><code>{{ currentDetail.curl.preview }}</code></pre>
           </el-tab-pane>
         </el-tabs>
 
@@ -256,10 +292,16 @@ import {
   listAutoResultCases,
   getAutoCaseResultDetail,
   createBugFromCaseResult,
+  FAILURE_TYPE_LABELS,
+  FAILURE_TYPE_TAG,
   type AutoResultSummary,
   type AutoCaseResultBrief,
   type AutoCaseResultFull,
 } from '@/api/autoresult';
+import DiagnosisCard from './components/result/DiagnosisCard.vue';
+import AssertionTable from './components/result/AssertionTable.vue';
+import RequestSnapshotPanel from './components/result/RequestSnapshotPanel.vue';
+import ResponseSnapshotPanel from './components/result/ResponseSnapshotPanel.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -394,6 +436,19 @@ const bulkCreateBugs = async () => {
 
 const goBack = () => router.back();
 
+const semanticLabel = (row: Partial<AutoCaseResultBrief> | Partial<AutoCaseResultFull> | null | undefined) => {
+  if (!row) return '未知结果';
+  return row.semantic_label || (row.passed ? '成功响应断言通过' : '测试失败');
+};
+
+const semanticTagType = (row: Partial<AutoCaseResultBrief> | Partial<AutoCaseResultFull> | null | undefined) => {
+  const semantic = row?.semantic_status || '';
+  if (semantic === 'expected_error_matched' || semantic === 'success_response_passed') return 'success';
+  if (semantic === 'expected_error_unmatched' || semantic === 'success_response_failed') return 'danger';
+  if (semantic === 'expected_error_execution_error') return 'warning';
+  return row?.passed ? 'success' : 'warning';
+};
+
 const statusType = (s: string) =>
   ({ passed: 'success', failed: 'danger', error: 'warning', running: 'info', pending: 'info' } as Record<
     string,
@@ -433,6 +488,33 @@ const formatValue = (v: any) => {
   return String(v);
 };
 
+const failureLabel = computed(() => {
+  const ft = currentDetail.value?.failure_type;
+  if (!ft) return '';
+  return FAILURE_TYPE_LABELS[ft] || ft;
+});
+
+const failureTagType = computed(() => {
+  const ft = currentDetail.value?.failure_type;
+  if (!ft) return 'info' as const;
+  return FAILURE_TYPE_TAG[ft] || 'info';
+});
+
+const hasExtractedVars = computed(() => {
+  const p = currentDetail.value?.extracted_variables_preview;
+  return !!p && Object.keys(p).length > 0;
+});
+
+const extractedVarRows = computed(() => {
+  const p = currentDetail.value?.extracted_variables_preview || {};
+  return Object.entries(p).map(([name, env]) => ({
+    name,
+    preview: env?.preview ?? '',
+    redacted: env?.redacted ?? false,
+    truncated: env?.truncated ?? false,
+  }));
+});
+
 onMounted(reload);
 </script>
 
@@ -469,6 +551,17 @@ onMounted(reload);
 .filters { display: flex; gap: 8px; }
 .clickable-row { cursor: pointer; }
 .pagination { margin-top: 12px; justify-content: flex-end; display: flex; }
+
+.semantic-result-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.semantic-hint {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
 
 .method-tag {
   font-weight: 600; font-size: 11px; padding: 2px 6px;
@@ -512,35 +605,16 @@ onMounted(reload);
   max-height: 320px; overflow: auto;
 }
 
-.assertion-list { display: flex; flex-direction: column; gap: 10px; }
-.assertion-row {
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  background: var(--color-surface);
-}
-.assertion-row.failed {
-  border-color: var(--color-danger);
-  background: var(--color-danger-bg);
-}
-.assertion-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.assertion-head code {
-  font-family: var(--font-mono);
-  font-size: 12px;
+.trace-id {
+  font-family: var(--font-mono); font-size: 11px;
   color: var(--color-text-secondary);
 }
-.assertion-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.diff-col { display: flex; flex-direction: column; gap: 4px; }
-.diff-label { font-size: 12px; color: var(--color-text-secondary); }
-.diff-value {
-  margin: 0; padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono); font-size: 12px;
-  white-space: pre-wrap; word-break: break-all;
+.curl-hint {
+  font-size: 12px; color: var(--color-text-secondary);
+  margin-bottom: 6px;
 }
-.diff-value.expected { background: var(--color-success-bg); color: var(--color-success); }
-.diff-value.actual { background: var(--color-danger-bg); color: var(--color-danger); }
-.assertion-error {
-  color: var(--color-danger); font-size: 12px; margin-top: 6px;
+.extracted-preview {
+  font-family: var(--font-mono); font-size: 12px;
+  word-break: break-all;
 }
 </style>

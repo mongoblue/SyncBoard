@@ -1,14 +1,31 @@
 from django.utils import timezone
 from rest_framework import serializers
 from .models import (
-    ApiTestCase, ApiTestResult, UiTestCase, TestResult, TestScreenshot, TestTask,
+    UiTestCase, TestResult, TestScreenshot, TestTask,
     PerformanceTestCase, PerformanceTestResult,
     ApiAutoTestSuite, ApiAutoTestCase, ApiAutoTestAssertion,
     ApiAutoTestResult, ApiAutoTestCaseResult,
     TestRunPlan,
     TestEnvironment, TestGlobalVar,
     ApiAutoTestExtractor,
+    CiCdConfig,
 )
+
+
+def _latest_performance_case_result(obj):
+    return obj.results.select_related('test_result').order_by(
+        '-test_result__started_at',
+        '-executed_at',
+        '-id',
+    ).first()
+
+
+def _latest_auto_suite_result(obj):
+    return obj.test_results.order_by(
+        '-started_at',
+        '-created_at',
+        '-id',
+    ).first()
 
 
 TEST_TASK_CASE_PROJECT_ERROR = '测试用例不存在或不属于本项目'
@@ -23,7 +40,7 @@ def validate_test_task_config_cases(test_config, project):
         return test_config
 
     case_specs = (
-        ('api_cases', ApiTestCase),
+        ('api_cases', ApiAutoTestCase),
         ('ui_cases', UiTestCase),
     )
     for field_name, model_class in case_specs:
@@ -45,92 +62,6 @@ def validate_test_task_config_cases(test_config, project):
     return test_config
 
 
-class ApiTestCaseSerializer(serializers.ModelSerializer):
-    """API 测试用例序列化器"""
-
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
-    last_result = serializers.SerializerMethodField()
-    assertions = serializers.ListField(
-        child=serializers.DictField(),
-        required=False,
-        default=list,
-        write_only=True
-    )
-
-    class Meta:
-        model = ApiTestCase
-        fields = [
-            'id', 'project', 'name', 'url', 'method',
-            'headers', 'body', 'expected_status', 'assertions',
-            'created_by', 'created_by_name', 'last_result',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = ['created_by', 'created_at', 'updated_at']
-
-    def to_representation(self, instance):
-        """读取时：从 expected_response 提取 assertions"""
-        data = super().to_representation(instance)
-        expected_response = instance.expected_response or {}
-        if isinstance(expected_response, dict):
-            assertions = expected_response.get('assertions', [])
-            if isinstance(assertions, list):
-                data['assertions'] = assertions
-            else:
-                data['assertions'] = []
-        else:
-            data['assertions'] = []
-        return data
-
-    def create(self, validated_data):
-        """创建时：将 assertions 写入 expected_response"""
-        assertions = validated_data.pop('assertions', [])
-        validated_data['expected_response'] = {'assertions': assertions}
-        return super().create(validated_data)
-
-    def update(self, instance, validated_data):
-        """更新时：将 assertions 写入 expected_response"""
-        assertions = validated_data.pop('assertions', None)
-        if assertions is not None:
-            validated_data['expected_response'] = {'assertions': assertions}
-        return super().update(instance, validated_data)
-
-    def get_last_result(self, obj):
-        """获取最近一次执行结果"""
-        last_result = obj.results.first()
-        if last_result:
-            return {
-                'passed': last_result.passed,
-                'status_code': last_result.status_code,
-                'executed_at': last_result.executed_at
-            }
-        return None
-
-
-class ApiTestCaseListSerializer(serializers.ModelSerializer):
-    """API 测试用例列表序列化器（简化版）"""
-    
-    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
-    
-    class Meta:
-        model = ApiTestCase
-        fields = ['id', 'name', 'method', 'url', 'expected_status', 'created_by_name', 'created_at']
-
-
-class ApiTestResultSerializer(serializers.ModelSerializer):
-    """API 测试结果序列化器"""
-    
-    executed_by_name = serializers.CharField(source='executed_by.username', read_only=True)
-    
-    class Meta:
-        model = ApiTestResult
-        fields = [
-            'id', 'test_case', 'status_code', 'response_body',
-            'response_headers', 'response_time_ms', 'passed',
-            'assertion_results', 'error_message', 'executed_by', 'executed_by_name', 'executed_at'
-        ]
-        read_only_fields = ['executed_at']
-
-
 class ApiTestRunRequestSerializer(serializers.Serializer):
     """API 测试运行请求序列化器"""
 
@@ -142,7 +73,7 @@ class ApiTestRunRequestSerializer(serializers.Serializer):
 
 class ApiTestRunResponseSerializer(serializers.Serializer):
     """API 测试运行响应序列化器"""
-    
+
     status_code = serializers.IntegerField()
     response_body = serializers.CharField(allow_blank=True)
     response_headers = serializers.JSONField()
@@ -156,9 +87,9 @@ class ApiTestRunResponseSerializer(serializers.Serializer):
 
 class UiTestCaseSerializer(serializers.ModelSerializer):
     """UI 测试用例序列化器"""
-    
+
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
-    
+
     class Meta:
         model = UiTestCase
         fields = [
@@ -224,6 +155,13 @@ class TestResultListSerializer(serializers.ModelSerializer):
     executed_by_name = serializers.CharField(source='executed_by.username', read_only=True)
     project_name = serializers.CharField(source='project.name', read_only=True)
     screenshot_count = serializers.SerializerMethodField()
+    api_auto_result_id = serializers.IntegerField(read_only=True, default=None)
+    test_run_id = serializers.SerializerMethodField()
+    expectation_type = serializers.SerializerMethodField()
+    default_assertion_policy = serializers.SerializerMethodField()
+    expected_status = serializers.SerializerMethodField()
+    semantic_status = serializers.SerializerMethodField()
+    semantic_label = serializers.SerializerMethodField()
 
     class Meta:
         model = TestResult
@@ -231,11 +169,35 @@ class TestResultListSerializer(serializers.ModelSerializer):
             'id', 'test_type', 'test_type_display', 'name', 'status', 'status_display',
             'project', 'project_name', 'executed_by', 'executed_by_name',
             'started_at', 'completed_at', 'duration_ms', 'created_at',
-            'screenshot_count'
+            'screenshot_count', 'api_auto_result_id', 'test_run_id',
+            'expectation_type', 'default_assertion_policy', 'expected_status',
+            'semantic_status', 'semantic_label',
         ]
 
     def get_screenshot_count(self, obj):
         return obj.screenshots.count()
+
+    def get_test_run_id(self, obj):
+        tp = obj.test_params or {}
+        return tp.get('test_run_id')
+
+    def _semantics(self, obj):
+        return _mirrored_test_result_semantics(obj)
+
+    def get_expectation_type(self, obj):
+        return self._semantics(obj)['expectation_type']
+
+    def get_default_assertion_policy(self, obj):
+        return self._semantics(obj)['default_assertion_policy']
+
+    def get_expected_status(self, obj):
+        return self._semantics(obj)['expected_status']
+
+    def get_semantic_status(self, obj):
+        return self._semantics(obj)['semantic_status']
+
+    def get_semantic_label(self, obj):
+        return self._semantics(obj)['semantic_label']
 
 
 class TestResultDetailSerializer(serializers.ModelSerializer):
@@ -246,22 +208,46 @@ class TestResultDetailSerializer(serializers.ModelSerializer):
     executed_by_name = serializers.CharField(source='executed_by.username', read_only=True)
     project_name = serializers.CharField(source='project.name', read_only=True)
     screenshots = TestScreenshotSerializer(many=True, read_only=True)
-    api_test_case_name = serializers.CharField(source='api_test_case.name', read_only=True)
     ui_test_case_name = serializers.CharField(source='ui_test_case.name', read_only=True)
+    expectation_type = serializers.SerializerMethodField()
+    default_assertion_policy = serializers.SerializerMethodField()
+    expected_status = serializers.SerializerMethodField()
+    semantic_status = serializers.SerializerMethodField()
+    semantic_label = serializers.SerializerMethodField()
 
     class Meta:
         model = TestResult
         fields = [
             'id', 'test_type', 'test_type_display', 'name', 'status', 'status_display',
-            'project', 'project_name', 'api_test_case', 'api_test_case_name',
+            'project', 'project_name',
             'ui_test_case', 'ui_test_case_name', 'executed_by', 'executed_by_name',
             'started_at', 'completed_at', 'duration_ms', 'test_params', 'test_steps',
             'expected_result', 'actual_result', 'error_message', 'test_log',
             'response_time_ms', 'throughput', 'error_rate', 'concurrent_users',
             'test_environment', 'browser_info', 'user_agent',
             'task_id', 'error_code', 'error_traceback', 'worker_pid', 'temp_dir_path', 'aborted',
-            'screenshots', 'created_at', 'updated_at'
+            'screenshots', 'created_at', 'updated_at',
+            'expectation_type', 'default_assertion_policy', 'expected_status',
+            'semantic_status', 'semantic_label',
         ]
+
+    def _semantics(self, obj):
+        return _mirrored_test_result_semantics(obj)
+
+    def get_expectation_type(self, obj):
+        return self._semantics(obj)['expectation_type']
+
+    def get_default_assertion_policy(self, obj):
+        return self._semantics(obj)['default_assertion_policy']
+
+    def get_expected_status(self, obj):
+        return self._semantics(obj)['expected_status']
+
+    def get_semantic_status(self, obj):
+        return self._semantics(obj)['semantic_status']
+
+    def get_semantic_label(self, obj):
+        return self._semantics(obj)['semantic_label']
 
 
 class TestResultCreateSerializer(serializers.ModelSerializer):
@@ -270,7 +256,7 @@ class TestResultCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestResult
         fields = [
-            'test_type', 'name', 'project', 'api_test_case', 'ui_test_case',
+            'test_type', 'name', 'project', 'ui_test_case',
             'status', 'test_params', 'test_steps', 'expected_result',
             'test_environment', 'browser_info'
         ]
@@ -281,7 +267,82 @@ class TestResultCreateSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
 
-# ==================== 测试任务序列化器 ====================
+def _mirrored_test_result_semantics(test_result):
+    auto_result = getattr(test_result, 'api_auto_result', None)
+    if not auto_result:
+        if test_result.status == 'passed':
+            return {
+                'semantic_status': 'result_passed',
+                'semantic_label': '通过',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        if test_result.status == 'failed':
+            return {
+                'semantic_status': 'result_failed',
+                'semantic_label': '失败',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        if test_result.status == 'error':
+            return {
+                'semantic_status': 'result_error',
+                'semantic_label': '错误',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        return {
+            'semantic_status': f'result_{test_result.status}',
+            'semantic_label': test_result.get_status_display(),
+            'expectation_type': None,
+            'default_assertion_policy': None,
+            'expected_status': None,
+        }
+
+    case_results = auto_result.case_results.order_by('executed_at', 'id')
+    if case_results.count() != 1:
+        if test_result.status == 'passed':
+            return {
+                'semantic_status': 'result_passed',
+                'semantic_label': '通过',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        if test_result.status == 'failed':
+            return {
+                'semantic_status': 'result_failed',
+                'semantic_label': '失败',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        if test_result.status == 'error':
+            return {
+                'semantic_status': 'result_error',
+                'semantic_label': '错误',
+                'expectation_type': None,
+                'default_assertion_policy': None,
+                'expected_status': None,
+            }
+        return {
+            'semantic_status': f'result_{test_result.status}',
+            'semantic_label': test_result.get_status_display(),
+            'expectation_type': None,
+            'default_assertion_policy': None,
+            'expected_status': None,
+        }
+
+    first_case = case_results.first()
+    return _result_semantics(
+        first_case.result_metadata,
+        passed=first_case.passed,
+        failure_type=first_case.failure_type,
+        status_code=first_case.status_code,
+    )
 
 class TestTaskListSerializer(serializers.ModelSerializer):
     """测试任务列表序列化器"""
@@ -324,6 +385,7 @@ class TestTaskDetailSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     project_name = serializers.CharField(source='project.name', read_only=True)
     last_result_detail = TestResultListSerializer(source='last_result', read_only=True)
+    schedule_backend = serializers.SerializerMethodField()
 
     class Meta:
         model = TestTask
@@ -333,9 +395,20 @@ class TestTaskDetailSerializer(serializers.ModelSerializer):
             'project', 'project_name', 'test_config', 'cron_expression', 'webhook_url',
             'execution_count', 'last_executed', 'last_result_detail',
             'notify_on_success', 'notify_on_failure', 'notification_channels',
-            'is_active', 'created_by', 'created_by_name', 'created_at', 'updated_at'
+            'is_active', 'created_by', 'created_by_name', 'created_at', 'updated_at',
+            'schedule_backend',
         ]
-        read_only_fields = ['created_by', 'execution_count', 'last_executed', 'created_at', 'updated_at']
+        read_only_fields = ['created_by', 'execution_count', 'last_executed',
+                           'created_at', 'updated_at', 'schedule_backend']
+
+    def get_schedule_backend(self, obj):
+        if obj.trigger_type == 'scheduled':
+            try:
+                import django_celery_beat  # noqa: F401
+                return 'django_celery_beat'
+            except ImportError:
+                return 'unavailable'
+        return None
 
 
 class TestTaskCreateSerializer(serializers.ModelSerializer):
@@ -392,28 +465,31 @@ class PerformanceTestCaseSerializer(serializers.ModelSerializer):
 
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     last_result = serializers.SerializerMethodField()
-    # 显式定义 body 为 CharField，保持字符串类型，允许null
     body = serializers.CharField(allow_blank=True, allow_null=True, required=False, default='')
-    # 显式定义 headers，确保返回对象而不是null
     headers = serializers.JSONField(default=dict)
-    # 添加 project_id 字段，方便前端使用
+    query_params = serializers.JSONField(default=dict, required=False)
+    auth_config = serializers.JSONField(default=dict, required=False)
+    steps = serializers.JSONField(default=list, required=False)
+    assertions = serializers.JSONField(default=list, required=False)
     project_id = serializers.PrimaryKeyRelatedField(source='project', read_only=True)
 
     class Meta:
         model = PerformanceTestCase
         fields = [
             'id', 'project', 'project_id', 'name', 'description', 'url', 'method',
-            'headers', 'body', 'concurrent_users', 'duration_seconds',
-            'ramp_up_seconds', 'requests_per_second', 'expected_response_time_ms',
-            'expected_throughput', 'expected_error_rate',
+            'headers', 'body', 'query_params', 'body_type',
+            'request_timeout', 'follow_redirects', 'verify_ssl',
+            'auth_config', 'steps', 'assertions',
+            'concurrent_users', 'duration_seconds', 'ramp_up_seconds',
+            'requests_per_second', 'think_time_min', 'think_time_max', 'weight',
+            'expected_response_time_ms', 'expected_throughput', 'expected_error_rate',
             'created_by', 'created_by_name', 'last_result',
             'created_at', 'updated_at', 'is_active'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
 
     def get_last_result(self, obj):
-        """获取最近一次执行结果"""
-        last_result = obj.results.first()
+        last_result = _latest_performance_case_result(obj)
         if last_result:
             return {
                 'id': last_result.id,
@@ -423,6 +499,17 @@ class PerformanceTestCaseSerializer(serializers.ModelSerializer):
                 'executed_at': last_result.executed_at
             }
         return None
+
+    def to_representation(self, instance):
+        """序列化时屏蔽 auth_config 中的敏感 token。"""
+        data = super().to_representation(instance)
+        auth = data.get('auth_config', {}) or {}
+        if auth.get('token') and not str(auth.get('token', '')).startswith('{{'):
+            token = str(auth.get('token', ''))
+            auth = dict(auth)
+            auth['token'] = token[:4] + '****' + token[-4:] if len(token) > 8 else '****'
+            data['auth_config'] = auth
+        return data
 
 
 class PerformanceTestCaseListSerializer(serializers.ModelSerializer):
@@ -437,8 +524,15 @@ class PerformanceTestCaseListSerializer(serializers.ModelSerializer):
         model = PerformanceTestCase
         fields = [
             'id', 'project_id', 'name', 'url', 'method', 'headers', 'body',
-            'concurrent_users', 'duration_seconds', 'created_by_name', 'created_at', 'is_active'
+            'concurrent_users', 'duration_seconds', 'ramp_up_seconds',
+            'created_by_name', 'created_at', 'is_active'
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # 列表页不返回敏感认证信息
+        data.pop('auth_config', None)
+        return data
 
 
 class PerformanceTestResultSerializer(serializers.ModelSerializer):
@@ -457,6 +551,7 @@ class PerformanceTestResultSerializer(serializers.ModelSerializer):
             'throughput', 'error_rate',
             'response_time_distribution', 'throughput_over_time',
             'response_time_over_time', 'error_details',
+            'step_results', 'assertion_results',
             'executed_by', 'executed_by_name', 'executed_at'
         ]
         read_only_fields = ['executed_at']
@@ -568,7 +663,7 @@ class ApiAutoTestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApiAutoTestCase
         fields = [
-            'id', 'suite', 'name', 'description', 'url', 'method', 'method_display',
+            'id', 'suite', 'project', 'environment', 'name', 'description', 'url', 'method', 'method_display',
             'headers', 'content_type', 'body',
             'query_params', 'form_files', 'enable_cookie_session',
             'expected_status',
@@ -576,6 +671,13 @@ class ApiAutoTestCaseSerializer(serializers.ModelSerializer):
             'created_by', 'created_by_name', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        suite = attrs.get('suite') or (self.instance.suite if self.instance else None)
+        project = attrs.get('project') or (self.instance.project if self.instance else None)
+        if not suite and not project:
+            raise serializers.ValidationError('suite 和 project 至少需要提供一个')
+        return attrs
 
 
 class ApiAutoTestCaseListSerializer(serializers.ModelSerializer):
@@ -618,7 +720,7 @@ class ApiAutoTestSuiteSerializer(serializers.ModelSerializer):
         return obj.test_cases.filter(is_active=True).count()
 
     def get_last_result(self, obj):
-        last_result = obj.test_results.first()
+        last_result = _latest_auto_suite_result(obj)
         if last_result:
             return {
                 'id': last_result.id,
@@ -649,7 +751,7 @@ class ApiAutoTestSuiteListSerializer(serializers.ModelSerializer):
         return obj.test_cases.filter(is_active=True).count()
 
     def get_last_run(self, obj):
-        last_result = obj.test_results.first()
+        last_result = _latest_auto_suite_result(obj)
         if last_result:
             return {
                 'id': last_result.id,
@@ -662,19 +764,113 @@ class ApiAutoTestSuiteListSerializer(serializers.ModelSerializer):
         return None
 
 
+def _result_semantics(metadata, *, passed, failure_type, status_code=None):
+    payload = metadata if isinstance(metadata, dict) else {}
+    expectation_type = payload.get('expectation_type') or 'success_response'
+    default_assertion_policy = payload.get('default_assertion_policy') or (
+        'expected_error_response' if expectation_type == 'error_response' else 'success_response'
+    )
+    expected_status = payload.get('expected_status')
+    provider = payload.get('provider') or 'http'
+
+    semantic_status = payload.get('semantic_status')
+    semantic_label = payload.get('semantic_label')
+    if not semantic_status or not semantic_label:
+        if expectation_type == 'error_response':
+            if passed:
+                semantic_status = 'expected_error_matched'
+                semantic_label = '预期错误响应且匹配成功'
+            elif failure_type == 'assertion_failed':
+                semantic_status = 'expected_error_unmatched'
+                semantic_label = '预期错误响应但未匹配'
+            else:
+                semantic_status = 'expected_error_execution_error'
+                semantic_label = '预期错误场景执行异常'
+        else:
+            if passed:
+                semantic_status = 'success_response_passed'
+                semantic_label = '成功响应断言通过'
+            else:
+                semantic_status = 'success_response_failed'
+                semantic_label = '测试失败'
+
+    return {
+        'provider': provider,
+        'expectation_type': expectation_type,
+        'default_assertion_policy': default_assertion_policy,
+        'expected_status': expected_status,
+        'semantic_status': semantic_status,
+        'semantic_label': semantic_label,
+        'actual_status_code': status_code,
+    }
+
+
 class ApiAutoTestCaseResultSerializer(serializers.ModelSerializer):
     """API自动化用例执行结果序列化器"""
     case_name = serializers.CharField(source='case.name', read_only=True)
     case_url = serializers.CharField(source='case.url', read_only=True)
     case_method = serializers.CharField(source='case.method', read_only=True)
+    summary = serializers.SerializerMethodField()
+    diagnosis = serializers.SerializerMethodField()
+    provider = serializers.SerializerMethodField()
+    expectation_type = serializers.SerializerMethodField()
+    default_assertion_policy = serializers.SerializerMethodField()
+    expected_status = serializers.SerializerMethodField()
+    semantic_status = serializers.SerializerMethodField()
+    semantic_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ApiAutoTestCaseResult
         fields = [
             'id', 'test_result', 'case', 'case_name', 'case_url', 'case_method',
             'status_code', 'response_body', 'response_headers', 'response_time_ms',
-            'passed', 'assertion_details', 'error_message', 'executed_at'
+            'passed', 'failure_type', 'assertion_details', 'error_message',
+            'trace_id', 'raw_status', 'error_code',
+            'request_snapshot', 'response_snapshot', 'curl',
+            'extracted_variables_preview', 'result_metadata',
+            'provider', 'expectation_type', 'default_assertion_policy', 'expected_status',
+            'semantic_status', 'semantic_label',
+            'summary', 'diagnosis',
+            'executed_at'
         ]
+
+    def get_summary(self, obj):
+        metadata = obj.result_metadata or {}
+        if isinstance(metadata, dict):
+            return metadata.get('summary') or ''
+        return ''
+
+    def get_diagnosis(self, obj):
+        metadata = obj.result_metadata or {}
+        if isinstance(metadata, dict):
+            return metadata.get('diagnosis') or None
+        return None
+
+    def _semantics(self, obj):
+        return _result_semantics(
+            obj.result_metadata,
+            passed=obj.passed,
+            failure_type=obj.failure_type,
+            status_code=obj.status_code,
+        )
+
+    def get_provider(self, obj):
+        return self._semantics(obj)['provider']
+
+    def get_expectation_type(self, obj):
+        return self._semantics(obj)['expectation_type']
+
+    def get_default_assertion_policy(self, obj):
+        return self._semantics(obj)['default_assertion_policy']
+
+    def get_expected_status(self, obj):
+        return self._semantics(obj)['expected_status']
+
+    def get_semantic_status(self, obj):
+        return self._semantics(obj)['semantic_status']
+
+    def get_semantic_label(self, obj):
+        return self._semantics(obj)['semantic_label']
 
 
 class ApiAutoTestCaseResultBriefSerializer(serializers.ModelSerializer):
@@ -686,12 +882,20 @@ class ApiAutoTestCaseResultBriefSerializer(serializers.ModelSerializer):
     assertion_total = serializers.SerializerMethodField()
     assertion_passed = serializers.SerializerMethodField()
     error_summary = serializers.SerializerMethodField()
+    provider = serializers.SerializerMethodField()
+    expectation_type = serializers.SerializerMethodField()
+    default_assertion_policy = serializers.SerializerMethodField()
+    expected_status = serializers.SerializerMethodField()
+    semantic_status = serializers.SerializerMethodField()
+    semantic_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ApiAutoTestCaseResult
         fields = [
             'id', 'case', 'case_name', 'case_url', 'case_method',
             'status_code', 'response_time_ms', 'passed',
+            'provider', 'expectation_type', 'default_assertion_policy', 'expected_status',
+            'semantic_status', 'semantic_label',
             'assertion_total', 'assertion_passed',
             'error_summary', 'executed_at',
         ]
@@ -705,11 +909,36 @@ class ApiAutoTestCaseResultBriefSerializer(serializers.ModelSerializer):
     def get_error_summary(self, obj):
         if obj.error_message:
             return obj.error_message[:300]
-        # 取第一个失败断言的 error_message
         for a in (obj.assertion_details or []):
             if not a.get('passed') and a.get('error_message'):
                 return str(a['error_message'])[:300]
         return ''
+
+    def _semantics(self, obj):
+        return _result_semantics(
+            obj.result_metadata,
+            passed=obj.passed,
+            failure_type=obj.failure_type,
+            status_code=obj.status_code,
+        )
+
+    def get_provider(self, obj):
+        return self._semantics(obj)['provider']
+
+    def get_expectation_type(self, obj):
+        return self._semantics(obj)['expectation_type']
+
+    def get_default_assertion_policy(self, obj):
+        return self._semantics(obj)['default_assertion_policy']
+
+    def get_expected_status(self, obj):
+        return self._semantics(obj)['expected_status']
+
+    def get_semantic_status(self, obj):
+        return self._semantics(obj)['semantic_status']
+
+    def get_semantic_label(self, obj):
+        return self._semantics(obj)['semantic_label']
 
 
 class ApiAutoTestResultSerializer(serializers.ModelSerializer):
@@ -869,6 +1098,7 @@ class TestEnvironmentSerializer(serializers.ModelSerializer):
         model = TestEnvironment
         fields = [
             'id', 'project', 'name', 'base_url', 'variables',
+            'allowed_hosts', 'allowed_cidrs',
             'description', 'is_default',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
         ]
@@ -884,6 +1114,38 @@ class TestEnvironmentSerializer(serializers.ModelSerializer):
             if not isinstance(k, str) or not k.strip():
                 raise serializers.ValidationError('变量名必须是非空字符串')
         return value
+
+    def validate_allowed_hosts(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('allowed_hosts 必须是数组')
+        from .environment_security import normalize_allowed_host
+        out = []
+        try:
+            for item in value:
+                out.append(normalize_allowed_host(item))
+        except serializers.ValidationError:
+            raise
+        except Exception as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return out
+
+    def validate_allowed_cidrs(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('allowed_cidrs 必须是数组')
+        from .environment_security import validate_allowed_cidr
+        out = []
+        try:
+            for item in value:
+                out.append(validate_allowed_cidr(item))
+        except serializers.ValidationError:
+            raise
+        except Exception as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return out
 
     def validate(self, attrs):
         if self.instance and 'project' in attrs and attrs['project'].id != self.instance.project_id:
@@ -943,3 +1205,69 @@ class TestGlobalVarSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'key': '该项目下已存在同名全局变量'})
         return attrs
 
+
+
+# ---------------------------------------------------------------------------
+# CI/CD Config serializer — unified serialization with frontend compatibility aliases
+# ---------------------------------------------------------------------------
+
+class CiCdConfigSerializer(serializers.ModelSerializer):
+    ci_token_display = serializers.SerializerMethodField()
+
+    # Frontend compatibility aliases (read-only)
+    type = serializers.CharField(source='ci_type', read_only=True)
+    test_suite = serializers.JSONField(source='test_suite_ids', read_only=True)
+    enabled = serializers.BooleanField(source='is_active', read_only=True)
+    status = serializers.SerializerMethodField()
+    project_id = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+
+    # Write-only project_id that maps to the project FK
+    write_only_project_id = serializers.PrimaryKeyRelatedField(
+        source='project',
+        queryset=CiCdConfig._meta.get_field('project').remote_field.model.objects.all(),
+        write_only=True,
+        required=False,
+    )
+
+    class Meta:
+        model = CiCdConfig
+        fields = [
+            "id", "name", "ci_type", "type",
+            "ci_url", "ci_token", "ci_token_display",
+            "ci_project", "ci_job_name", "verify_ssl",
+            "webhook_url", "api_token", "branch",
+            "auto_trigger", "test_suite_ids", "test_suite",
+            "headers", "is_active", "enabled", "status",
+            "project", "project_id", "write_only_project_id",
+            "created_by", "created_by_name",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "created_by", "created_at", "updated_at",
+            "ci_token_display", "project",
+        ]
+        extra_kwargs = {
+            "ci_token": {"write_only": True},
+            "api_token": {"write_only": True},
+        }
+
+    def get_ci_token_display(self, obj):
+        """Return a masked version of ci_token for display."""
+        token = obj.ci_token or ""
+        if len(token) <= 4:
+            return "****"
+        return token[:4] + "*" * (len(token) - 4)
+
+    def get_status(self, obj):
+        return 'active' if obj.is_active else 'inactive'
+
+    def get_project_id(self, obj):
+        return str(obj.project_id) if obj.project_id else None
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.username if obj.created_by else ''
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)

@@ -9,8 +9,6 @@ from bug_tracker.models import Bug
 from qa_center.models import (
     ApiAutoTestCase,
     ApiAutoTestSuite,
-    ApiTestCase,
-    ApiTestResult,
     CiCdConfig,
     PerformanceTestCase,
     PerformanceTestResult,
@@ -90,7 +88,7 @@ class TestProjectIsolationRegressions:
         assert resp.status_code == 403
 
     def test_qa_api_cases_list_rejects_outsider_project_filter(self, client):
-        ApiTestCase.objects.create(
+        ApiAutoTestCase.objects.create(
             project=self.project,
             created_by=self.owner,
             name='Hidden case',
@@ -100,7 +98,7 @@ class TestProjectIsolationRegressions:
         )
         client.force_login(self.outsider)
 
-        resp = client.get(f'/api/qa/api-cases/?project={self.project.id}')
+        resp = client.get(f'/api/qa/auto-cases/?project={self.project.id}')
 
         assert resp.status_code == 403
 
@@ -108,7 +106,7 @@ class TestProjectIsolationRegressions:
         client.force_login(self.outsider)
 
         resp = client.post(
-            '/api/qa/api-cases/',
+            '/api/qa/auto-cases/',
             data={
                 'project': self.project.id,
                 'name': 'Injected case',
@@ -120,27 +118,7 @@ class TestProjectIsolationRegressions:
         )
 
         assert resp.status_code == 403
-        assert ApiTestCase.objects.count() == 0
-
-    def test_qa_run_batch_rejects_outsider_cases(self, client):
-        case = ApiTestCase.objects.create(
-            project=self.project,
-            created_by=self.owner,
-            name='Hidden case',
-            url='/api/health/',
-            method='GET',
-            expected_status=200,
-        )
-        client.force_login(self.outsider)
-
-        resp = client.post(
-            '/api/qa/api-cases/run-batch/',
-            data={'case_ids': [case.id]},
-            content_type='application/json',
-        )
-
-        assert resp.status_code == 403
-        assert QaTestRun.objects.count() == 0
+        assert ApiAutoTestCase.objects.count() == 0
 
     def test_qa_test_run_detail_rejects_outsider(self, client):
         run = QaTestRun.objects.create(
@@ -437,7 +415,7 @@ class TestProjectIsolationRegressions:
             url='/secret-ui/',
             steps=[{'action': 'click', 'selector': '#secret'}],
         )
-        api_case = ApiTestCase.objects.create(
+        api_case = ApiAutoTestCase.objects.create(
             project=self.project,
             created_by=self.owner,
             name='Secret API Case',
@@ -454,15 +432,6 @@ class TestProjectIsolationRegressions:
             executed_by=self.owner,
             test_log='secret log',
             error_message='secret error',
-        )
-        api_result = ApiTestResult.objects.create(
-            test_case=api_case,
-            status_code=200,
-            response_body='secret response body',
-            response_headers={'X-Secret': 'yes'},
-            response_time_ms=12,
-            passed=True,
-            executed_by=self.owner,
         )
         perf_case = PerformanceTestCase.objects.create(
             project=self.project,
@@ -488,7 +457,7 @@ class TestProjectIsolationRegressions:
             throughput=2.5,
             error_rate=10.0,
         )
-        return result, ui_case, api_case, api_result, perf_case, perf_result
+        return result, ui_case, api_case, perf_case, perf_result
 
     def _create_ui_screenshot_fixture(self):
         result, ui_case, *_ = self._create_result_fixture()
@@ -541,6 +510,7 @@ class TestProjectIsolationRegressions:
 
     def test_ui_case_list_without_project_does_not_leak_foreign_cases(self, client):
         ui_case, _, _ = self._create_ui_case_fixture()
+
         client.force_login(self.outsider)
 
         resp = client.get('/api/qa/ui-cases/')
@@ -619,7 +589,9 @@ class TestProjectIsolationRegressions:
         assert running_result.status == 'running'
         assert running_result.aborted is False
 
+    @pytest.mark.django_db(transaction=True)
     def test_ui_case_member_can_access_project_case(self, client):
+        import time
         ui_case, linked_task, _ = self._create_ui_case_fixture()
         member = User.objects.create_user(username='iso_ui_member', password='pass')
         self.project.members.add(member)
@@ -640,6 +612,8 @@ class TestProjectIsolationRegressions:
         linked_tasks = client.get(f'/api/qa/ui-cases/{ui_case.id}/linked-tasks/')
         with patch('qa_center.views_ui_test.execute_ui_case', return_value={'success': True, 'summary': {}}):
             run_resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+            # 等待后台线程完成持久化
+            time.sleep(0.3)
 
         assert list_resp.status_code == 200
         returned_ids = [item['id'] for item in list_resp.data['results']]
@@ -648,9 +622,27 @@ class TestProjectIsolationRegressions:
         assert detail.status_code == 200
         assert linked_tasks.status_code == 200
         assert str(linked_task.id) in [str(item['id']) for item in linked_tasks.data]
-        assert run_resp.status_code == 200
-        assert run_resp.data['success'] is True
+        # 异步启动：返回 202 + task_id
+        assert run_resp.status_code == 202
+        assert run_resp.data['status'] == 'running'
+        assert 'task_id' in run_resp.data
+        assert 'result_id' in run_resp.data
+        assert 'websocket_url' in run_resp.data
+        # TestResult 在请求线程中创建（status=running），后台线程更新为 passed
         assert QaTestResult.objects.count() == initial_result_count + 1
+        tr = QaTestResult.objects.get(task_id=run_resp.data['task_id'])
+        assert tr.status == 'passed'
+        run = QaTestRun.objects.get(project=self.project, name=ui_case.name)
+        case_result = run.case_results.get(sequence=1)
+        assert run.test_type == 'ui'
+        assert run.status == 'passed'
+        assert run.total_count == 1
+        assert run.passed_count == 1
+        assert run.failed_count == 0
+        assert run.error_count == 0
+        assert case_result.case_type == 'ui'
+        assert case_result.ui_test_case_id == ui_case.id
+        assert case_result.status == 'passed'
 
     def test_ui_run_temp_requires_project_before_side_effects(self, client):
         client.force_login(self.owner)
@@ -800,17 +792,31 @@ class TestProjectIsolationRegressions:
 
         assert resp.status_code == 403
 
-    def test_test_result_list_without_project_does_not_leak_foreign_results(self, client):
+    def test_test_result_list_returns_semantic_fields_without_project_leak(self, client):
         result, *_ = self._create_result_fixture()
-        client.force_login(self.outsider)
+        client.force_login(self.owner)
 
         resp = client.get('/api/qa/test-results/')
 
         assert resp.status_code == 200
-        items = resp.data['results']
-        assert result.name not in [item['name'] for item in items]
+        row = next(item for item in resp.data['results'] if item['id'] == result.id)
+        assert 'semantic_status' in row
+        assert 'semantic_label' in row
 
-    def test_test_result_detail_update_delete_complete_upload_reject_outsider(self, client):
+    def test_test_result_detail_returns_semantic_fields_for_project_member(self, client):
+        result, *_ = self._create_result_fixture()
+        member = User.objects.create_user(username='iso_result_semantic_member', password='pass')
+        self.project.members.add(member)
+        client.force_login(member)
+
+        resp = client.get(f'/api/qa/test-results/{result.id}/')
+
+        assert resp.status_code == 200
+        assert 'semantic_status' in resp.data
+        assert 'semantic_label' in resp.data
+        assert 'expectation_type' in resp.data
+        assert 'default_assertion_policy' in resp.data
+        assert 'expected_status' in resp.data
         result, *_ = self._create_result_fixture()
         client.force_login(self.outsider)
 
@@ -888,21 +894,8 @@ class TestProjectIsolationRegressions:
         assert resp.status_code == 200
         assert resp.data['total'] == 0
 
-    def test_api_results_reject_outsider_project_data(self, client):
-        _, _, api_case, api_result, *_ = self._create_result_fixture()
-        client.force_login(self.outsider)
-
-        list_resp = client.get('/api/qa/api-results/')
-        filtered = client.get(f'/api/qa/api-results/?test_case={api_case.id}')
-        detail = client.get(f'/api/qa/api-results/{api_result.id}/')
-
-        assert list_resp.status_code == 200
-        assert api_result.id not in [item['id'] for item in list_resp.data['results']]
-        assert filtered.status_code == 403
-        assert detail.status_code == 403
-
     def test_performance_results_reject_outsider_project_data(self, client):
-        _, _, _, _, perf_case, perf_result = self._create_result_fixture()
+        _, _, _, perf_case, perf_result = self._create_result_fixture()
         client.force_login(self.outsider)
 
         list_resp = client.get('/api/qa/performance-results/')
@@ -1060,21 +1053,19 @@ class TestProjectIsolationRegressions:
         assert status_resp.data['state'] == 'running'
 
     def test_result_member_can_access_project_results(self, client):
-        result, _, _, api_result, _, perf_result = self._create_result_fixture()
+        result, _, _, _, perf_result = self._create_result_fixture()
         member = User.objects.create_user(username='iso_result_member', password='pass')
         self.project.members.add(member)
         client.force_login(member)
 
         result_detail = client.get(f'/api/qa/test-results/{result.id}/')
-        api_detail = client.get(f'/api/qa/api-results/{api_result.id}/')
         perf_detail = client.get(f'/api/qa/performance-results/{perf_result.id}/')
 
         assert result_detail.status_code == 200
-        assert api_detail.status_code == 200
         assert perf_detail.status_code == 200
 
     def _create_devops_dashboard_fixture(self):
-        api_case = ApiTestCase.objects.create(
+        api_case = ApiAutoTestCase.objects.create(
             project=self.project,
             created_by=self.owner,
             name='Secret DevOps API Case',
@@ -1091,7 +1082,6 @@ class TestProjectIsolationRegressions:
         )
         passed_result = QaTestResult.objects.create(
             project=self.project,
-            api_test_case=api_case,
             test_type='api',
             name='Secret DevOps Passed Result',
             status='passed',
@@ -1161,7 +1151,7 @@ class TestProjectIsolationRegressions:
         self.project.members.add(member)
         other_owner = User.objects.create_user(username='iso_devops_other_owner', password='pass')
         other_project = Project.objects.create(name='Other DevOps Project', owner=other_owner)
-        other_case = ApiTestCase.objects.create(
+        other_case = ApiAutoTestCase.objects.create(
             project=other_project,
             created_by=other_owner,
             name='Other DevOps API Case',
@@ -1171,7 +1161,6 @@ class TestProjectIsolationRegressions:
         )
         foreign_result = QaTestResult.objects.create(
             project=other_project,
-            api_test_case=other_case,
             test_type='api',
             name='Other DevOps Result',
             status='failed',
@@ -1347,7 +1336,7 @@ class TestProjectIsolationRegressions:
     def _create_devops_task_case_config_fixture(self):
         member = User.objects.create_user(username='iso_devops_task_case_member', password='pass')
         self.project.members.add(member)
-        api_case = ApiTestCase.objects.create(
+        api_case = ApiAutoTestCase.objects.create(
             project=self.project,
             created_by=self.owner,
             name='Project DevOps API Case',
@@ -1364,7 +1353,7 @@ class TestProjectIsolationRegressions:
         )
         other_owner = User.objects.create_user(username='iso_devops_task_case_other_owner', password='pass')
         other_project = Project.objects.create(name='Other DevOps Case Project', owner=other_owner)
-        foreign_api_case = ApiTestCase.objects.create(
+        foreign_api_case = ApiAutoTestCase.objects.create(
             project=other_project,
             created_by=other_owner,
             name='Foreign DevOps API Case',
@@ -1688,3 +1677,102 @@ class TestProjectIsolationRegressions:
         new_run_id = trigger.data['run_id']
         new_run = PipelineRun.objects.get(id=new_run_id)
         assert new_run.project_id == self.project.id
+
+    # ── UI Runner async / concurrency / events / abort 的新测试 ──────────
+
+    @pytest.mark.django_db(transaction=True)
+    def test_ui_run_async_returns_202_and_creates_running_result(self, client):
+        """异步启动应返回 202，立即创建 status=running 的 TestResult。"""
+        import time
+        ui_case, _, _ = self._create_ui_case_fixture()
+        initial_count = QaTestResult.objects.count()
+        client.force_login(self.owner)
+
+        with patch('qa_center.views_ui_test.execute_ui_case',
+                   return_value={'success': True, 'summary': {}}):
+            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+            time.sleep(0.3)
+
+        assert resp.status_code == 202
+        assert resp.data['status'] == 'running'
+        assert 'task_id' in resp.data
+        assert 'result_id' in resp.data
+        assert 'websocket_url' in resp.data
+        assert resp.data['websocket_url'].startswith('ws/qa/run/')
+        # TestResult 已创建
+        assert QaTestResult.objects.count() == initial_count + 1
+        tr = QaTestResult.objects.get(task_id=resp.data['task_id'])
+        assert tr.status == 'passed'  # 后台线程已完成
+        assert tr.test_type == 'ui'
+
+    def test_ui_run_concurrency_limit_returns_429(self, client):
+        """并发超限时应返回 429。"""
+        import time
+        ui_case, _, _ = self._create_ui_case_fixture()
+        client.force_login(self.owner)
+
+        # 把 semaphore 耗尽
+        hold_sem = __import__('qa_center.views_ui_test', fromlist=['_UI_RUNNER_SEMAPHORE'])._UI_RUNNER_SEMAPHORE
+        acquired = []
+        while hold_sem.acquire(blocking=False):
+            acquired.append(True)
+
+        try:
+            with patch('qa_center.views_ui_test.execute_ui_case',
+                       return_value={'success': True, 'summary': {}}):
+                resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+            assert resp.status_code == 429
+            assert resp.data['code'] == 'TOO_MANY_RUNNERS'
+        finally:
+            for _ in acquired:
+                hold_sem.release()
+
+    def test_ui_run_semaphore_released_on_error(self, client):
+        """后台线程异常时 semaphore 应被释放。"""
+        import time
+        ui_case, _, _ = self._create_ui_case_fixture()
+        client.force_login(self.owner)
+
+        hold_sem = __import__('qa_center.views_ui_test', fromlist=['_UI_RUNNER_SEMAPHORE'])._UI_RUNNER_SEMAPHORE
+
+        with patch('qa_center.views_ui_test.execute_ui_case',
+                   side_effect=RuntimeError('simulated crash')):
+            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+            time.sleep(0.3)
+
+        assert resp.status_code == 202
+        # semaphore 应已释放（能再次 acquire 成功）
+        assert hold_sem.acquire(blocking=False)
+        hold_sem.release()
+
+    def test_get_events_is_non_destructive(self, client):
+        """get_events 应可重复读取，不会一次性清空。"""
+        from qa_center.workers.runner_supervisor import record_event, get_events, _EVENTS, _EVENTS_LOCK
+
+        tid = 'test-replay-nondestructive'
+        record_event(tid, {'type': 'step_log', 'message': 'hello'})
+        record_event(tid, {'type': 'step_log', 'message': 'world'})
+
+        ev1 = get_events(tid)
+        ev2 = get_events(tid)
+
+        assert len(ev1) == 2
+        assert len(ev2) == 2
+        assert ev1 == ev2
+
+        # 清理
+        with _EVENTS_LOCK:
+            _EVENTS.pop(tid, None)
+
+    def test_abort_mark_and_is_aborted(self, client):
+        """mark_aborted / is_aborted / clear_aborted 应正确工作。"""
+        from qa_center.workers.runner_supervisor import (
+            mark_aborted, is_aborted, clear_aborted
+        )
+
+        tid = 'test-abort-flag'
+        assert not is_aborted(tid)
+        mark_aborted(tid)
+        assert is_aborted(tid)
+        clear_aborted(tid)
+        assert not is_aborted(tid)

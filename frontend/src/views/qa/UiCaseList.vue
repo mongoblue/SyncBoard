@@ -115,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
@@ -128,9 +128,11 @@ import {
   Delete
 } from '@element-plus/icons-vue';
 import service from '@/utils/request';
+import { useBoardStore } from '@/stores/board';
 
 const router = useRouter();
 const route = useRoute();
+const boardStore = useBoardStore();
 
 const cases = ref<any[]>([]);
 const projects = ref<any[]>([]);
@@ -153,8 +155,10 @@ const loadCases = async () => {
   loading.value = true;
   try {
     const params: any = {};
-    if (selectedProject.value) {
-      params.project = selectedProject.value;
+    // 始终使用当前项目过滤（优先使用手动选择的项目，回退到全局项目上下文）
+    const effectiveProject = selectedProject.value || boardStore.currentProject?.id;
+    if (effectiveProject) {
+      params.project = effectiveProject;
     }
     const res = await service.get('/qa/ui-cases/', { params });
     // 处理分页响应
@@ -229,7 +233,19 @@ const handleDelete = async (row: any) => {
 };
 
 onMounted(() => {
+  // 如果没有手动选择项目，使用全局项目上下文
+  if (!selectedProject.value && boardStore.currentProject?.id) {
+    selectedProject.value = boardStore.currentProject.id;
+  }
   loadProjects();
+  loadCases();
+});
+
+// 全局项目切换时自动刷新列表
+watch(() => boardStore.currentProject?.id, (newProjectId) => {
+  if (newProjectId && !selectedProject.value) {
+    selectedProject.value = newProjectId;
+  }
   loadCases();
 });
 </script>

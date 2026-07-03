@@ -35,8 +35,8 @@ export function useRecorderSocket(options: RecorderSocketOptions = {}) {
   function open() {
     if (ws.value) return
     const path = projectId
-      ? `/ws/qa/recorder/${encodeURIComponent(projectId)}/`
-      : '/ws/qa/recorder/'
+      ? `ws/qa/recorder/${encodeURIComponent(projectId)}/`
+      : 'ws/qa/recorder/'
     const sock = new WebSocket(buildWsUrl(path))
     ws.value = sock
     status.value = 'connecting'

@@ -22,9 +22,14 @@
         <template #header>
           <div class="card-header">
             <span>基本信息</span>
-            <el-tag :type="getStatusType(result.status)" size="large">
-              {{ result.status_display }}
-            </el-tag>
+            <div class="header-tags">
+              <el-tag :type="semanticTagType(result)" size="large">
+                {{ semanticLabel(result) }}
+              </el-tag>
+              <span v-if="result.expectation_type === 'error_response' && result.expected_status" class="semantic-hint">
+                期望 {{ result.expected_status }}
+              </span>
+            </div>
           </div>
         </template>
 
@@ -45,6 +50,23 @@
           <el-descriptions-item label="创建时间">{{ formatDate(result.created_at) }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
+
+      <!-- API 旧结果 deprecation banner -->
+      <el-alert
+        v-if="isLegacyApiTest"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="API 用例执行已迁移到新流程"
+        style="margin-bottom: 20px;"
+      >
+        <div>
+          API 自动化用例现已统一使用 <code>ApiAutoTestResult</code> 模型，本页保留用于查看历史记录。
+          新执行请前往
+          <router-link v-if="result.project" :to="`/projects/${result.project}/qa/auto-results`" class="link">API 自动化结果列表</router-link>
+          查看结构化详情（诊断、断言 diff、请求/响应快照）。
+        </div>
+      </el-alert>
 
       <!-- 执行摘要 -->
       <!-- 错误码/堆栈告警 -->
@@ -247,6 +269,10 @@
             </template>
 
             <div class="case-detail">
+              <!-- 无详细数据时的提示 -->
+              <div v-if="!caseResult.request && !caseResult.response && !caseResult.assertions?.length" class="detail-section">
+                <el-empty description="此用例无详细执行数据（可能为模拟执行或执行异常）" :image-size="80" />
+              </div>
               <!-- UI 测试步骤 -->
               <div v-if="caseResult.type === 'ui' && caseResult.steps && caseResult.steps.length > 0" class="detail-section">
                 <div class="section-title">
@@ -389,13 +415,18 @@
         <div>此测试结果是旧格式数据，建议重新执行测试任务以查看详细的执行步骤和截图。</div>
       </el-alert>
 
-      <!-- 原始测试日志 -->
+      <!-- 原始测试日志（默认收起，高级排查使用） -->
       <el-card v-if="result.test_log && !isOldDataFormat" class="log-card">
         <template #header>
           <span>原始日志</span>
         </template>
         <div class="log-content">
-          <pre>{{ formatJson(result.test_log) }}</pre>
+          <CollapsibleRawJson
+            :data="parsedTestLog"
+            label="原始 JSON（高级）"
+            :default-open="false"
+            name="test_log"
+          />
         </div>
       </el-card>
 
@@ -455,6 +486,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { ArrowLeft, Refresh, Upload, Download, Check, List, Picture, CircleCheck, CircleClose, Timer, Setting, Warning } from '@element-plus/icons-vue';
 import service from '@/utils/request';
+import CollapsibleRawJson from './components/result/CollapsibleRawJson.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -484,15 +516,23 @@ const caseResults = computed(() => {
   if (!result.value?.test_log) return [];
   try {
     const log = JSON.parse(result.value.test_log);
+    let items = [];
     // 新格式: { summary: {}, results: [] }
     if (log.results && Array.isArray(log.results)) {
-      return log.results;
+      items = log.results;
     }
     // 旧格式兼容: 直接是数组
-    if (Array.isArray(log)) {
-      return log;
+    else if (Array.isArray(log)) {
+      items = log;
     }
-    return [];
+    // 兼容模拟执行结果：将 status 字段转换为 passed 布尔值
+    return items.map((item: any) => ({
+      ...item,
+      passed: item.passed !== undefined
+        ? item.passed
+        : (item.status === 'passed'),
+      case_name: item.case_name || item.case || `用例 #${item.case_id || item.step || '?'}`,
+    }));
   } catch {
     return [];
   }
@@ -516,10 +556,23 @@ const isOldDataFormat = computed(() => {
   }
 });
 
+// 解析后的 test_log，供 CollapsibleRawJson 使用
+const parsedTestLog = computed(() => {
+  if (!result.value?.test_log) return null;
+  try {
+    return JSON.parse(result.value.test_log);
+  } catch {
+    return result.value.test_log;
+  }
+});
+
 // 是否是性能测试
 const isPerformanceTest = computed(() => {
   return result.value?.test_type === 'performance';
 });
+
+// 是否是 API 类型（旧 TestResult）— P1 后 API 用例统一走 ApiAutoTestResult
+const isLegacyApiTest = computed(() => result.value?.test_type === 'api');
 
 // 性能测试指标
 const performanceMetrics = computed(() => {
@@ -608,6 +661,25 @@ const getTestTypeType = (type: string) => {
     'regression': 'info'
   };
   return types[type] || 'info';
+};
+
+const semanticLabel = (row: any) => {
+  if (!row) return '未知结果';
+  return row.semantic_label || row.status_display || '未知结果';
+};
+
+const semanticTagType = (row: any) => {
+  const semantic = row?.semantic_status || '';
+  if (semantic === 'expected_error_matched' || semantic === 'success_response_passed' || semantic === 'result_passed') {
+    return 'success';
+  }
+  if (semantic === 'expected_error_unmatched' || semantic === 'success_response_failed' || semantic === 'result_failed') {
+    return 'danger';
+  }
+  if (semantic === 'expected_error_execution_error' || semantic === 'result_error') {
+    return 'warning';
+  }
+  return getStatusType(row?.status);
 };
 
 // 获取状态码样式
@@ -754,6 +826,18 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.semantic-hint {
+  font-size: 12px;
+  color: var(--color-text-secondary);
 }
 
 .metric-item {

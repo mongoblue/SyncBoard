@@ -418,6 +418,37 @@ def test_assertion_result_to_dict_includes_rendered():
     assert d['actual_rendered'] == '30 (str)'
 
 
+def test_backward_compatible_normalize_and_run_assertions_with_legacy_aliases():
+    ctx = ua.ResponseContext.from_raw(
+        status_code=200,
+        response_body='{"items":["grpc","mqtt"],"name":"queue-a"}',
+        response_headers={},
+        response_time_ms=5,
+    )
+    normalized = ua.normalize_one({
+        'assertion_type': 'json_equals',
+        'json_path': '$.name',
+        'comparison_operator': '==',
+        'expected_value': 'queue-a',
+    })
+
+    assert normalized is not None
+    assert normalized.operator == 'eq'
+
+    results = ua.run_assertions([
+        {
+            'assertion_type': 'json_equals',
+            'json_path': '$.items',
+            'comparison_operator': 'in',
+            'expected_value': 'grpc',
+        }
+    ], ctx)
+
+    assert results[0]['assertion_type'] == 'json_equals'
+    assert results[0]['operator'] == 'in'
+    assert results[0]['passed'] is True
+
+
 def test_evaluate_fills_rendered_on_failure():
     """evaluate 失败时自动填 expected_rendered/actual_rendered"""
     from qa_center.unified_assertions import (

@@ -709,7 +709,7 @@ def execute_tool(tool_name: str, tool_args: dict, project_id: str, user) -> str:
 
     # ---- QA: API 测试用例 ----
     elif tool_name == "create_api_test_case":
-        from qa_center.models import ApiTestCase
+        from qa_center.models import ApiAutoTestCase
         name = tool_args.get("name", "")
         url = tool_args.get("url", "").strip()
         method = tool_args.get("method", "GET").upper()
@@ -746,20 +746,19 @@ def execute_tool(tool_name: str, tool_args: dict, project_id: str, user) -> str:
                     expected_response = {"assertions": assertions}
             except: pass
 
-        case = ApiTestCase.objects.create(
+        case = ApiAutoTestCase.objects.create(
             project=project, name=name, url=url, method=method,
             headers=headers, body=body,
             expected_status=expected_status,
-            expected_response=expected_response,
             created_by=user,
         )
         return f"已创建 API 测试用例「{case.name}」(ID: {case.id}) — {method} {url}" + \
                (f"，期望状态码: {expected_status}" if expected_status else "")
 
     elif tool_name == "list_api_cases":
-        from qa_center.models import ApiTestCase
+        from qa_center.models import ApiAutoTestCase
         kw = tool_args.get("keyword", "")
-        qs = ApiTestCase.objects.filter(project=project)
+        qs = ApiAutoTestCase.objects.filter(project=project)
         if kw:
             qs = qs.filter(name__icontains=kw)
         cases = qs[:15]
@@ -771,9 +770,9 @@ def execute_tool(tool_name: str, tool_args: dict, project_id: str, user) -> str:
         return f"共 {qs.count()} 个 API 用例，显示前 {len(lines)} 个：\n" + "\n".join(lines)
 
     elif tool_name == "run_api_test":
-        from qa_center.models import ApiTestCase
+        from qa_center.models import ApiAutoTestCase
         case_name = tool_args.get("case_name", "")
-        case = ApiTestCase.objects.filter(project=project, name__icontains=case_name).first()
+        case = ApiAutoTestCase.objects.filter(project=project, name__icontains=case_name).first()
         if not case:
             return f"未找到名称包含「{case_name}」的 API 用例"
 
@@ -850,27 +849,79 @@ def execute_tool(tool_name: str, tool_args: dict, project_id: str, user) -> str:
         return f"已创建测试任务「{task.name}」(ID: {task.id})，类型: {test_type}，包含 {len(api_ids)} 个 API 用例和 {len(ui_ids)} 个 UI 用例"
 
     elif tool_name == "execute_test_task":
-        from qa_center.models import TestTask
+        from qa_center.models import TestTask, TestResult
         task_name = tool_args.get("task_name", "")
-        task = TestTask.objects.filter(project=project, name__icontains=task_name, status='idle').first()
+        task = TestTask.objects.filter(project=project, name__icontains=task_name, status="idle").first()
         if not task:
             task = TestTask.objects.filter(project=project, name__icontains=task_name).first()
         if not task:
             return f"未找到名称包含「{task_name}」的测试任务"
-        # 调用执行逻辑
-        from qa_center.views_devops import TestTaskExecuteView
-        task.status = 'running'
+        if task.status == "running":
+            return f"测试任务「{task.name}」正在执行中，请等待完成"
+
+        task.status = "running"
         task.execution_count += 1
         task.save()
+
         import threading
         def run_bg():
             try:
-                from qa_center.views_devops import DashboardStatsView
-                task.status = 'completed'
+                from qa_center.models import ApiAutoTestCase, UiTestCase
+                config = task.test_config or {}
+                api_ids = config.get("api_cases", [])
+                ui_ids = config.get("ui_cases", [])
+
+                results = []
+                # Execute API tests
+                if api_ids:
+                    from django.test import Client
+                    import time, json as _json
+                    client = Client()
+                    for aid in api_ids:
+                        try:
+                            case = ApiAutoTestCase.objects.get(pk=aid, project=project)
+                            start = time.time()
+                            headers = case.headers if isinstance(case.headers, dict) else {}
+                            body_data = case.body if isinstance(case.body, str) else _json.dumps(case.body, ensure_ascii=False)
+                            method = case.method.upper()
+                            if method == "GET":
+                                resp = client.get(case.url, **{k: str(v) for k, v in headers.items()})
+                            elif method in ("POST", "PUT", "PATCH", "DELETE"):
+                                fn = getattr(client, method.lower())
+                                resp = fn(case.url, data=body_data, content_type="application/json")
+                            else:
+                                continue
+                            elapsed = int((time.time() - start) * 1000)
+                            passed = resp.status_code == case.expected_status if case.expected_status else 200 <= resp.status_code < 300
+                            TestResult.objects.create(
+                                project=project, test_task=task, name=case.name,
+                                test_type="api", status="passed" if passed else "failed",
+                                duration_ms=elapsed,
+                                error_message=f"Status: {resp.status_code}" if not passed else "",
+                            )
+                            results.append(passed)
+                        except Exception as e:
+                            TestResult.objects.create(
+                                project=project, test_task=task, name=f"API-{aid}",
+                                test_type="api", status="error", error_message=str(e),
+                            )
+                # Skip UI tests (require Playwright environment)
+                if ui_ids:
+                    for uid in ui_ids:
+                        TestResult.objects.create(
+                            project=project, test_task=task, name=f"UI-{uid}",
+                            test_type="ui", status="skipped",
+                            error_message="UI tests require Playwright environment",
+                        )
+
+                total = len(results)
+                passed_count = sum(results)
+                task.status = "completed" if passed_count == total else ("failed" if passed_count == 0 else "partial")
                 task.save()
             except Exception as e:
-                task.status = 'failed'
+                task.status = "failed"
                 task.save()
+
         threading.Thread(target=run_bg, daemon=True).start()
         return f"已触发测试任务「{task.name}」（ID: {task.id}），正在后台执行..."
 

@@ -252,9 +252,9 @@ UI 用例编辑 + 录制面板。
                 <el-icon><Monitor /></el-icon>
                 <span>执行结果</span>
               </div>
-              <el-tag :type="testResult.success ? 'success' : 'danger'" size="large">
-                {{ testResult.success ? '✅ 成功' : '❌ 失败' }}
-              </el-tag>
+              <el-tag v-if="testResult.success === true" type="success" size="large">✅ 成功</el-tag>
+              <el-tag v-else-if="testResult.success === false" type="danger" size="large">❌ 失败</el-tag>
+              <el-tag v-else type="warning" size="large">⏳ 运行中</el-tag>
             </div>
           </template>
 
@@ -585,12 +585,9 @@ const handleSave = async () => {
   }
 };
 
-// 运行测试（已保存的用例，同步：后端跑完再统一展示到右侧控制台）
+// 运行测试（已保存的用例，同步模式）
 const handleRun = async () => {
-  if (!isEdit.value) {
-    ElMessage.warning('请先保存用例');
-    return;
-  }
+  if (!isEdit.value) { ElMessage.warning('请先保存用例'); return; }
 
   running.value = true;
   testResult.value = null;
@@ -604,7 +601,7 @@ const handleRun = async () => {
     if (res.success) {
       ElMessage.success('测试执行成功');
     } else {
-      ElMessage.error('测试执行失败');
+      ElMessage.error(res.error || '测试执行失败');
     }
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '运行测试失败');

@@ -1,17 +1,14 @@
 """TestRun 操作端点 (cancel 等)"""
 import logging
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.utils import timezone
-from django.db import close_old_connections
 
-from .models import TestRun, TestRunCaseResult, ApiTestCase
-from room.project_access import ensure_project_id_access, project_access_q, user_can_access_project
+from .models import TestRun, TestRunCaseResult
+from room.project_access import ensure_project_id_access, project_access_q
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +122,7 @@ def test_run_cases(request, run_id):
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
     _ensure_run_project_access(request, run)
 
-    qs = run.case_results.select_related('api_test_case', 'ui_test_case').order_by('sequence')
+    qs = run.case_results.select_related('api_auto_case', 'ui_test_case').order_by('sequence')
     status_filter = request.query_params.get('status')
     if status_filter:
         qs = qs.filter(status=status_filter)
@@ -150,7 +147,7 @@ def test_run_cases(request, run_id):
 def test_run_case_detail(request, run_id, case_result_id):
     try:
         case_result = TestRunCaseResult.objects.select_related(
-            'test_run__project', 'api_test_case', 'ui_test_case'
+            'test_run__project', 'api_auto_case', 'ui_test_case'
         ).get(id=case_result_id, test_run_id=run_id)
     except TestRunCaseResult.DoesNotExist:
         return Response({'error': 'CaseResult 不存在'}, status=status.HTTP_404_NOT_FOUND)
@@ -180,19 +177,68 @@ def _serialize_run(run):
     }
 
 
+def _result_semantics(case_result):
+    payload = case_result.result_metadata if isinstance(case_result.result_metadata, dict) else {}
+    expectation_type = payload.get('expectation_type') or 'success_response'
+    default_assertion_policy = payload.get('default_assertion_policy') or (
+        'expected_error_response' if expectation_type == 'error_response' else 'success_response'
+    )
+    expected_status = payload.get('expected_status')
+    provider = payload.get('provider') or 'http'
+    semantic_status = payload.get('semantic_status')
+    semantic_label = payload.get('semantic_label')
+
+    passed = case_result.status == 'passed'
+    failure_like = case_result.status == 'failed'
+    if not semantic_status or not semantic_label:
+        if expectation_type == 'error_response':
+            if passed:
+                semantic_status = 'expected_error_matched'
+                semantic_label = '预期错误响应且匹配成功'
+            elif failure_like:
+                semantic_status = 'expected_error_unmatched'
+                semantic_label = '预期错误响应但未匹配'
+            else:
+                semantic_status = 'expected_error_execution_error'
+                semantic_label = '预期错误场景执行异常'
+        else:
+            if passed:
+                semantic_status = 'success_response_passed'
+                semantic_label = '成功响应断言通过'
+            else:
+                semantic_status = 'success_response_failed'
+                semantic_label = '测试失败'
+
+    return {
+        'provider': provider,
+        'expectation_type': expectation_type,
+        'default_assertion_policy': default_assertion_policy,
+        'expected_status': expected_status,
+        'semantic_status': semantic_status,
+        'semantic_label': semantic_label,
+    }
+
+
 def _serialize_case_result(r, full=False):
+    semantics = _result_semantics(r)
     base = {
         'id': r.id,
         'test_run_id': r.test_run_id,
         'case_type': r.case_type,
         'sequence': r.sequence,
-        'api_test_case_id': r.api_test_case_id,
+        'api_auto_case_id': r.api_auto_case_id,
         'ui_test_case_id': r.ui_test_case_id,
-        'name': r.api_test_case.name if r.api_test_case else (r.ui_test_case.name if r.ui_test_case else ''),
+        'name': r.api_auto_case.name if r.api_auto_case else (r.ui_test_case.name if r.ui_test_case else ''),
         'status': r.status,
         'duration_ms': r.duration_ms,
         'status_code': r.status_code,
         'error_message': r.error_message,
+        'provider': semantics['provider'],
+        'expectation_type': semantics['expectation_type'],
+        'default_assertion_policy': semantics['default_assertion_policy'],
+        'expected_status': semantics['expected_status'],
+        'semantic_status': semantics['semantic_status'],
+        'semantic_label': semantics['semantic_label'],
         'started_at': r.started_at.isoformat() if r.started_at else None,
         'completed_at': r.completed_at.isoformat() if r.completed_at else None,
     }
@@ -203,6 +249,12 @@ def _serialize_case_result(r, full=False):
             'assertion_results': r.assertion_results,
             'request_snapshot': r.request_snapshot,
             'curl': r.curl,
+            'trace_id': r.trace_id,
+            'raw_status': r.raw_status,
+            'error_code': r.error_code,
+            'response_snapshot': r.response_snapshot,
+            'extracted_variables_preview': r.extracted_variables_preview,
+            'result_metadata': r.result_metadata,
         })
     return base
 
@@ -210,118 +262,21 @@ def _serialize_case_result(r, full=False):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def rerun_test_run(request, run_id):
-    """用 config_snapshot 重新执行一个 TestRun。
+    """重跑 TestRun。
 
-    创建新 TestRun,继承原 run 的 case_ids / max_workers / environment_id,
-    在后台线程里跑完后更新 status。
+    P1 重构后：legacy API 用例模型（ApiTestCase）已删除，基于它的重跑链路不再支持。
+    请通过 API 用例页面的 execute 入口重新执行用例。
     """
-    from .views_api_test import execute_single_api_case
-
     try:
         old_run = TestRun.objects.select_related('project').get(id=run_id)
     except TestRun.DoesNotExist:
         return Response({'error': 'TestRun 不存在'}, status=status.HTTP_404_NOT_FOUND)
     _ensure_run_project_access(request, old_run)
-
-    if old_run.status not in ('passed', 'failed', 'error', 'cancelled'):
-        return Response(
-            {'error': f'TestRun 当前状态 {old_run.status},不可重跑'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    config = old_run.config_snapshot or {}
-    case_ids = config.get('case_ids', [])
-    if not case_ids:
-        # 兼容老的单条 run: 用 api_test_case 找原 case
-        first_cr = old_run.case_results.filter(api_test_case__isnull=False).first()
-        if first_cr:
-            case_ids = [first_cr.api_test_case_id]
-
-    if not case_ids:
-        return Response(
-            {'error': '原 TestRun 没有可重跑的 case'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-
-    cases_by_id = {
-        case.id: case
-        for case in ApiTestCase.objects.filter(id__in=case_ids).select_related('project')
-    }
-    cases = []
-    for case_id in case_ids:
-        case = cases_by_id.get(int(case_id))
-        if case:
-            cases.append(case)
-    if not cases:
-        return Response(
-            {'error': '原 case 已被删除,无法重跑'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if len(cases) != len(case_ids) or any(case.project_id != old_run.project_id for case in cases):
-        return Response(
-            {'error': '原 case 已被删除或不属于原项目,无法重跑'},
-            status=status.HTTP_400_BAD_REQUEST,
-        )
-    if any(not user_can_access_project(request.user, case.project) for case in cases):
-        return Response({'detail': '无权访问此项目'}, status=status.HTTP_403_FORBIDDEN)
-
-    max_workers = int(config.get('max_workers', 4))
-    triggered_user = request.user
-
-    new_run = TestRun.objects.create(
-        project=old_run.project,
-        name=f"{old_run.name} (重跑)",
-        trigger='manual',
-        test_type=old_run.test_type,
-        status='running',
-        total_count=len(cases),
-        started_at=timezone.now(),
-        triggered_by=triggered_user,
-        config_snapshot={
-            **config,
-            'rerun_from': old_run.id,
-            'case_ids': [c.id for c in cases],
+    return Response(
+        {
+            'detail': 'Legacy API 用例重跑已废弃。请从 API 用例页面重新执行。',
+            'error_code': 'rerun_deprecated',
+            'old_run_id': old_run.id,
         },
+        status=status.HTTP_410_GONE,
     )
-
-    def _background():
-        try:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(execute_single_api_case, case, new_run, idx + 1, triggered_user)
-                    for idx, case in enumerate(cases)
-                ]
-                for future in as_completed(futures):
-                    try:
-                        future.result()
-                    except Exception:
-                        logger.exception('Rerun case error')
-            new_run.refresh_from_db()
-            new_run.recompute_pass_rate()
-            current = TestRun.objects.filter(id=new_run.id).values_list('status', flat=True).first()
-            if current == 'cancelled':
-                # cancel 端点已写 completed_at,不要覆盖
-                if new_run.started_at and new_run.completed_at:
-                    new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
-                new_run.save(update_fields=['pass_rate', 'duration_ms'])
-                return
-            if new_run.failed_count == 0 and new_run.error_count == 0:
-                new_run.status = 'passed'
-            elif new_run.error_count > 0:
-                new_run.status = 'error'
-            else:
-                new_run.status = 'failed'
-            new_run.completed_at = timezone.now()
-            if new_run.started_at:
-                new_run.duration_ms = int((new_run.completed_at - new_run.started_at).total_seconds() * 1000)
-            new_run.save(update_fields=['status', 'completed_at', 'duration_ms', 'pass_rate'])
-        except Exception:
-            logger.exception('Failed to finalize rerun')
-        finally:
-            close_old_connections()
-
-    thread = threading.Thread(target=_background)
-    thread.daemon = True
-    thread.start()
-
-    return Response({'new_run_id': new_run.id}, status=status.HTTP_202_ACCEPTED)

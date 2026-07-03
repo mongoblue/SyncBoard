@@ -327,10 +327,10 @@ const startTest = async (type: string = 'default') => {
   }
 };
 
-// 跳转到 API 测试用例页面
+// 跳转到 API 测试结果页面（P1 后 API 用例管理入口暂指向结果列表）
 const goToApiCases = () => {
   router.push({
-    name: 'ApiCaseList',
+    name: 'AutoCaseList',
     query: { project: boardStore.currentProject?.id }
   });
 };
@@ -352,7 +352,7 @@ const goToPerformanceCases = () => {
 
 const goToTestResults = () => {
   router.push({
-    name: 'TestResultList',
+    name: 'TestResultHub',
     query: { project: boardStore.currentProject?.id }
   });
 };

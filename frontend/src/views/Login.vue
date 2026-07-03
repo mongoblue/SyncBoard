@@ -89,14 +89,18 @@ const handleLogin = async () => {
   }
 
   loading.value = true;
-  const success = await authStore.login(form.value);
+  const result = await authStore.login(form.value);
   loading.value = false;
 
-  if (success) {
+  if (result === true) {
     ElMessage.success('欢迎回来！');
     router.push('/');
+  } else if (result === 'invalid_credentials') {
+    ElMessage.error('账号或密码错误');
+  } else if (result === 'server_error') {
+    ElMessage.error('服务器错误，请稍后重试或联系管理员');
   } else {
-    ElMessage.error('登录失败，请检查账号密码');
+    ElMessage.error('网络异常，请检查连接');
   }
 };
 </script>

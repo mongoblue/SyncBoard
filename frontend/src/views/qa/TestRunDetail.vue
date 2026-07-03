@@ -26,9 +26,14 @@
     <el-table :data="cases" stripe>
       <el-table-column prop="sequence" label="#" width="50" />
       <el-table-column prop="name" label="名称" />
-      <el-table-column prop="status" label="状态" width="100">
+      <el-table-column label="结果语义" min-width="220">
         <template #default="{ row }">
-          <el-tag :type="tagType(row.status)">{{ row.status }}</el-tag>
+          <div class="semantic-result-cell">
+            <el-tag :type="semanticTagType(row)" size="small">{{ semanticLabel(row) }}</el-tag>
+            <span v-if="row.expectation_type === 'error_response' && row.expected_status" class="semantic-hint">
+              期望 {{ row.expected_status }}
+            </span>
+          </div>
         </template>
       </el-table-column>
       <el-table-column prop="status_code" label="状态码" width="100" />
@@ -105,6 +110,17 @@ function tagType(s: string): 'success' | 'danger' | 'warning' | 'info' {
   return 'info'
 }
 
+function semanticLabel(row: TestRunCaseResult): string {
+  return row.semantic_label || (row.status === 'passed' ? '成功响应断言通过' : '测试失败')
+}
+
+function semanticTagType(row: TestRunCaseResult): 'success' | 'danger' | 'warning' | 'info' {
+  if (row.semantic_status === 'expected_error_matched' || row.semantic_status === 'success_response_passed') return 'success'
+  if (row.semantic_status === 'expected_error_unmatched' || row.semantic_status === 'success_response_failed') return 'danger'
+  if (row.semantic_status === 'expected_error_execution_error') return 'warning'
+  return tagType(row.status)
+}
+
 function openWs() {
   if (ws) return
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -140,6 +156,8 @@ onBeforeUnmount(closeWs)
 </script>
 
 <style scoped>
+.semantic-result-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.semantic-hint { font-size: 12px; color: var(--color-text-secondary); }
 .test-run-detail { padding: 16px 24px; }
 .header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .header h2 { margin: 0; flex: 1; }

@@ -24,35 +24,44 @@ const BASE_URL = '/qa/devops';
 
 /**
  * 获取仪表板统计数据
+ * @param projectId 项目 ID（可选，用于项目隔离）
  * @param days 统计天数，默认7天
  */
-export const getDashboardStats = (days?: number): Promise<DashboardStats> => {
-  return service.get(`${BASE_URL}/stats/`, {
-    params: { days }
-  }) as Promise<DashboardStats>;
+export const getDashboardStats = (projectId?: string, days?: number): Promise<DashboardStats> => {
+  const params: Record<string, any> = {};
+  if (projectId) params.project_id = projectId;
+  if (days !== undefined) params.days = days;
+  return service.get(`${BASE_URL}/stats/`, { params }) as Promise<DashboardStats>;
 };
 
 /**
  * 获取最近执行记录
+ * @param projectId 项目 ID（可选）
  * @param limit 限制数量，默认10条
  * @param test_type 测试类型筛选
  */
 export const getRecentExecutions = (
+  projectId?: string,
   limit?: number,
   test_type?: TestType
 ): Promise<RecentExecution[]> => {
-  return service.get(`${BASE_URL}/recent-executions/`, {
-    params: { limit, test_type }
-  }) as Promise<RecentExecution[]>;
+  const params: Record<string, any> = {};
+  if (projectId) params.project_id = projectId;
+  if (limit !== undefined) params.limit = limit;
+  if (test_type) params.test_type = test_type;
+  return service.get(`${BASE_URL}/recent-executions/`, { params }) as Promise<RecentExecution[]>;
 };
 
 // ==================== CI/CD 配置管理 ====================
 
 /**
  * 获取 CI/CD 配置列表
+ * @param projectId 项目 ID（可选）
  */
-export const getCiCdConfigs = (): Promise<CiCdConfig[]> => {
-  return service.get(`${BASE_URL}/cicd-config/`) as Promise<CiCdConfig[]>;
+export const getCiCdConfigs = (projectId?: string): Promise<CiCdConfig[]> => {
+  const params: Record<string, any> = {};
+  if (projectId) params.project_id = projectId;
+  return service.get(`${BASE_URL}/cicd-config/`, { params }) as Promise<CiCdConfig[]>;
 };
 
 /**
@@ -100,13 +109,16 @@ export const testCiCdWebhook = (id: number): Promise<{ success: boolean; message
 
 /**
  * 获取测试任务列表
+ * @param projectId 项目 ID（可选）
  * @param type 任务类型筛选
  * @param status 状态筛选
  */
-export const getTestTasks = (type?: TestType, status?: string): Promise<TestTask[]> => {
-  return service.get(`${BASE_URL}/tasks/`, {
-    params: { type, status }
-  }) as Promise<TestTask[]>;
+export const getTestTasks = (projectId?: string, type?: TestType, status?: string): Promise<TestTask[]> => {
+  const params: Record<string, any> = {};
+  if (projectId) params.project_id = projectId;
+  if (type) params.type = type;
+  if (status) params.status = status;
+  return service.get(`${BASE_URL}/tasks/`, { params }) as Promise<TestTask[]>;
 };
 
 /**

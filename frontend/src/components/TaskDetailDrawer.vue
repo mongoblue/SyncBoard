@@ -339,7 +339,7 @@ const allTestCases = ref<any[]>([]);
 const linkedTestIds = computed(() => new Set(linkedTests.value.map((t: any) => `${t.test_type}-${t.id}`)));
 
 const TEST_LIST_URLS: Record<string, string> = {
-  api: '/qa/api-cases/',
+  api: '/qa/auto-cases/',
   ui: '/qa/ui-cases/',
 };
 
@@ -417,7 +417,8 @@ const reloadLinkedTests = async () => {
 const navigateToTestCase = (test: any) => {
   const projectId = boardStore.currentProjectId;
   if (test.test_type === 'api') {
-    router.push({ name: 'ApiCaseDetail', params: { id: test.id, projectId } });
+    // P1 后 legacy ApiCaseDetail 已删除；API 用例详情入口暂指向测试结果列表
+    router.push({ name: 'TestResultList', query: { project: projectId } });
   } else if (test.test_type === 'ui') {
     router.push({ name: 'UiCaseDetail', params: { id: test.id, projectId } });
   }

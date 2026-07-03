@@ -9,6 +9,7 @@ from room.models import Project
 from room.project_access import user_can_access_project as _sync_user_can_access_project
 from .models import PerformanceTestResult, TestResult, TestRun
 from .workers.recorder_supervisor import RecorderSession
+from .workers import runner_supervisor
 
 logger = logging.getLogger('django')
 
@@ -55,6 +56,11 @@ def _get_test_run_project(run_id):
 
 @database_sync_to_async
 def _get_performance_result_project(execution_id):
+    """获取性能测试关联的项目（用于 WebSocket 鉴权）。
+
+    优先查 PerformanceTestResult（测试完成后存在），
+    若不存在则回退到 TestResult（测试启动时即存在）。
+    """
     try:
         return PerformanceTestResult.objects.select_related(
             'test_case__project__owner'
@@ -62,6 +68,17 @@ def _get_performance_result_project(execution_id):
             'test_case__project__members'
         ).get(test_result_id=execution_id).test_case.project
     except PerformanceTestResult.DoesNotExist:
+        pass
+
+    # 回退：测试尚在运行中，PerformanceTestResult 尚未创建
+    try:
+        test_result = TestResult.objects.select_related(
+            'project__owner'
+        ).prefetch_related(
+            'project__members'
+        ).get(id=execution_id, test_type='performance')
+        return test_result.project
+    except TestResult.DoesNotExist:
         return None
 
 
@@ -355,6 +372,15 @@ class UiRunConsumer(AsyncWebsocketConsumer):
         self.group_name = f"ui_run_{self.task_id}"
         await self.channel_layer.group_add(self.group_name, self.channel_name)
         await self.accept()
+
+        # 回放历史事件（非破坏性读取），确保晚连接的客户端能拿到已有事件
+        loop = asyncio.get_running_loop()
+        buffered = await loop.run_in_executor(
+            None, runner_supervisor.get_events, self.task_id
+        )
+        for ev in buffered:
+            await self.send(text_data=json.dumps({"type": "run_event", "data": ev}))
+
         await self.send(text_data=json.dumps({"type": "connected", "task_id": self.task_id}))
 
     async def disconnect(self, close_code):

@@ -1,7 +1,10 @@
-"""Phase 6: TestRun REST 端点 (list / detail / cases / case_detail) 测试"""
+"""Phase 6: TestRun REST 端点 (list / detail / cases / case_detail) 测试。
+
+P1 重构后：legacy API 用例模型已删除，rerun 端点返回 410 Gone。
+"""
 import pytest
 from rest_framework.test import APIClient
-from qa_center.models import TestRun, TestRunCaseResult, ApiTestCase
+from qa_center.models import TestRun, TestRunCaseResult, ApiAutoTestCase
 
 
 @pytest.fixture
@@ -15,10 +18,9 @@ def tr_auth_client(db, test_user):
 @pytest.fixture
 def two_runs(db, test_project, tr_auth_client):
     _, user = tr_auth_client
-    case = ApiTestCase.objects.create(
+    case = ApiAutoTestCase.objects.create(
         name='c1', url='/api/x', method='GET', expected_status=200,
         project=test_project, created_by=user,
-        expected_response={'assertions': []},
     )
     r1 = TestRun.objects.create(
         project=test_project, name='run1', test_type='api', status='passed',
@@ -26,8 +28,16 @@ def two_runs(db, test_project, tr_auth_client):
         pass_rate=100.0,
     )
     TestRunCaseResult.objects.create(
-        test_run=r1, case_type='api', sequence=1, api_test_case=case,
+        test_run=r1, case_type='api', sequence=1, api_auto_case=case,
         status='passed',
+        result_metadata={
+            'provider': 'http',
+            'expectation_type': 'success_response',
+            'default_assertion_policy': 'success_response',
+            'expected_status': 200,
+            'semantic_status': 'success_response_passed',
+            'semantic_label': '成功响应断言通过',
+        },
     )
     r2 = TestRun.objects.create(
         project=test_project, name='run2', test_type='api', status='failed',
@@ -35,12 +45,28 @@ def two_runs(db, test_project, tr_auth_client):
         pass_rate=50.0,
     )
     TestRunCaseResult.objects.create(
-        test_run=r2, case_type='api', sequence=1, api_test_case=case,
+        test_run=r2, case_type='api', sequence=1, api_auto_case=case,
         status='passed',
+        result_metadata={
+            'provider': 'http',
+            'expectation_type': 'success_response',
+            'default_assertion_policy': 'success_response',
+            'expected_status': 200,
+            'semantic_status': 'success_response_passed',
+            'semantic_label': '成功响应断言通过',
+        },
     )
     TestRunCaseResult.objects.create(
-        test_run=r2, case_type='api', sequence=2, api_test_case=case,
+        test_run=r2, case_type='api', sequence=2, api_auto_case=case,
         status='failed', status_code=500,
+        result_metadata={
+            'provider': 'http',
+            'expectation_type': 'error_response',
+            'default_assertion_policy': 'expected_error_response',
+            'expected_status': 404,
+            'semantic_status': 'expected_error_unmatched',
+            'semantic_label': '预期错误响应但未匹配',
+        },
     )
     return r1, r2, case
 
@@ -48,7 +74,7 @@ def two_runs(db, test_project, tr_auth_client):
 @pytest.mark.django_db
 def test_list_runs(tr_auth_client, two_runs):
     client, _ = tr_auth_client
-    r1, r2, _ = two_runs
+    r1, _, _ = two_runs
     response = client.get(f'/api/qa/runs/?project={r1.project_id}')
     assert response.status_code == 200
     data = response.json()
@@ -95,6 +121,20 @@ def test_run_cases_list(tr_auth_client, two_runs):
 
 
 @pytest.mark.django_db
+def test_run_cases_include_semantic_fields(tr_auth_client, two_runs):
+    client, _ = tr_auth_client
+    _, r2, _ = two_runs
+    response = client.get(f'/api/qa/runs/{r2.id}/cases/')
+    assert response.status_code == 200
+    data = response.json()
+    failed = next(c for c in data['results'] if c['status'] == 'failed')
+    assert failed['expectation_type'] == 'error_response'
+    assert failed['semantic_status'] == 'expected_error_unmatched'
+    assert failed['semantic_label'] == '预期错误响应但未匹配'
+    assert failed['expected_status'] == 404
+
+
+@pytest.mark.django_db
 def test_run_case_detail(tr_auth_client, two_runs):
     client, _ = tr_auth_client
     _, r2, _ = two_runs
@@ -109,27 +149,35 @@ def test_run_case_detail(tr_auth_client, two_runs):
 
 
 @pytest.mark.django_db
+def test_run_case_detail_includes_semantic_fields(tr_auth_client, two_runs):
+    client, _ = tr_auth_client
+    _, r2, _ = two_runs
+    case_result = r2.case_results.get(sequence=2)
+    response = client.get(f'/api/qa/runs/{r2.id}/cases/{case_result.id}/')
+    assert response.status_code == 200
+    data = response.json()
+    assert data['expectation_type'] == 'error_response'
+    assert data['semantic_status'] == 'expected_error_unmatched'
+    assert data['semantic_label'] == '预期错误响应但未匹配'
+    assert data['expected_status'] == 404
+
+
+@pytest.mark.django_db
 def test_list_runs_invalid_page_returns_400(tr_auth_client, two_runs):
     client, _ = tr_auth_client
     response = client.get('/api/qa/runs/?page=abc')
     assert response.status_code == 400
 
 
-@pytest.mark.django_db(transaction=True)
-def test_rerun_creates_new_test_run(tr_auth_client, two_runs):
+@pytest.mark.django_db
+def test_rerun_returns_410_deprecated(tr_auth_client, two_runs):
+    """P1：legacy API 用例重跑已废弃，返回 410 Gone。"""
     client, _ = tr_auth_client
-    _, r2, case = two_runs
-    # r2 在 fixture 中没设 config_snapshot,走 case_results.api_test_case 兜底分支
+    _, r2, _ = two_runs
     response = client.post(f'/api/qa/runs/{r2.id}/rerun/')
-    assert response.status_code == 202
+    assert response.status_code == 410
     data = response.json()
-    assert 'new_run_id' in data
-    new_run = TestRun.objects.get(id=data['new_run_id'])
-    assert new_run.config_snapshot.get('rerun_from') == r2.id
-    # case_ids 写进了 config_snapshot
-    assert case.id in new_run.config_snapshot.get('case_ids', [])
-    # 新 run 至少有 1 个 case
-    assert new_run.total_count >= 1
+    assert data.get('error_code') == 'rerun_deprecated'
 
 
 @pytest.mark.django_db
@@ -140,24 +188,24 @@ def test_rerun_404_when_run_missing(tr_auth_client):
 
 
 @pytest.mark.django_db
-def test_rerun_400_when_no_cases(tr_auth_client, test_project):
-    """原 run 既无 config_snapshot.case_ids 也无 case_results,应 400。"""
+def test_rerun_410_for_empty_run(tr_auth_client, test_project):
+    """P1：空 run 重跑也返回 410（rerun 整体已废弃）。"""
     client, _ = tr_auth_client
     empty_run = TestRun.objects.create(
         project=test_project, name='empty', test_type='api', status='passed',
         total_count=0, passed_count=0, failed_count=0, error_count=0,
     )
     response = client.post(f'/api/qa/runs/{empty_run.id}/rerun/')
-    assert response.status_code == 400
+    assert response.status_code == 410
 
 
 @pytest.mark.django_db
-def test_rerun_400_when_run_still_running(tr_auth_client, test_project):
-    """正在跑的 run 不允许重跑,避免并发触发放大负载。"""
+def test_rerun_410_for_running_run(tr_auth_client, test_project):
+    """P1：running 状态的 run 重跑也返回 410。"""
     client, _ = tr_auth_client
     running_run = TestRun.objects.create(
         project=test_project, name='running', test_type='api', status='running',
         total_count=1, passed_count=0, failed_count=0, error_count=0,
     )
     response = client.post(f'/api/qa/runs/{running_run.id}/rerun/')
-    assert response.status_code == 400
+    assert response.status_code == 410

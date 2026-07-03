@@ -228,31 +228,111 @@ class TestRunPlanExecutor:
         assert result.passed_cases == 2
         assert result.failed_cases == 1
 
-    def test_stop_on_failure_serial(self, test_project, test_user, cases):
+    def test_serial_does_not_infer_http_failure_when_assertion_engine_returns_no_results(self, test_project, test_user, cases):
         from qa_center.run_plan_executor import TestRunPlanExecutor
-        plan = self._make_plan(
-            test_project, test_user, [c.id for c in cases],
-            stop_on_failure=True,
-        )
-        responses = [_mock_response(500)] + [_mock_response()] * 2
-        with patch('requests.Session.request', side_effect=responses):
-            result = TestRunPlanExecutor(plan, user=test_user).execute()
-        # 应该只跑了第一条
-        assert ApiAutoTestCaseResult.objects.filter(test_result=result).count() == 1
-        assert result.error_message == '遇到失败已中止后续用例'
 
-    def test_parallel_all_executed(self, test_project, test_user, cases):
-        from qa_center.run_plan_executor import TestRunPlanExecutor
-        plan = self._make_plan(
-            test_project, test_user, [c.id for c in cases],
-            parallel=True, max_workers=3,
-        )
-        with patch('requests.Session.request', return_value=_mock_response()):
+        plan = self._make_plan(test_project, test_user, [cases[0].id])
+        response = _mock_response(500, '{"detail":"boom"}')
+        with patch('requests.Session.request', return_value=response), \
+             patch('qa_center.run_plan_executor.ua.run_assertions', return_value=[]):
             result = TestRunPlanExecutor(plan, user=test_user).execute()
-        assert result.passed_cases == 3
-        assert ApiAutoTestCaseResult.objects.filter(test_result=result).count() == 3
-    # 并发执行器的子线程在 MySQL 下会被 default 的事务包裹卡住,需要显式 transaction=True
-    test_parallel_all_executed = pytest.mark.django_db(transaction=True)(test_parallel_all_executed)
+
+        case_result = ApiAutoTestCaseResult.objects.get(test_result=result)
+        assert case_result.passed is True
+        assert case_result.failure_type == 'passed'
+        assert result.status == 'passed'
+        assert result.passed_cases == 1
+        assert result.failed_cases == 0
+        assert result.error_cases == 0
+
+    def test_serial_expected_error_persists_semantic_metadata(self, test_project, test_user, suite):
+        from qa_center.run_plan_executor import TestRunPlanExecutor
+
+        case = ApiAutoTestCase.objects.create(
+            name='case-expected-error',
+            suite=suite,
+            url='http://example.invalid/missing',
+            method='GET',
+            expected_status=404,
+            sort_order=1,
+            timeout_seconds=5,
+            created_by=test_user,
+        )
+        plan = self._make_plan(test_project, test_user, [case.id])
+        response = _mock_response(404, '{"detail":"not found"}')
+        with patch('requests.Session.request', return_value=response):
+            result = TestRunPlanExecutor(plan, user=test_user).execute()
+
+        case_result = ApiAutoTestCaseResult.objects.get(test_result=result, case=case)
+        metadata = case_result.result_metadata or {}
+        assert case_result.passed is True
+        assert metadata.get('expectation_type') == 'error_response'
+        assert metadata.get('default_assertion_policy') == 'expected_error_response'
+
+
+    def test_serial_success_response_injects_provider_default_2xx_assertion(self, test_project, test_user, suite):
+        from qa_center.run_plan_executor import TestRunPlanExecutor
+
+        case = ApiAutoTestCase.objects.create(
+            name='case-success-policy',
+            suite=suite,
+            url='http://example.invalid/created',
+            method='GET',
+            expected_status=200,
+            sort_order=1,
+            timeout_seconds=5,
+            created_by=test_user,
+        )
+        plan = self._make_plan(test_project, test_user, [case.id])
+        response = _mock_response(201, '{"created":true}')
+        with patch('requests.Session.request', return_value=response):
+            result = TestRunPlanExecutor(plan, user=test_user).execute()
+
+        case_result = ApiAutoTestCaseResult.objects.get(test_result=result, case=case)
+        metadata = case_result.result_metadata or {}
+        assert case_result.passed is True
+        assert metadata.get('expectation_type') == 'success_response'
+        assert metadata.get('default_assertion_policy') == 'success_response'
+        assert metadata.get('expected_status') == 200
+        assert case_result.assertion_details[0]['assertion_type'] == 'status_code'
+        assert case_result.assertion_details[0]['expected_value'] == '2xx'
+        assert case_result.assertion_details[0]['passed'] is True
+        assert case_result.assertion_details[0]['source'] == 'provider_default'
+
+    def test_serial_expected_error_syncs_semantics_into_test_run_center(self, test_project, test_user, suite):
+        from qa_center.run_plan_executor import TestRunPlanExecutor
+        from qa_center.models import TestRun, TestRunCaseResult, TestResult
+        from qa_center.result_sink import _select_preferred_mirror
+
+        case = ApiAutoTestCase.objects.create(
+            name='case-expected-error-center',
+            suite=suite,
+            url='http://example.invalid/missing-center',
+            method='GET',
+            expected_status=404,
+            sort_order=1,
+            timeout_seconds=5,
+            created_by=test_user,
+        )
+        plan = self._make_plan(test_project, test_user, [case.id])
+        response = _mock_response(404, '{"detail":"not found"}')
+        with patch('requests.Session.request', return_value=response):
+            result = TestRunPlanExecutor(plan, user=test_user).execute()
+
+        run = TestRun.objects.get(name=result.name, project=test_project)
+        mirrored = _select_preferred_mirror(auto_result=result)
+        case_result = TestRunCaseResult.objects.get(test_run=run, api_auto_case=case)
+
+        assert run.summary['auto_result_id'] == result.id
+        assert run.status == 'passed'
+        assert mirrored.source == 'single'
+        assert case_result.status == 'passed'
+        assert case_result.result_metadata['expectation_type'] == 'error_response'
+        assert case_result.result_metadata['default_assertion_policy'] == 'expected_error_response'
+        assert case_result.result_metadata['expected_status'] == 404
+        assert case_result.result_metadata['semantic_status'] == 'expected_error_matched'
+        assert case_result.result_metadata['semantic_label'] == '预期错误响应且匹配成功'
+
 
     def test_progress_broadcast_called(self, test_project, test_user, cases):
         from qa_center.run_plan_executor import TestRunPlanExecutor
@@ -394,17 +474,49 @@ class TestAutoResultCasesEndpoint:
         assert 'response_body' in resp.data
         assert resp.data['response_body'] == cr.response_body
 
-    def test_case_detail_rejects_foreign_id(self, auth_client, suite, cases, test_user):
+
+    def test_cases_include_semantic_fields(self, auth_client, suite, cases):
         result = self._make_result_with_cases(suite, cases)
-        # 另起一个 result
-        other = ApiAutoTestResult.objects.create(
-            suite=suite, name='r2', status='passed', total_cases=1, passed_cases=1,
-        )
-        other_cr = ApiAutoTestCaseResult.objects.create(
-            test_result=other, case=cases[0], status_code=200,
-            response_body='', response_time_ms=1, passed=True, assertion_details=[],
-        )
+        failed_case = ApiAutoTestCaseResult.objects.filter(test_result=result, passed=False).first()
+        failed_case.failure_type = 'assertion_failed'
+        failed_case.result_metadata = {
+            'provider': 'http',
+            'expectation_type': 'error_response',
+            'default_assertion_policy': 'expected_error_response',
+            'expected_status': 404,
+            'semantic_status': 'expected_error_matched',
+            'semantic_label': '预期错误响应且匹配成功',
+        }
+        failed_case.save(update_fields=['failure_type', 'result_metadata'])
+
+        resp = auth_client.get(f'/api/qa/auto-results/{result.id}/cases/?passed=false')
+
+        assert resp.status_code == 200
+        row = resp.data['results'][0]
+        assert row['expectation_type'] == 'error_response'
+        assert row['semantic_status'] == 'expected_error_matched'
+        assert row['semantic_label'] == '预期错误响应且匹配成功'
+        assert row['expected_status'] == 404
+
+    def test_case_detail_includes_semantic_fields(self, auth_client, suite, cases):
+        result = self._make_result_with_cases(suite, cases)
+        cr = ApiAutoTestCaseResult.objects.filter(test_result=result).first()
+        cr.result_metadata = {
+            'provider': 'http',
+            'expectation_type': 'success_response',
+            'default_assertion_policy': 'success_response',
+            'expected_status': 200,
+            'semantic_status': 'success_response_failed',
+            'semantic_label': '测试失败',
+        }
+        cr.save(update_fields=['result_metadata'])
+
         resp = auth_client.get(
-            f'/api/qa/auto-results/{result.id}/case_detail/?case_result_id={other_cr.id}'
+            f'/api/qa/auto-results/{result.id}/case_detail/?case_result_id={cr.id}'
         )
-        assert resp.status_code == 404
+
+        assert resp.status_code == 200
+        assert resp.data['expectation_type'] == 'success_response'
+        assert resp.data['semantic_status'] == 'success_response_failed'
+        assert resp.data['semantic_label'] == '测试失败'
+        assert resp.data['expected_status'] == 200

@@ -21,6 +21,8 @@ import json
 import time
 import logging
 import requests
+
+from .ssrf import validate_target_url, SSRFError
 import pytest
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -43,6 +45,45 @@ from . import unified_assertions as ua
 from . import template_engine as te
 from . import request_builder as rb
 from . import extractors as ex_engine
+from .result_sink import mirror_to_test_result, sync_unified_run_from_auto_result
+from .api_execution.adapters import ApiAutoTestCaseAdapter
+
+
+def _legacy_result_metadata(*, case: ApiAutoTestCase, passed: bool, failure_type: str) -> Dict[str, Any]:
+    expectation_type = 'error_response' if (case.expected_status or 200) >= 400 else 'success_response'
+    default_assertion_policy = (
+        'expected_error_response' if expectation_type == 'error_response' else 'success_response'
+    )
+    if expectation_type == 'error_response':
+        if passed:
+            semantic_status = 'expected_error_matched'
+            semantic_label = '预期错误响应且匹配成功'
+        elif failure_type == 'assertion_failed':
+            semantic_status = 'expected_error_unmatched'
+            semantic_label = '预期错误响应但未匹配'
+        else:
+            semantic_status = 'expected_error_execution_error'
+            semantic_label = '预期错误场景执行异常'
+    else:
+        if passed:
+            semantic_status = 'success_response_passed'
+            semantic_label = '成功响应断言通过'
+        else:
+            semantic_status = 'success_response_failed'
+            semantic_label = '测试失败'
+    return {
+        'provider': 'http',
+        'expectation_type': expectation_type,
+        'default_assertion_policy': default_assertion_policy,
+        'expected_status': case.expected_status,
+        'semantic_status': semantic_status,
+        'semantic_label': semantic_label,
+    }
+
+
+def _legacy_assertions_with_provider_defaults(case: ApiAutoTestCase) -> List[Any]:
+    adapter = ApiAutoTestCaseAdapter()
+    return adapter.adapt(case).assertions
 
 
 class JsonPathExtractor:
@@ -199,13 +240,84 @@ class ApiAutoTestExecutor:
         globals_ = te.load_project_globals(suite.project)
         self._variables = te.build_variable_pool(environment=env, global_vars=globals_)
 
-    def execute_single_case(self, case: ApiAutoTestCase, test_result: Optional[ApiAutoTestResult] = None) -> ApiAutoTestCaseResult:
+    def _create_single_case_test_result(self, case: ApiAutoTestCase) -> ApiAutoTestResult:
+        project = case.project or (case.suite.project if case.suite_id else None)
+        execution_name = f"{case.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}"
+        self.test_result = ApiAutoTestResult.objects.create(
+            suite=case.suite,
+            project=project,
+            name=execution_name,
+            status='running',
+            total_cases=1,
+            executed_by=self.user,
+            started_at=timezone.now(),
+        )
+        return self.test_result
+
+    @staticmethod
+    def _classify_case_result(case_result: ApiAutoTestCaseResult) -> tuple[int, int, int]:
+        if case_result.passed:
+            return 1, 0, 0
+        if case_result.failure_type != 'assertion_failed':
+            return 0, 0, 1
+        return 0, 1, 0
+
+    def _finalize_test_result(
+        self,
+        *,
+        passed_count: int,
+        failed_count: int,
+        error_count: int,
+        source: str,
+        error_message: str = '',
+    ) -> ApiAutoTestResult:
+        completed_at = timezone.now()
+        started_at = self.test_result.started_at or completed_at
+        duration = int((completed_at - started_at).total_seconds() * 1000)
+
+        if error_message and not (passed_count or failed_count or error_count):
+            final_status = 'error'
+            error_count = 1
+        elif error_count > 0:
+            final_status = 'error'
+        elif failed_count > 0:
+            final_status = 'failed'
+        else:
+            final_status = 'passed'
+
+        self.test_result.passed_cases = passed_count
+        self.test_result.failed_cases = failed_count
+        self.test_result.error_cases = error_count
+        self.test_result.duration_ms = duration
+        self.test_result.status = final_status
+        self.test_result.completed_at = completed_at
+        self.test_result.error_message = error_message
+        self.test_result.save()
+        sync_unified_run_from_auto_result(auto_result=self.test_result, source=source)
+        mirror_to_test_result(auto_result=self.test_result, source=source)
+        return self.test_result
+
+    def execute_single_case(
+        self,
+        case: ApiAutoTestCase,
+        test_result: Optional[ApiAutoTestResult] = None,
+        *,
+        source: str = 'single',
+    ) -> ApiAutoTestCaseResult:
         self.suite = case.suite
         self.suite_id = case.suite_id
         self._initialize_variables()
-        if test_result is not None:
-            self.test_result = test_result
-        return self._execute_case(case)
+        self.test_result = test_result or self._create_single_case_test_result(case)
+
+        case_result = self._execute_case(case)
+        passed_count, failed_count, error_count = self._classify_case_result(case_result)
+        self._finalize_test_result(
+            passed_count=passed_count,
+            failed_count=failed_count,
+            error_count=error_count,
+            source=source,
+        )
+        return case_result
 
     def execute(self) -> ApiAutoTestResult:
         self.suite = ApiAutoTestSuite.objects.select_related('project').get(id=self.suite_id)
@@ -237,12 +349,10 @@ class ApiAutoTestExecutor:
 
             for case in active_cases:
                 case_result = self._execute_case(case)
-                if case_result.passed:
-                    passed_count += 1
-                elif case_result.error_message and 'execution' in case_result.error_message.lower():
-                    error_count += 1
-                else:
-                    failed_count += 1
+                case_passed, case_failed, case_error = self._classify_case_result(case_result)
+                passed_count += case_passed
+                failed_count += case_failed
+                error_count += case_error
 
             duration = int((timezone.now() - self.test_result.started_at).total_seconds() * 1000)
 
@@ -260,6 +370,8 @@ class ApiAutoTestExecutor:
             self.test_result.status = final_status
             self.test_result.completed_at = timezone.now()
             self.test_result.save()
+            sync_unified_run_from_auto_result(auto_result=self.test_result, source='single')
+            mirror_to_test_result(auto_result=self.test_result, source='single')
 
             # 自动为失败用例创建 Bug 任务
             if final_status in ('failed', 'error'):
@@ -280,6 +392,8 @@ class ApiAutoTestExecutor:
             self.test_result.error_message = str(e)
             self.test_result.completed_at = timezone.now()
             self.test_result.save()
+            sync_unified_run_from_auto_result(auto_result=self.test_result, source='single')
+            mirror_to_test_result(auto_result=self.test_result, source='single')
 
         return self.test_result
 
@@ -320,6 +434,22 @@ class ApiAutoTestExecutor:
             if files:
                 headers = {k: v for k, v in headers.items() if k.lower() != 'content-type'}
 
+            # SSRF protection: validate the target URL
+            try:
+                url = validate_target_url(url)
+            except SSRFError as e:
+                return ApiAutoTestCaseResult(
+                    test_case=case,
+                    test_result=test_result,
+                    status_code=None,
+                    response_body=str(e),
+                    response_headers={},
+                    response_time_ms=0,
+                    assertion_results=[{'type': 'ssrf', 'passed': False, 'message': str(e)}],
+                    passed=False,
+                    error_message=str(e),
+                )
+
             start_time = time.time()
             response = requests.request(
                 method=case.method,
@@ -343,7 +473,7 @@ class ApiAutoTestExecutor:
 
             response_headers = dict(response.headers)
 
-            active_assertions = list(case.assertions.filter(is_active=True).order_by('sort_order', 'id'))
+            active_assertions = _legacy_assertions_with_provider_defaults(case)
             ctx = ua.ResponseContext.from_raw(
                 status_code=status_code,
                 response_body=response_body,
@@ -352,19 +482,6 @@ class ApiAutoTestExecutor:
             )
             assertion_details = ua.run_assertions(active_assertions, ctx)
             all_passed = all(r.get('passed') for r in assertion_details) if assertion_details else True
-
-            has_status_code_assertion = any(
-                getattr(a, 'assertion_type', None) == 'status_code' for a in active_assertions
-            )
-            if not has_status_code_assertion and case.expected_status and status_code != case.expected_status:
-                all_passed = False
-                assertion_details.insert(0, {
-                    'assertion_type': 'status_code',
-                    'expected_value': case.expected_status,
-                    'actual_value': status_code,
-                    'passed': False,
-                    'error_message': f"Expected status {case.expected_status}, got {status_code}"
-                })
 
             active_extractors = list(case.extractors.filter(is_active=True).order_by('sort_order', 'id'))
             if active_extractors:
@@ -399,7 +516,13 @@ class ApiAutoTestExecutor:
             response_time_ms=response_time_ms,
             passed=passed,
             assertion_details=assertion_details,
-            error_message=error_message
+            error_message=error_message,
+            failure_type='passed' if passed else ('assertion_failed' if not error_message else 'unknown_error'),
+            result_metadata=_legacy_result_metadata(
+                case=case,
+                passed=passed,
+                failure_type='passed' if passed else ('assertion_failed' if not error_message else 'unknown_error'),
+            ),
         )
 
         return case_result

@@ -22,8 +22,47 @@ from .serializers import (
     ApiAutoTestExecuteSerializer,
     ApiAutoTestExtractorSerializer,
 )
-from .api_auto_executor import run_api_auto_test
+from .api_execution.orchestrators import (
+    create_api_auto_single_case_orchestrator,
+    create_api_auto_suite_orchestrator,
+)
+from .api_execution.runtime_guard import RuntimeGuard
+from .feature_flags import (
+    use_unified_runner_for_api_auto_case,
+    use_unified_runner_for_api_auto_suite,
+)
 from room.project_access import ensure_project_id_access, project_access_q
+
+
+def _create_single_case_test_result(*, case, user):
+    project = case.project or (case.suite.project if case.suite_id else None)
+    return ApiAutoTestResult.objects.create(
+        suite=case.suite,
+        project=project,
+        name=f"{case.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}",
+        status='running',
+        total_cases=1,
+        executed_by=user,
+        started_at=timezone.now()
+    )
+
+
+def _execute_single_case_unified(*, case, user):
+    test_result = _create_single_case_test_result(case=case, user=user)
+    orchestrator = create_api_auto_single_case_orchestrator(
+        case=case,
+        user=user,
+        test_result=test_result,
+    )
+    return orchestrator.execute()
+
+
+def _execute_suite_unified(*, suite, user):
+    orchestrator = create_api_auto_suite_orchestrator(
+        suite=suite,
+        user=user,
+    )
+    return orchestrator.execute()
 
 
 class ProjectScopedViewSetMixin:
@@ -75,10 +114,12 @@ class ApiAutoTestSuiteViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
         suite = self.get_object()
-        executor = run_api_auto_test(suite.id, request.user)
-        serializer = ApiAutoTestResultSerializer(executor)
+        guard = RuntimeGuard()
+        outcome = _execute_suite_unified(suite=suite, user=request.user)
+        serializer = ApiAutoTestResultSerializer(outcome["test_result"])
         return Response({
             'message': 'Test execution completed',
+            'runtime_mode': outcome.get('runtime_mode', 'real'),
             'result': serializer.data
         })
 
@@ -95,10 +136,16 @@ class ApiAutoTestCaseViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
     serializer_class = ApiAutoTestCaseSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(self._accessible_project_q('suite__project')).distinct()
+        queryset = super().get_queryset().filter(
+            self._accessible_project_q('project') | self._accessible_project_q('suite__project')
+        ).distinct()
         suite_id = self.request.query_params.get('suite')
         if suite_id:
             queryset = queryset.filter(suite_id=suite_id)
+        project_id = self.request.query_params.get('project')
+        if project_id:
+            self._ensure_query_project_access()
+            queryset = queryset.filter(Q(project_id=project_id) | Q(suite__project_id=project_id))
         is_active = self.request.query_params.get('is_active')
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active.lower() == 'true')
@@ -113,39 +160,37 @@ class ApiAutoTestCaseViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewSet):
         return ApiAutoTestCaseSerializer
 
     def perform_create(self, serializer):
-        ensure_project_id_access(self.request.user, serializer.validated_data['suite'].project_id)
+        project = serializer.validated_data.get('project')
+        if project is None:
+            suite = serializer.validated_data.get('suite')
+            if suite is not None:
+                project = suite.project
+        if project is None:
+            from rest_framework.exceptions import ValidationError
+            raise ValidationError('project 或 suite 至少需要提供一个')
+        ensure_project_id_access(self.request.user, project.id)
         serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        project = serializer.validated_data.get('project') or serializer.instance.project
+        if project is None and serializer.instance.suite_id:
+            project = serializer.instance.suite.project
+        if project is not None:
+            ensure_project_id_access(self.request.user, project.id)
+        serializer.save()
 
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
         case = self.get_object()
-        from .api_auto_executor import ApiAutoTestExecutor
-        from .models import ApiAutoTestResult
-
-        suite = case.suite
-        test_result = ApiAutoTestResult.objects.create(
-            suite=suite,
-            name=f"{case.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}",
-            status='running',
-            total_cases=1,
-            executed_by=request.user,
-            started_at=timezone.now()
-        )
-
-        executor = ApiAutoTestExecutor(suite.id, request.user)
-        case_result = executor.execute_single_case(case, test_result=test_result)
-
-        test_result.passed_cases = 1 if case_result.passed else 0
-        test_result.failed_cases = 0 if case_result.passed else 1
-        test_result.duration_ms = case_result.response_time_ms
-        test_result.status = 'passed' if case_result.passed else 'failed'
-        test_result.completed_at = timezone.now()
-        test_result.save()
-
-        serializer = ApiAutoTestCaseResultSerializer(case_result)
+        outcome = _execute_single_case_unified(case=case, user=request.user)
+        test_result = outcome.get('test_result')
+        case_result = outcome.get('case_result')
         return Response({
-            'message': 'Case execution completed',
-            'result': serializer.data
+            'message': 'Test execution completed',
+            'runtime_mode': outcome.get('runtime_mode'),
+            'result_id': test_result.id if test_result else None,
+            'case_result_id': case_result.id if case_result else None,
+            'status': test_result.status if test_result else None,
         })
 
     @action(detail=False, methods=['post'])
@@ -168,7 +213,9 @@ class ApiAutoTestAssertionViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewS
     serializer_class = ApiAutoTestAssertionSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(self._accessible_project_q('case__suite__project')).distinct()
+        queryset = super().get_queryset().filter(
+            self._accessible_project_q('case__project') | self._accessible_project_q('case__suite__project')
+        ).distinct()
         case_id = self.request.query_params.get('case')
         if case_id:
             queryset = queryset.filter(case_id=case_id)
@@ -178,7 +225,9 @@ class ApiAutoTestAssertionViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewS
         return queryset.order_by('sort_order', 'id')
 
     def perform_create(self, serializer):
-        ensure_project_id_access(self.request.user, serializer.validated_data['case'].suite.project_id)
+        case = serializer.validated_data['case']
+        project = case.project or (case.suite.project if case.suite_id else None)
+        ensure_project_id_access(self.request.user, project.id)
         serializer.save()
 
     @action(detail=False, methods=['post'])
@@ -210,7 +259,9 @@ class ApiAutoTestExtractorViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewS
     serializer_class = ApiAutoTestExtractorSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(self._accessible_project_q('case__suite__project')).distinct()
+        qs = super().get_queryset().filter(
+            self._accessible_project_q('case__project') | self._accessible_project_q('case__suite__project')
+        ).distinct()
         case_id = self.request.query_params.get('case')
         if case_id:
             qs = qs.filter(case_id=case_id)
@@ -220,7 +271,9 @@ class ApiAutoTestExtractorViewSet(ProjectScopedViewSetMixin, viewsets.ModelViewS
         return qs.order_by('sort_order', 'id')
 
     def perform_create(self, serializer):
-        ensure_project_id_access(self.request.user, serializer.validated_data['case'].suite.project_id)
+        case = serializer.validated_data['case']
+        project = case.project or (case.suite.project if case.suite_id else None)
+        ensure_project_id_access(self.request.user, project.id)
         serializer.save()
 
     @action(detail=False, methods=['post'])
@@ -252,7 +305,10 @@ class ApiAutoTestResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyModel
         return super().paginator
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(self._accessible_project_q('suite__project')).distinct()
+        from django.db.models import Q
+        # P1 后 result 直接挂 project，但也可能走 suite（批次执行）。两者都查。
+        q = self._accessible_project_q('project') | self._accessible_project_q('suite__project')
+        queryset = super().get_queryset().filter(q).distinct()
         suite_id = self.request.query_params.get('suite')
         if suite_id:
             queryset = queryset.filter(suite_id=suite_id)
@@ -262,7 +318,7 @@ class ApiAutoTestResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyModel
         project_id = self.request.query_params.get('project')
         if project_id:
             self._ensure_query_project_access()
-            queryset = queryset.filter(suite__project_id=project_id)
+            queryset = queryset.filter(Q(project_id=project_id) | Q(suite__project_id=project_id))
         return queryset.select_related('suite', 'executed_by').order_by('-created_at')
 
     def get_serializer_class(self):
@@ -286,7 +342,7 @@ class ApiAutoTestResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyModel
 
         Query params:
         - passed=true|false  按通过/失败过滤
-        - search=xxx         按 case_name / case_url 模糊匹配
+        - search=xxx         指case_name / case_url 模糊匹配
         - ordering=-response_time_ms / executed_at  排序字段
         - page=N / page_size=M
         """
@@ -354,10 +410,21 @@ class ApiAutoTestExecuteView(APIView):
         try:
             suite = ApiAutoTestSuite.objects.select_related('project').get(id=suite_id, is_active=True)
             ensure_project_id_access(request.user, suite.project_id)
-            test_result = run_api_auto_test(suite_id, request.user)
-            result_serializer = ApiAutoTestResultSerializer(test_result)
+            guard = RuntimeGuard()
+            if not use_unified_runner_for_api_auto_suite() and guard.is_strict():
+                return Response(
+                    {
+                        'detail': 'Unified runner is required for this entrypoint in strict environments',
+                        'error_code': 'runner_required',
+                        'runtime_mode': guard.build_runtime_mode(guarded_rejected=True),
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            outcome = _execute_suite_unified(suite=suite, user=request.user)
+            result_serializer = ApiAutoTestResultSerializer(outcome["test_result"])
             return Response({
                 'message': 'Test execution completed',
+                'runtime_mode': outcome.get('runtime_mode', 'real'),
                 'result': result_serializer.data
             })
         except Exception as e:
@@ -372,7 +439,7 @@ class ApiAutoTestCaseResultViewSet(ProjectScopedViewSetMixin, viewsets.ReadOnlyM
     serializer_class = ApiAutoTestCaseResultSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset().filter(self._accessible_project_q('test_result__suite__project')).distinct()
+        queryset = super().get_queryset().filter(self._accessible_project_q('test_result__project')).distinct()
         test_result_id = self.request.query_params.get('test_result')
         if test_result_id:
             queryset = queryset.filter(test_result_id=test_result_id)

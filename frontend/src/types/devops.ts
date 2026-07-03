@@ -70,6 +70,8 @@ export interface RecentExecution {
   duration_ms: number | null;
   screenshot_count: number;
   created_at: string;
+  api_auto_result_id?: number | null;
+  test_run_id?: number | null;
 }
 
 /**
@@ -77,6 +79,7 @@ export interface RecentExecution {
  */
 export interface CiCdConfig {
   id: number;
+  project_id: string;
   name: string;
   type: CiCdType;
   webhook_url: string;
@@ -85,17 +88,24 @@ export interface CiCdConfig {
   auto_trigger: boolean;
   test_suite: number[];
   headers: Record<string, string>;
+  ci_url?: string;
+  ci_token_display?: string;
+  ci_project?: string;
+  ci_job_name?: string;
+  verify_ssl?: boolean;
   created_at: string;
   updated_at: string;
   created_by: string;
-  last_triggered: string | null;
-  status: 'active' | 'inactive' | 'error';
+  created_by_name?: string;
+  status: 'active' | 'inactive';
 }
 
 /**
  * 创建 CI/CD 配置请求
  */
 export interface CreateCiCdConfigRequest {
+  project?: string | number;
+  write_only_project_id?: string | number;
   name: string;
   type: CiCdType;
   webhook_url: string;
@@ -104,6 +114,12 @@ export interface CreateCiCdConfigRequest {
   auto_trigger?: boolean;
   test_suite?: number[];
   headers?: Record<string, string>;
+  ci_url?: string;
+  ci_token?: string;
+  ci_project?: string;
+  ci_job_name?: string;
+  verify_ssl?: boolean;
+  api_token?: string;
 }
 
 /**

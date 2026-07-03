@@ -11,13 +11,16 @@
 
 核心入口：run_assertions(raw_list, ctx) → list[dict{passed, assertion_type, ...}]
 """
-
 from __future__ import annotations
 
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+from qa_center.assertion_core.ir import AssertionIR
+from qa_center.assertion_core.operators import OPERATORS as CORE_OPERATORS
+from qa_center.assertion_core.operators import normalize_operator
 
 try:  # pragma: no cover - 软依赖
     from jsonpath_ng import parse as jsonpath_parse
@@ -39,7 +42,7 @@ except Exception:  # pragma: no cover
 # 统一以下表为权威，符号会先映射成缩写。
 _SYMBOL_TO_OP = {
     '==': 'eq', '=': 'eq',
-    '!=': 'ne', '<>': 'ne',
+    '!=': 'neq', '<>': 'neq',
     '>': 'gt', '<': 'lt',
     '>=': 'gte', '<=': 'lte',
 }
@@ -87,18 +90,9 @@ def _smart_ne(a: Any, b: Any) -> bool:
     return not _smart_eq(a, b)
 
 
-OPERATORS: Dict[str, Any] = {
-    'eq': _smart_eq,
-    'ne': _smart_ne,
-    'gt': lambda a, b: _safe_cmp(a, b, lambda x, y: x > y),
-    'gte': lambda a, b: _safe_cmp(a, b, lambda x, y: x >= y),
-    'lt': lambda a, b: _safe_cmp(a, b, lambda x, y: x < y),
-    'lte': lambda a, b: _safe_cmp(a, b, lambda x, y: x <= y),
-    'contains': lambda a, b: (b in a) if isinstance(a, (str, list, dict, tuple)) else (str(b) in str(a) if a is not None else False),
-    'not_contains': lambda a, b: not OPERATORS['contains'](a, b),
-    'exists': lambda a, _b: a is not None,
-    'not_exists': lambda a, _b: a is None,
-}
+OPERATORS: Dict[str, Any] = dict(CORE_OPERATORS)
+# 兼容旧调用方仍直接使用 ne
+OPERATORS['ne'] = CORE_OPERATORS['neq']
 
 
 def _safe_cmp(a: Any, b: Any, fn) -> bool:
@@ -149,6 +143,20 @@ class Assertion:
     path: str = ''           # jsonpath / 字段路径
     header_name: str = ''    # response header 名
     error_message: str = ''  # 自定义失败文案
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_ir(cls, ir: AssertionIR) -> 'Assertion':
+        return cls(
+            kind=ir.type,
+            operator=normalize_operator(ir.operator),
+            expected=ir.expected,
+            path=ir.path,
+        )
+
+    @staticmethod
+    def normalize_operator(op: Optional[str]) -> str:
+        return normalize_operator(op)
 
 
 @dataclass
@@ -191,10 +199,7 @@ class AssertionResult:
 
 
 def _norm_operator(op: Optional[str]) -> str:
-    if not op:
-        return 'eq'
-    op = op.strip()
-    return _SYMBOL_TO_OP.get(op, op)
+    return normalize_operator(op)
 
 
 def _coerce_legacy_type(t: str) -> str:
@@ -248,6 +253,12 @@ def normalize_one(raw: Any) -> Optional[Assertion]:
     if kind == KIND_JSON_EQUALS and op in ('exists', 'not_exists'):
         kind = KIND_JSON_EXISTS
 
+    extra: Dict[str, Any] = {}
+    if isinstance(raw, dict):
+        for key in ('source', 'provider', 'scope', 'metadata'):
+            if key in raw and raw[key] is not None:
+                extra[key] = raw[key]
+
     return Assertion(
         kind=kind,
         operator=op,
@@ -255,6 +266,7 @@ def normalize_one(raw: Any) -> Optional[Assertion]:
         path=str(path),
         header_name=str(header_name or raw.get('header_name', '') if isinstance(raw, dict) else header_name),
         error_message=err,
+        extra=extra,
     )
 
 
@@ -425,12 +437,13 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
         expected_value=a.expected,
         json_path=a.path,
         header_name=a.header_name,
+        extra=dict(a.extra or {}),
     )
 
     try:
         if a.kind == KIND_STATUS_CODE:
             actual = ctx.status_code
-            expected = _try_int(a.expected, default=actual)
+            expected = a.expected if a.operator in ('in', 'not_in', 'contains') else _try_int(a.expected, default=actual)
             res.actual_value = actual
             res.passed = OPERATORS.get(a.operator, OPERATORS['eq'])(actual, expected)
             if not res.passed:
@@ -446,7 +459,7 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             expected = _try_float(a.expected, default=0.0)
             res.actual_value = actual
             # response_time 默认操作符为 lt（更友好）；eq 几乎没意义，统一改成 lt
-            op = a.operator if a.operator in ('gt', 'gte', 'lt', 'lte', 'ne') else 'lt'
+            op = a.operator if a.operator in ('gt', 'gte', 'lt', 'lte', 'ne', 'neq') else 'lt'
             res.passed = OPERATORS[op](actual, expected)
             res.operator = op
             if not res.passed:
@@ -477,7 +490,7 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             actual = _extract_by_jsonpath(ctx.response_json, a.path)
             res.actual_value = actual
             # 对 eq/ne 走严格相等（不强制把 "30" 解析成 30）；其余比较走 _safe_cmp 自动处理。
-            if a.operator in ('eq', 'ne'):
+            if a.operator in ('eq', 'ne', 'neq'):
                 expected = _maybe_loads_structured(a.expected)
             else:
                 expected = _maybe_loads_json(a.expected)
@@ -537,7 +550,7 @@ def evaluate(a: Assertion, ctx: ResponseContext) -> AssertionResult:
             expected = _try_int(a.expected, default=0)
             res.actual_value = actual
             # body_size 默认 lte（不超过）；精确字节相等几乎不会用到，统一退化到 lte。
-            op = a.operator if a.operator in ('gt', 'gte', 'lt', 'lte', 'ne') else 'lte'
+            op = a.operator if a.operator in ('gt', 'gte', 'lt', 'lte', 'ne', 'neq') else 'lte'
             res.passed = OPERATORS[op](actual, expected)
             res.operator = op
             if not res.passed:

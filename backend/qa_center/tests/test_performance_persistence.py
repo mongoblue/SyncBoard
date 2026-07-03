@@ -1,16 +1,15 @@
 """验证 run_performance_test 会把指标写入 PerformanceTestResult 表。
 
-我们 mock LocustRunner，让它不实际启动 Locust 子进程，直接喂回最终统计，
-然后断言 worker 任务回填了 TestResult 与 PerformanceTestResult。
+mock LocustRunner（纯适配器），Worker 自行轮询 read_stats()。
 """
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from django.contrib.auth.models import User
 from django.utils import timezone
 
 from room.models import Project
-from qa_center.models import PerformanceTestCase, PerformanceTestResult, TestResult
+from qa_center.models import PerformanceTestCase, PerformanceTestResult, TestResult, TestRun, TestRunCaseResult
 from qa_center.tasks import run_performance_test
 
 
@@ -25,60 +24,117 @@ def test_project(db, test_user):
 
 
 FINAL_STATS = {
-    'state': 'completed',
-    'total_requests': 1200,
-    'successful_requests': 1180,
-    'failed_requests': 20,
-    'avg_response_time': 123.45,
-    'min_response_time': 12.0,
-    'max_response_time': 789.0,
-    'p50_response_time': 110.0,
-    'p90_response_time': 250.0,
-    'p95_response_time': 320.0,
-    'p99_response_time': 600.0,
-    'throughput': 40.0,
-    'error_rate': 1.6,
-    'errors': [{'message': 'boom', 'count': 20}],
-    'current_users': 10,
-    'start_time': '2026-06-23T00:00:00',
-    'duration': 30,
+    'ok': True,
+    'runner_status': 'locust_running_with_requests',
+    'metrics_status': 'ok',
+    'stats': {
+        'state': 'completed',
+        'total_requests': 1200,
+        'successful_requests': 1180,
+        'failed_requests': 20,
+        'avg_response_time': 123.45,
+        'min_response_time': 12.0,
+        'max_response_time': 789.0,
+        'p50_response_time': 110.0,
+        'p90_response_time': 250.0,
+        'p95_response_time': 320.0,
+        'p99_response_time': 600.0,
+        'current_rps': 40.0,
+        'error_rate': 1.6,
+        'errors': [{'type': 'ConnectionError', 'message': 'boom', 'endpoint': '/', 'count': 20}],
+        'per_endpoint': {},
+        'throughput_over_time': [{'t': 1.0, 'rps': 40.0}],
+        'response_time_over_time': [{'t': 1.0, 'avg': 123.0, 'p95': 320.0}],
+        'error_rate_over_time': [{'t': 1.0, 'error_rate': 1.6}],
+        'response_time_distribution': {'100-150ms': 800, '150-200ms': 300},
+    },
+    'diagnostics': {},
 }
 
 FULL_PAYLOAD = {
     **FINAL_STATS,
-    'throughput_over_time': [{'t': 1.0, 'rps': 40.0}],
-    'response_time_over_time': [{'t': 1.0, 'avg': 123.0, 'p95': 320.0}],
-    'response_time_distribution': {'100-150ms': 800, '150-200ms': 300},
+    'diagnostics': {'artifact_dir': '/fake/perf_runs/99'},
 }
 
 
 class _FakeRunner:
-    """假的 LocustRunner：start 立即"完成"，无子进程。"""
+    """Mock LocustRunner（纯适配器，无回调/无业务逻辑）。
 
-    def __init__(self, execution_id=None):
+    start_test 立即返回 True 并设置 _running=False，
+    Worker 的 _wait() 循环第一次 is_running() 即退出。
+    """
+
+    def __init__(self, execution_id=None, port_offset=0):
         self.execution_id = execution_id
-        self._callbacks = []
         self._running = False
+        self.process = None          # is_running 检查 poll()
+        self.metrics_file_path = '/fake/metrics.json'
+        self.port_offset = port_offset
 
-    def register_callback(self, cb):
-        self._callbacks.append(cb)
+    # -- 子进程管理 --
+    def ensure_artifact_dir(self):
+        return '/fake/perf_runs/99'
 
-    def start_test(self, test_case, host, users, spawn_rate, run_time):
-        # 标记为"已结束"：worker 第一次 is_running 检查就会跳出循环
+    @property
+    def artifact_dir(self):
+        return '/fake/perf_runs/99'
+
+    def generate_locustfile(self, test_case, metrics_file):
+        self.metrics_file_path = '/fake/metrics.json'
+        return '/fake/locustfile.py'
+
+    def start_test(self, test_case, host, users, spawn_rate, run_time,
+                   use_web_ui=False):
+        self._running = False        # 立即"完成"
+        return True
+
+    def stop_test(self):
         self._running = False
         return True
 
     def is_running(self):
         return self._running
 
-    def stop_test(self):
-        self._running = False
+    def exit_code(self):
+        return None
 
-    def get_current_stats(self):
+    # -- 被动读取 --
+    def read_stats(self):
         return dict(FINAL_STATS)
 
-    def get_full_payload(self):
+    def read_full_payload(self):
         return dict(FULL_PAYLOAD)
+
+    # -- 诊断信息 --
+    def get_diagnostic_info(self):
+        return {
+            'execution_id': self.execution_id,
+            'host': 'https://example.com',
+            'users': 10,
+            'spawn_rate': 1,
+            'run_time': '10s',
+            'is_running': self._running,
+            'exit_code': None,
+        }
+
+    def read_stderr_tail(self, lines=50):
+        return ''
+
+    def read_stdout_tail(self, lines=50):
+        return ''
+
+    def start_watchdog(self, max_runtime=None, on_timeout=None):
+        pass
+
+    def cancel_watchdog(self):
+        pass
+
+    def get_resource_usage(self):
+        return {}
+
+    @property
+    def web_port(self):
+        return 8089 + self.port_offset
 
 
 @pytest.mark.django_db
@@ -102,7 +158,11 @@ def test_run_performance_test_persists_result(test_project, test_user):
         started_at=timezone.now(),
     )
 
-    with patch('qa_center.tasks.LocustRunner', _FakeRunner):
+    class _ProbeOkResponse:
+        status_code = 200
+
+    with patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
+         patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,
@@ -124,16 +184,31 @@ def test_run_performance_test_persists_result(test_project, test_user):
     assert tr.duration_ms is not None
 
     perf = PerformanceTestResult.objects.get(test_result=tr)
+    run = TestRun.objects.get(project=test_project, name=case.name)
+    case_result = TestRunCaseResult.objects.get(test_run=run, sequence=1)
     assert perf.test_case_id == case.id
     assert perf.total_requests == 1200
     assert perf.failed_requests == 20
     assert perf.p95_response_time_ms == pytest.approx(320.0)
     assert perf.throughput == pytest.approx(40.0)
     assert perf.error_rate == pytest.approx(1.6)
-    assert perf.response_time_distribution == FULL_PAYLOAD['response_time_distribution']
-    assert perf.throughput_over_time == FULL_PAYLOAD['throughput_over_time']
-    assert perf.response_time_over_time == FULL_PAYLOAD['response_time_over_time']
-    assert perf.error_details == FINAL_STATS['errors']
+    assert perf.response_time_distribution == FULL_PAYLOAD['stats']['response_time_distribution']
+    assert perf.throughput_over_time == FULL_PAYLOAD['stats']['throughput_over_time']
+    assert perf.response_time_over_time == FULL_PAYLOAD['stats']['response_time_over_time']
+    assert perf.error_details == FINAL_STATS['stats']['errors']
+    assert run.test_type == 'performance'
+    assert run.status == 'passed'
+    assert run.total_count == 1
+    assert run.passed_count == 1
+    assert run.failed_count == 0
+    assert run.error_count == 0
+    assert case_result.case_type == 'performance'
+    assert case_result.status == 'passed'
+    assert case_result.duration_ms == tr.duration_ms
+    assert case_result.result_metadata['provider'] == 'performance'
+    assert case_result.result_metadata['performance_test_case_id'] == case.id
+    assert case_result.result_metadata['total_requests'] == 1200
+    assert case_result.result_metadata['error_rate'] == pytest.approx(1.6)
 
 
 @pytest.mark.django_db
@@ -157,7 +232,11 @@ def test_run_performance_test_marks_failed_when_error_rate_exceeds(test_project,
         started_at=timezone.now(),
     )
 
-    with patch('qa_center.tasks.LocustRunner', _FakeRunner):
+    class _ProbeOkResponse:
+        status_code = 200
+
+    with patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
+         patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,
@@ -169,14 +248,27 @@ def test_run_performance_test_marks_failed_when_error_rate_exceeds(test_project,
 
     assert result['status'] == 'failed'
     tr.refresh_from_db()
+    run = TestRun.objects.get(project=test_project, name=case.name)
+    case_result = TestRunCaseResult.objects.get(test_run=run, sequence=1)
     assert tr.status == 'failed'
     assert tr.status in dict(TestResult._meta.get_field('status').choices)
     assert PerformanceTestResult.objects.filter(test_result=tr).exists()
+    assert run.test_type == 'performance'
+    assert run.status == 'failed'
+    assert run.total_count == 1
+    assert run.passed_count == 0
+    assert run.failed_count == 1
+    assert run.error_count == 0
+    assert case_result.case_type == 'performance'
+    assert case_result.status == 'failed'
+    assert case_result.result_metadata['provider'] == 'performance'
+    assert case_result.result_metadata['error_rate'] == pytest.approx(1.6)
 
 
 @pytest.mark.django_db
 def test_should_stop_uses_aborted_flag_not_stopped_status(test_project, test_user):
-    from qa_center.tasks import _should_stop
+    from qa_center.execution.worker import ExecutionWorker
+    from qa_center.execution.job import TestJob
 
     tr = TestResult.objects.create(
         test_type='performance',
@@ -188,7 +280,15 @@ def test_should_stop_uses_aborted_flag_not_stopped_status(test_project, test_use
         aborted=True,
     )
 
-    assert _should_stop(tr.id) is True
+    case = PerformanceTestCase.objects.create(
+        name='dummy', url='https://example.com/', method='GET',
+        project=test_project, created_by=test_user,
+        concurrent_users=1, duration_seconds=1,
+    )
+    job = TestJob(test_case=case, host='https://example.com', execution_id=tr.id)
+    worker = ExecutionWorker(job)
+
+    assert worker._check_should_stop() is True
 
     tr.refresh_from_db()
     assert tr.status == 'running'
@@ -196,17 +296,16 @@ def test_should_stop_uses_aborted_flag_not_stopped_status(test_project, test_use
 
 
 class _StoppedRunner(_FakeRunner):
-    def __init__(self, execution_id=None):
-        super().__init__(execution_id=execution_id)
+    """模拟用户中途停止：is_running 首次返回 True，之后返回 False。"""
+
+    def __init__(self, execution_id=None, port_offset=0):
+        super().__init__(execution_id=execution_id, port_offset=port_offset)
         self._running = True
         self._checks = 0
 
     def is_running(self):
         self._checks += 1
         return self._checks == 1
-
-    def stop_test(self):
-        self._running = False
 
 
 @pytest.mark.django_db
@@ -231,7 +330,12 @@ def test_run_performance_test_marks_user_stopped_run_as_error_and_aborted(test_p
         aborted=True,
     )
 
-    with patch('qa_center.tasks.LocustRunner', _StoppedRunner):
+    class _ProbeOkResponse:
+        status_code = 200
+        ok = True
+
+    with patch('qa_center.execution.worker.create_runner', return_value=_StoppedRunner(execution_id=tr.id)), \
+         patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,

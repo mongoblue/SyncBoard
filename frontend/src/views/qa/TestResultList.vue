@@ -6,6 +6,10 @@
         <p class="page-subtitle">查看和管理所有测试执行结果</p>
       </div>
       <div class="header-actions">
+        <el-button @click="goBackToHub">
+          <el-icon><ArrowLeft /></el-icon>
+          返回结果中心
+        </el-button>
         <el-button @click="loadStatistics">
           <el-icon><TrendCharts /></el-icon>
           统计概览
@@ -158,11 +162,16 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="状态" width="100">
+      <el-table-column label="结果语义" min-width="220">
         <template #default="{ row }">
-          <el-tag :type="getStatusType(row.status)" size="small">
-            {{ row.status_display }}
-          </el-tag>
+          <div class="semantic-result-cell">
+            <el-tag :type="getSemanticTagType(row)" size="small">
+              {{ row.semantic_label || row.status_display }}
+            </el-tag>
+            <span v-if="row.expectation_type === 'error_response' && row.expected_status" class="semantic-hint">
+              期望 {{ row.expected_status }}
+            </span>
+          </div>
         </template>
       </el-table-column>
 
@@ -270,7 +279,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import {
   Refresh,
@@ -282,11 +291,13 @@ import {
   Picture,
   View,
   Delete,
-  TrendCharts
+  TrendCharts,
+  ArrowLeft
 } from '@element-plus/icons-vue';
 import service from '@/utils/request';
 
 const router = useRouter();
+const route = useRoute();
 
 const results = ref<any[]>([]);
 const projects = ref<any[]>([]);
@@ -296,7 +307,7 @@ const statisticsDialogVisible = ref(false);
 
 const filters = ref({
   source: '',
-  test_type: '',
+  test_type: (route.query.test_type as string) || '',
   status: '',
   project: '',
   date_range: null as Date[] | null,
@@ -396,6 +407,21 @@ const getTestTypeType = (type: string) => {
   return types[type] || 'info';
 };
 
+// 获取语义标签样式
+const getSemanticTagType = (row: any) => {
+  const semantic = row?.semantic_status || '';
+  if (semantic === 'expected_error_matched' || semantic === 'success_response_passed' || semantic === 'result_passed') {
+    return 'success';
+  }
+  if (semantic === 'expected_error_unmatched' || semantic === 'success_response_failed' || semantic === 'result_failed') {
+    return 'danger';
+  }
+  if (semantic === 'expected_error_execution_error' || semantic === 'result_error') {
+    return 'warning';
+  }
+  return getStatusType(row?.status);
+};
+
 // 获取状态标签样式
 const getStatusType = (status: string) => {
   const types: Record<string, string> = {
@@ -428,6 +454,16 @@ const formatDate = (dateString: string) => {
 
 // 查看详情
 const viewDetail = (row: any) => {
+  // 有 test_run_id → 跳 TestRunDetail（统一批量执行视图）
+  if (row.test_run_id) {
+    router.push({ name: 'TestRunDetail', params: { id: row.test_run_id } });
+    return;
+  }
+  // API 类型且有 api_auto_result_id → 跳 AutoResultDetail（P1 重做的详情页）
+  if (row.test_type === 'api' && row.api_auto_result_id) {
+    router.push({ name: 'AutoResultDetail', params: { id: row.api_auto_result_id } });
+    return;
+  }
   router.push({
     name: 'TestResultDetail',
     params: { id: row.id }
@@ -460,6 +496,10 @@ onMounted(() => {
   loadProjects();
   loadResults();
 });
+
+const goBackToHub = () => {
+  router.push({ name: 'TestResultHub' });
+};
 </script>
 
 <style scoped>
@@ -470,7 +510,18 @@ onMounted(() => {
   gap: 8px;
 }
 
-/* 统计卡片 */
+.semantic-result-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.semantic-hint {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 .statistics-cards {
   display: grid;
   grid-template-columns: repeat(5, 1fr);

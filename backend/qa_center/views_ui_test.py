@@ -131,11 +131,14 @@ class UiTestCaseViewSet(viewsets.ModelViewSet):
         case_data = {"case_id": test_case.id, "url": test_case.url, "steps": test_case.steps or []}
         events: list = []
         result = execute_ui_case(case_data, on_event=events.append)
+        # 必须在 _save_test_result 之前构造 payload，
+        # 因为 _save_test_result 会清理 worker 的 temp_dir（截图文件所在目录）
+        payload = self._events_to_payload(events, result)
         try:
             self._save_test_result(test_case, result, events, request)
         except Exception:
             logger.exception("_save_test_result 失败")
-        return Response(self._events_to_payload(events, result), status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)
 
     def _events_to_payload(self, events, result):
         logs = []

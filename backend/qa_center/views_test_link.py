@@ -11,7 +11,7 @@ from room.serializers import TaskSerializer
 
 # 支持关联的测试用例模型
 TEST_CASE_MODELS = {
-    'api': 'qa_center.ApiTestCase',
+    'api': 'qa_center.ApiAutoTestCase',
     'ui': 'qa_center.UiTestCase',
     'performance': 'qa_center.PerformanceTestCase',
 }

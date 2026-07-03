@@ -6,6 +6,75 @@ import { createBug } from '@/api/bug';
 
 export type AutoResultStatus = 'pending' | 'running' | 'passed' | 'failed' | 'error';
 
+export type FailureType =
+  | ''
+  | 'passed'
+  | 'assertion_failed'
+  | 'http_error'
+  | 'network_error'
+  | 'timeout'
+  | 'ssl_error'
+  | 'auth_error'
+  | 'server_error'
+  | 'framework_error'
+  | 'config_error'
+  | 'script_error'
+  | 'schema_failed'
+  | 'unknown_error';
+
+export interface TextEnvelope {
+  preview: string;
+  preview_size: number;
+  truncated: boolean;
+  original_size: number;
+  limit_bytes: number;
+  content_type: string;
+  encoding: string;
+  is_binary: boolean;
+  sha256: string;
+  redacted: boolean;
+  meta: Record<string, any>;
+}
+
+export interface FrameworkDiagnosis {
+  framework: string;
+  title: string;
+  root_cause: string;
+  suggested_fixes: string[];
+  message: string;
+}
+
+export interface RequestSnapshot {
+  snapshot_schema_version: number;
+  rendered_url: string;
+  url_template: string;
+  headers: Record<string, any> | null;
+  query_params: any[] | null;
+  cookies: Record<string, any> | null;
+  auth: { auth_type: string; redacted: boolean } | null;
+  body_mode: string;
+  body: TextEnvelope | null;
+  files: any[];
+  timeout: number;
+  allow_redirects: boolean;
+  trace_id: string;
+}
+
+export interface ResponseSnapshot {
+  snapshot_schema_version: number;
+  status_code: number;
+  headers: Record<string, any> | null;
+  cookies: Record<string, any> | null;
+  content_type: string | null;
+  content_encoding: string | null;
+  body: TextEnvelope;
+  body_size_raw: number;
+  body_size_decoded: number;
+  final_url: string;
+  redirect_chain: any[];
+  elapsed_ms: number;
+}
+
 export interface AssertionDetail {
   assertion_type: string;
   json_path?: string;
@@ -44,6 +113,11 @@ export interface AutoCaseResultBrief {
   status_code: number;
   response_time_ms: number;
   passed: boolean;
+  expectation_type?: 'success_response' | 'error_response';
+  default_assertion_policy?: 'success_response' | 'expected_error_response' | 'custom';
+  expected_status?: number | null;
+  semantic_status?: string;
+  semantic_label?: string;
   assertion_total: number;
   assertion_passed: number;
   error_summary: string;
@@ -56,6 +130,24 @@ export interface AutoCaseResultFull extends AutoCaseResultBrief {
   response_headers: Record<string, string>;
   assertion_details: AssertionDetail[];
   error_message: string;
+  failure_type?: FailureType;
+  raw_status?: string;
+  trace_id?: string;
+  request_snapshot?: RequestSnapshot | null;
+  response_snapshot?: ResponseSnapshot | null;
+  extracted_variables_preview?: Record<string, TextEnvelope> | null;
+  result_metadata?: {
+    summary?: string;
+    diagnosis?: FrameworkDiagnosis | null;
+    provider?: string;
+    expectation_type?: 'success_response' | 'error_response';
+    default_assertion_policy?: 'success_response' | 'expected_error_response' | 'custom';
+    expected_status?: number | null;
+    semantic_status?: string;
+    semantic_label?: string;
+    [key: string]: any;
+  } | null;
+  curl?: { preview: string } | null;
 }
 
 export interface Paginated<T> {
@@ -64,6 +156,40 @@ export interface Paginated<T> {
   previous: string | null;
   results: T[];
 }
+
+export const FAILURE_TYPE_LABELS: Record<FailureType, string> = {
+  '': '未知',
+  passed: '通过',
+  assertion_failed: '断言失败',
+  http_error: 'HTTP 错误',
+  network_error: '网络错误',
+  timeout: '请求超时',
+  ssl_error: 'SSL 错误',
+  auth_error: '认证失败',
+  server_error: '服务器错误',
+  framework_error: '框架错误',
+  config_error: '配置错误',
+  script_error: '脚本错误',
+  schema_failed: 'Schema 校验失败',
+  unknown_error: '未知错误',
+};
+
+export const FAILURE_TYPE_TAG: Record<FailureType, '' | 'success' | 'warning' | 'danger' | 'info'> = {
+  '': 'info',
+  passed: 'success',
+  assertion_failed: 'danger',
+  http_error: 'warning',
+  network_error: 'danger',
+  timeout: 'warning',
+  ssl_error: 'danger',
+  auth_error: 'warning',
+  server_error: 'danger',
+  framework_error: 'danger',
+  config_error: 'warning',
+  script_error: 'danger',
+  schema_failed: 'danger',
+  unknown_error: 'info',
+};
 
 const BASE = '/qa/auto-results';
 

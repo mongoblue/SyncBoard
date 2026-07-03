@@ -85,3 +85,7 @@ def open_project_card(page: Page, name: str | None = None) -> str:
     project = get_or_create_project(page, name=name)
     open_board(page, project["id"])
     return project["id"]
+
+def ensure_project(page: Page, name: str = "E2E QA Project") -> dict:
+    """Alias for get_or_create_project — used by QA center E2E tests."""
+    return get_or_create_project(page, name=name)

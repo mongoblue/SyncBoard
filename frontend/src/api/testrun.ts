@@ -25,12 +25,18 @@ export interface TestRunCaseResult {
   test_run_id: number
   case_type: 'api' | 'ui' | 'performance'
   sequence: number
-  api_test_case_id: number | null
+  api_auto_case_id: number | null
   name: string
   status: 'pending' | 'running' | 'passed' | 'failed' | 'error' | 'skipped'
   duration_ms: number | null
   status_code: number | null
   error_message: string
+  provider?: string
+  expectation_type?: 'success_response' | 'error_response'
+  default_assertion_policy?: 'success_response' | 'expected_error_response' | 'custom'
+  expected_status?: number | null
+  semantic_status?: string
+  semantic_label?: string
   started_at: string | null
   completed_at: string | null
   // full=true 时:
@@ -39,6 +45,12 @@ export interface TestRunCaseResult {
   assertion_results?: any[]
   request_snapshot?: any
   curl?: string
+  trace_id?: string
+  raw_status?: string
+  error_code?: string
+  response_snapshot?: any
+  extracted_variables_preview?: any
+  result_metadata?: any
 }
 
 export interface PaginatedResponse<T> {
@@ -64,14 +76,8 @@ export const testRunApi = {
   cancel(id: number) {
     return request.post(`/qa/runs/${id}/cancel/`)
   },
+  // P1 后 rerun 已废弃（后端返回 410 Gone）；保留方法以让调用方显式处理
   rerun(id: number) {
     return request.post<{ run_id: number; total_count: number }>(`/qa/runs/${id}/rerun/`)
-  },
-  runBatch(payload: { case_ids: number[]; name?: string; environment_id?: number; max_workers?: number }) {
-    return request.post<{ run_id: number; total_count: number }>('/qa/api-cases/run-batch/', payload)
-  },
-  // 旧的单条运行(扩展了响应字段)
-  runSingle(caseId: number, payload: any = {}) {
-    return request.post<any>(`/qa/api-cases/${caseId}/run/`, payload)
   },
 }

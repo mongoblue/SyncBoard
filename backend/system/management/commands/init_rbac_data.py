@@ -316,12 +316,12 @@ class Command(BaseCommand):
             }
         )
 
-        # API测试
-        Menu.objects.get_or_create(
+        # API测试（P1.5：菜单指向 API 用例管理页）
+        Menu.objects.update_or_create(
             name='API测试',
             defaults={
                 'code': 'qa:api:list',
-                'path': '/qa/api-cases',
+                'path': '/qa/auto-cases',
                 'type': 'menu',
                 'icon': 'Document',
                 'parent': qa_dir,

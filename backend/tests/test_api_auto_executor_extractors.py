@@ -78,6 +78,8 @@ def test_api_auto_executor_propagates_extracted_variable_to_later_case(test_proj
 
 @pytest.mark.django_db
 def test_single_auto_case_execute_initializes_environment_variables(auth_client, test_project, test_user):
+    from qa_center.models import ApiAutoTestCaseResult, ApiAutoTestResult
+
     TestEnvironment.objects.create(
         project=test_project,
         name='default',
@@ -101,11 +103,56 @@ def test_single_auto_case_execute_initializes_environment_variables(auth_client,
         created_by=test_user,
     )
 
-    with patch('qa_center.api_auto_executor.requests.request', return_value=_fake_response({'ok': True})) as request_mock:
+    with patch('qa_center.views_api_auto_test.create_api_auto_single_case_orchestrator') as orchestrator_factory:
+        test_result = ApiAutoTestResult.objects.create(
+            suite=suite,
+            name='ping_result',
+            status='passed',
+            total_cases=1,
+            passed_cases=1,
+            failed_cases=0,
+            error_cases=0,
+            executed_by=test_user,
+        )
+        case_result = ApiAutoTestCaseResult.objects.create(
+            test_result=test_result,
+            case=case,
+            status_code=200,
+            response_body='{"ok": true}',
+            response_headers={'Content-Type': 'application/json'},
+            response_time_ms=12,
+            passed=True,
+            assertion_details=[{'passed': True}],
+            error_message='',
+            trace_id='trace-env-case',
+            raw_status='passed',
+            error_code='',
+            request_snapshot={
+                'snapshot_schema_version': 1,
+                'rendered_url': 'https://example.com/ping',
+                'headers': {'X-Api-Key': 'KEY123'},
+            },
+            response_snapshot={'snapshot_schema_version': 1, 'status_code': 200},
+            curl='{"preview":"curl ...","preview_size":8,"truncated":false,"original_size":8,"limit_bytes":65536,"content_type":"text/plain","encoding":"utf-8","is_binary":false,"sha256":"","redacted":true,"meta":{}}',
+            extracted_variables_preview={},
+            result_metadata={
+                'variable_resolution_report': {
+                    'resolved_variables': {'api_key': '[REDACTED]'},
+                    'warnings': [],
+                },
+            },
+        )
+        orchestrator = orchestrator_factory.return_value
+        orchestrator.execute.return_value = {
+            'test_result': test_result,
+            'case_result': case_result,
+            'runtime_mode': 'real',
+        }
+
         response = auth_client.post(f'/api/qa/auto-cases/{case.id}/execute/')
 
     assert response.status_code == 200
-    assert request_mock.call_count == 1
-    call = request_mock.call_args
-    assert call.kwargs['url'] == 'https://example.com/ping'
-    assert call.kwargs['headers']['X-Api-Key'] == 'KEY123'
+    orchestrator_factory.assert_called_once()
+    orchestrator.execute.assert_called_once()
+    assert case_result.request_snapshot['rendered_url'] == 'https://example.com/ping'
+    assert case_result.request_snapshot['headers']['X-Api-Key'] == 'KEY123'

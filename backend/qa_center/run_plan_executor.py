@@ -28,7 +28,19 @@ from channels.layers import get_channel_layer
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from .api_auto_executor import AssertionExecutor
+from .api_execution import (
+    ApiExecutionContext,
+    MockTransport,
+    RequestsTransport,
+    SSRFProtectedRequestsTransport,
+    UnifiedApiRunner,
+)
+from .api_execution.adapters import ApiAutoTestCaseAdapter
+from .api_execution.mappers import ApiAutoTestCaseResultMapper
+from .api_execution.runtime_guard import RuntimeGuard
+from .metrics import generate_trace_id
+from .result_sink import mirror_to_test_result, sync_unified_run_from_auto_result
+from .api_auto_executor import _legacy_result_metadata
 from .bug_utils import create_bug_from_test_failure
 from .models import (
     ApiAutoTestCase,
@@ -82,6 +94,8 @@ class TestRunPlanExecutor:
         max_workers: Optional[int] = None,
         stop_on_failure: Optional[bool] = None,
         environment_id: Optional[int] = None,
+        use_unified_serial: bool = False,
+        use_unified_parallel: bool = False,
     ):
         self.plan = plan
         self.user = user
@@ -89,6 +103,11 @@ class TestRunPlanExecutor:
         self.max_workers = max(1, min(32, max_workers if max_workers is not None else plan.max_workers))
         self.stop_on_failure = stop_on_failure if stop_on_failure is not None else plan.stop_on_failure
         self.timeout = plan.case_timeout_seconds
+        self.use_unified_serial = use_unified_serial and not self.parallel
+        self.use_unified_parallel = use_unified_parallel and self.parallel
+        self.guard = RuntimeGuard()
+        self._adapter = ApiAutoTestCaseAdapter()
+        self._case_mapper = ApiAutoTestCaseResultMapper()
 
         # M3.2: 解析运行环境 + 全局变量，预先合并成变量池
         env = te.resolve_project_environment(
@@ -97,6 +116,7 @@ class TestRunPlanExecutor:
         )
         globals_ = te.load_project_globals(plan.project)
         self._variables = te.build_variable_pool(environment=env, global_vars=globals_)
+        self._global_vars = {item.key: item.value for item in globals_}
         self._environment = env
 
         # M3.3: 用例间抽取变量。串行下逐条注入；并行下保留抽取但日志警告"不会传递"
@@ -111,6 +131,7 @@ class TestRunPlanExecutor:
         self._passed = 0
         self._failed = 0
         self._error = 0
+        self._runner: Optional[UnifiedApiRunner] = None
 
     # ---------- public ----------
 
@@ -128,6 +149,7 @@ class TestRunPlanExecutor:
             executed_by=self.user,
             started_at=timezone.now(),
         )
+        mirror_to_test_result(auto_result=self.test_result, source='single')
 
         _broadcast({
             'type': 'run_plan_progress',
@@ -143,7 +165,12 @@ class TestRunPlanExecutor:
 
         self._session = requests.Session()
         try:
-            if self.parallel and total > 1:
+            if self.use_unified_serial:
+                self._runner = UnifiedApiRunner(transport=self._build_unified_transport())
+                self._run_serial_unified(cases)
+            elif self.use_unified_parallel:
+                self._run_parallel_unified(cases)
+            elif self.parallel and total > 1:
                 # M3.3: 并行模式下后续 case 拿不到前 case 的抽取值（无确定执行顺序）
                 if any(c.extractors.filter(is_active=True).exists() for c in cases):
                     logger.warning(
@@ -160,6 +187,7 @@ class TestRunPlanExecutor:
             except Exception:
                 pass
             self._session = None
+            self._runner = None
 
         self._finalize()
         self._auto_create_bugs()
@@ -183,6 +211,25 @@ class TestRunPlanExecutor:
                     logger.exception('[RunPlan] case future raised: %s', e)
                 if self._stop_event.is_set():
                     # 取消尚未开始的任务
+                    for f in futures:
+                        if not f.done() and not f.running():
+                            f.cancel()
+
+    def _run_serial_unified(self, cases: List[ApiAutoTestCase]) -> None:
+        for case in cases:
+            if self._stop_event.is_set():
+                break
+            self._execute_one_unified(case)
+
+    def _run_parallel_unified(self, cases: List[ApiAutoTestCase]) -> None:
+        with ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='runplan-unified') as pool:
+            futures: List[Future] = [pool.submit(self._execute_one_unified_parallel, case) for case in cases]
+            for fut in as_completed(futures):
+                try:
+                    fut.result()
+                except Exception as e:  # pragma: no cover
+                    logger.exception('[RunPlan] unified parallel case future raised: %s', e)
+                if self._stop_event.is_set():
                     for f in futures:
                         if not f.done() and not f.running():
                             f.cancel()
@@ -264,7 +311,7 @@ class TestRunPlanExecutor:
 
             response_headers = dict(response.headers)
 
-            active_assertions = list(case.assertions.filter(is_active=True).order_by('sort_order', 'id'))
+            active_assertions = self._adapter.adapt(case).assertions
             ctx = ua.ResponseContext.from_raw(
                 status_code=status_code,
                 response_body=response_body,
@@ -273,19 +320,6 @@ class TestRunPlanExecutor:
             )
             assertion_details = ua.run_assertions(active_assertions, ctx)
             all_passed = all(r.get('passed') for r in assertion_details) if assertion_details else True
-
-            has_status_code_assertion = any(
-                getattr(a, 'assertion_type', None) == 'status_code' for a in active_assertions
-            )
-            if not has_status_code_assertion and case.expected_status and status_code != case.expected_status:
-                all_passed = False
-                assertion_details.insert(0, {
-                    'assertion_type': 'status_code',
-                    'expected_value': case.expected_status,
-                    'actual_value': status_code,
-                    'passed': False,
-                    'error_message': f'Expected status {case.expected_status}, got {status_code}',
-                })
 
             passed = all_passed
 
@@ -316,6 +350,7 @@ class TestRunPlanExecutor:
         except Exception as e:
             error_message = f'Request execution error: {e}'
 
+        failure_type = 'passed' if passed else ('assertion_failed' if not error_message else 'unknown_error')
         ApiAutoTestCaseResult.objects.create(
             test_result=self.test_result,
             case=case,
@@ -326,6 +361,12 @@ class TestRunPlanExecutor:
             passed=passed,
             assertion_details=assertion_details,
             error_message=error_message,
+            failure_type=failure_type,
+            result_metadata=_legacy_result_metadata(
+                case=case,
+                passed=passed,
+                failure_type=failure_type,
+            ),
         )
 
         self._bump_counters(passed=passed, has_error=bool(error_message))
@@ -335,6 +376,149 @@ class TestRunPlanExecutor:
         )
 
         if not passed and self.stop_on_failure:
+            self._stop_event.set()
+
+    def _execute_one_unified(self, case: ApiAutoTestCase) -> None:
+        assert self.test_result is not None
+        assert self._runner is not None
+
+        with self._extracted_lock:
+            chain_vars = dict(self._extracted)
+
+        runtime_mode = self.guard.build_runtime_mode(
+            is_mock=self.guard.choose_default_transport() == "mock_transport"
+        )
+        context = ApiExecutionContext(
+            trace_id=generate_trace_id(),
+            project_id=str(self.plan.project_id),
+            environment_id=str(self._environment.id) if self._environment else "",
+            system_vars={
+                "base_url": getattr(self._environment, "base_url", "") or "",
+                "project_id": str(self.plan.project_id),
+                "environment_id": str(self._environment.id) if self._environment else "",
+            },
+            global_vars=self._global_vars,
+            environment_vars=getattr(self._environment, "variables", {}) or {},
+            run_overrides={},
+            chain_vars=chain_vars,
+            locked_variables={"base_url", "project_id", "environment_id"},
+            secret_names={
+                *(name.lower() for name, value in self._global_vars.items() if value),
+                "authorization",
+                "token",
+                "password",
+                "secret",
+                "api_key",
+                "cookie",
+                "set-cookie",
+            },
+            secret_values={value for value in self._global_vars.values() if isinstance(value, str)},
+            policies={
+                "allowed_hosts": getattr(self._environment, "allowed_hosts", []) or [],
+                "allowed_cidrs": getattr(self._environment, "allowed_cidrs", []) or [],
+                "app_env": self.guard.get_app_env(),
+            },
+            runtime_mode=runtime_mode,
+            metadata={"source": "run_plan_serial_execute"},
+        )
+        definition = self._adapter.adapt(case)
+        execution_result = self._runner.run(definition, context)
+        case_result = self._case_mapper.create_case_result(
+            case=case,
+            test_result=self.test_result,
+            execution_result=execution_result,
+        )
+
+        if execution_result.status == "passed" and execution_result.runtime_outputs.eligible_for_chain:
+            with self._extracted_lock:
+                self._extracted.update(execution_result.runtime_outputs.extracted_variables)
+
+        self._bump_counters(
+            passed=execution_result.status == "passed",
+            has_error=execution_result.status in {
+                "timeout",
+                "request_error",
+                "ssrf_blocked",
+                "unresolved_variables",
+                "internal_error",
+            },
+        )
+        self._broadcast_progress(
+            case=case,
+            passed=execution_result.status == "passed",
+            error_message=case_result.error_message,
+            extracted_preview=execution_result.persistable_result.extracted_variables_preview,
+        )
+
+        if execution_result.status != "passed" and self.stop_on_failure:
+            self._stop_event.set()
+
+    def _execute_one_unified_parallel(self, case: ApiAutoTestCase) -> None:
+        assert self.test_result is not None
+
+        runtime_mode = self.guard.build_runtime_mode(
+            is_mock=self.guard.choose_default_transport() == "mock_transport"
+        )
+        context = ApiExecutionContext(
+            trace_id=generate_trace_id(),
+            project_id=str(self.plan.project_id),
+            environment_id=str(self._environment.id) if self._environment else "",
+            system_vars={
+                "base_url": getattr(self._environment, "base_url", "") or "",
+                "project_id": str(self.plan.project_id),
+                "environment_id": str(self._environment.id) if self._environment else "",
+            },
+            global_vars=self._global_vars,
+            environment_vars=getattr(self._environment, "variables", {}) or {},
+            run_overrides={},
+            chain_vars={},
+            locked_variables={"base_url", "project_id", "environment_id"},
+            secret_names={
+                *(name.lower() for name, value in self._global_vars.items() if value),
+                "authorization",
+                "token",
+                "password",
+                "secret",
+                "api_key",
+                "cookie",
+                "set-cookie",
+            },
+            secret_values={value for value in self._global_vars.values() if isinstance(value, str)},
+            policies={
+                "allowed_hosts": getattr(self._environment, "allowed_hosts", []) or [],
+                "allowed_cidrs": getattr(self._environment, "allowed_cidrs", []) or [],
+                "app_env": self.guard.get_app_env(),
+            },
+            runtime_mode=runtime_mode,
+            metadata={"source": "run_plan_parallel_execute"},
+        )
+        definition = self._adapter.adapt(case)
+        runner = UnifiedApiRunner(transport=self._build_unified_transport())
+        execution_result = runner.run(definition, context)
+        case_result = self._case_mapper.create_case_result(
+            case=case,
+            test_result=self.test_result,
+            execution_result=execution_result,
+        )
+
+        self._bump_counters(
+            passed=execution_result.status == "passed",
+            has_error=execution_result.status in {
+                "timeout",
+                "request_error",
+                "ssrf_blocked",
+                "unresolved_variables",
+                "internal_error",
+            },
+        )
+        self._broadcast_progress(
+            case=case,
+            passed=execution_result.status == "passed",
+            error_message=case_result.error_message,
+            extracted_preview=execution_result.persistable_result.extracted_variables_preview,
+        )
+
+        if execution_result.status != "passed" and self.stop_on_failure:
             self._stop_event.set()
 
     # ---------- helpers ----------
@@ -363,7 +547,8 @@ class TestRunPlanExecutor:
                 self._failed += 1
 
     def _broadcast_progress(self, *, case: ApiAutoTestCase, passed: bool, error_message: str,
-                            extracted: Optional[Dict[str, Any]] = None) -> None:
+                            extracted: Optional[Dict[str, Any]] = None,
+                            extracted_preview: Optional[Dict[str, Any]] = None) -> None:
         with self._counter_lock:
             snapshot = {
                 'completed': self._completed,
@@ -387,9 +572,27 @@ class TestRunPlanExecutor:
             'completed': snapshot['completed'],
             'last_error': error_message[:300] if error_message else '',
         }
-        if extracted:
+        if extracted_preview:
+            event['extracted'] = [
+                {
+                    'name': name,
+                    'value_preview': value.get('preview'),
+                    'redacted': value.get('redacted', False),
+                    'truncated': value.get('truncated', False),
+                }
+                for name, value in extracted_preview.items()
+            ]
+        elif extracted:
             event['extracted'] = ex_engine.summarize_extractions(extracted)
         _broadcast(event, project_id=self.plan.project_id)
+
+    def _build_unified_transport(self):
+        transport_name = self.guard.choose_default_transport()
+        if transport_name == "mock_transport":
+            return MockTransport()
+        if transport_name == "ssrf_protected_requests_transport":
+            return SSRFProtectedRequestsTransport()
+        return RequestsTransport()
 
     def _finalize(self) -> None:
         assert self.test_result is not None
@@ -410,6 +613,8 @@ class TestRunPlanExecutor:
         if self._stop_event.is_set():
             self.test_result.error_message = '遇到失败已中止后续用例'
         self.test_result.save()
+        sync_unified_run_from_auto_result(auto_result=self.test_result, source='single')
+        mirror_to_test_result(auto_result=self.test_result, source='single')
 
         _broadcast({
             'type': 'run_plan_progress',
@@ -446,6 +651,8 @@ def run_plan(
     max_workers: Optional[int] = None,
     stop_on_failure: Optional[bool] = None,
     environment_id: Optional[int] = None,
+    use_unified_serial: bool = False,
+    use_unified_parallel: bool = False,
 ) -> ApiAutoTestResult:
     plan = TestRunPlan.objects.select_related('project', 'created_by').get(id=plan_id)
     executor = TestRunPlanExecutor(
@@ -454,5 +661,7 @@ def run_plan(
         max_workers=max_workers,
         stop_on_failure=stop_on_failure,
         environment_id=environment_id,
+        use_unified_serial=use_unified_serial,
+        use_unified_parallel=use_unified_parallel,
     )
     return executor.execute()

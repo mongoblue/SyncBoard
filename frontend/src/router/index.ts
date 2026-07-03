@@ -79,24 +79,6 @@ const routes = [
                 meta: { permission: 'qa:manage' },
             },
             {
-                path: 'qa/api-cases',
-                name: 'ApiCaseList',
-                component: () => import("../views/qa/ApiCaseList.vue"),
-                meta: { permission: 'qa:api:list' },
-            },
-            {
-                path: 'qa/api-cases/create',
-                name: 'ApiCaseCreate',
-                component: () => import("../views/qa/ApiCaseDetail.vue"),
-                meta: { permission: 'qa:api:list' },
-            },
-            {
-                path: 'qa/api-cases/:id',
-                name: 'ApiCaseDetail',
-                component: () => import("../views/qa/ApiCaseDetail.vue"),
-                meta: { permission: 'qa:api:list' },
-            },
-            {
                 path: 'qa/ui-cases',
                 name: 'UiCaseList',
                 component: () => import("../views/qa/UiCaseList.vue"),
@@ -115,7 +97,31 @@ const routes = [
                 meta: { permission: 'qa:ui:list' },
             },
             {
+                path: 'qa/auto-cases',
+                name: 'AutoCaseList',
+                component: () => import("../views/qa/AutoCaseList.vue"),
+                meta: { permission: 'qa:api:list' },
+            },
+            {
+                path: 'qa/auto-cases/create',
+                name: 'AutoCaseCreate',
+                component: () => import("../views/qa/AutoCaseDetail.vue"),
+                meta: { permission: 'qa:api:list' },
+            },
+            {
+                path: 'qa/auto-cases/:id',
+                name: 'AutoCaseDetail',
+                component: () => import("../views/qa/AutoCaseDetail.vue"),
+                meta: { permission: 'qa:api:list' },
+            },
+            {
                 path: 'qa/test-results',
+                name: 'TestResultHub',
+                component: () => import("../views/qa/TestResultHub.vue"),
+                meta: { permission: 'qa:result:list' },
+            },
+            {
+                path: 'qa/test-results/all',
                 name: 'TestResultList',
                 component: () => import("../views/qa/TestResultList.vue"),
                 meta: { permission: 'qa:result:list' },
@@ -130,12 +136,6 @@ const routes = [
                 path: 'qa/test-runs/:id',
                 name: 'TestRunDetail',
                 component: () => import("../views/qa/TestRunDetail.vue"),
-                meta: { permission: 'qa:api:list' },
-            },
-            {
-                path: 'qa/test-runs/:runId/cases/:caseResultId',
-                name: 'ApiCaseRunDetail',
-                component: () => import("../views/qa/ApiCaseRunDetail.vue"),
                 meta: { permission: 'qa:api:list' },
             },
             {

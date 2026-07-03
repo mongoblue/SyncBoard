@@ -171,26 +171,6 @@
       <el-form-item>
         <el-collapse>
           <el-collapse-item title="高级配置" name="advanced">
-            <el-form-item label="失败重试次数">
-              <el-input-number
-                v-model="formData.config.retry_count"
-                :min="0"
-                :max="5"
-                style="width: 150px"
-              />
-              <span class="form-tip-inline">测试失败时的自动重试次数</span>
-            </el-form-item>
-
-            <el-form-item label="超时时间 (秒)">
-              <el-input-number
-                v-model="formData.config.timeout"
-                :min="30"
-                :max="3600"
-                :step="30"
-                style="width: 150px"
-              />
-            </el-form-item>
-
             <el-form-item label="并发执行">
               <el-switch
                 v-model="formData.config.parallel"
@@ -198,15 +178,6 @@
                 inactive-text="关闭"
               />
               <span class="form-tip-inline">同时执行多个测试用例（仅适用于API测试）</span>
-            </el-form-item>
-
-            <el-form-item label="失败时停止">
-              <el-switch
-                v-model="formData.config.fail_fast"
-                active-text="是"
-                inactive-text="否"
-              />
-              <span class="form-tip-inline">遇到失败的用例时立即停止后续测试</span>
             </el-form-item>
 
             <el-form-item label="通知邮箱">
@@ -299,10 +270,7 @@ interface FormData {
     parallel: boolean;
   };
   config: {
-    retry_count: number;
-    timeout: number;
     parallel: boolean;
-    fail_fast: boolean;
     notifications: string[];
   };
 }
@@ -327,10 +295,7 @@ const formData = ref<FormData>({
     parallel: false,
   },
   config: {
-    retry_count: 0,
-    timeout: 300,
     parallel: false,
-    fail_fast: false,
     notifications: [],
   },
 });
@@ -378,7 +343,7 @@ const getMethodType = (method: string): 'success' | 'primary' | 'warning' | 'dan
 const loadTestCases = async () => {
   try {
     const [apiRes, uiRes] = await Promise.all([
-      service.get('/qa/api-cases/'),
+      service.get('/qa/auto-cases/'),
       service.get('/qa/ui-cases/'),
     ]);
     apiTestCases.value = apiRes.results || apiRes || [];
@@ -467,10 +432,7 @@ const initFormData = () => {
         parallel: props.task.test_config?.parallel || false,
       },
       config: {
-        retry_count: 0,
-        timeout: 300,
         parallel: false,
-        fail_fast: false,
         notifications: [],
       },
     };
@@ -490,10 +452,7 @@ const initFormData = () => {
         parallel: false,
       },
       config: {
-        retry_count: 0,
-        timeout: 300,
         parallel: false,
-        fail_fast: false,
         notifications: [],
       },
     };

@@ -12,7 +12,7 @@ from ..models import (
 from ..serializers import AIConversationSerializer, AIMessageSerializer
 from ..ai_utils import (
     get_rag_answer, get_streaming_answer, build_project_context,
-    AVAILABLE_TOOLS, execute_tool,
+    AVAILABLE_TOOLS, execute_tool, client, SYSTEM_PROMPT_STREAM,
 )
 from backend.throttles import AIRateThrottle
 import logging
@@ -211,7 +211,7 @@ class AIChatView(APIView):
 # ============================================================
 
 class AIStreamChatView(APIView):
-    """POST /api/ai/chat/stream/ — 流式响应（不含 Tool Calling，保持低延迟）"""
+    """POST /api/ai/chat/stream/ — 真正 SSE 流式 + Tool Calling"""
 
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [AIRateThrottle]
@@ -228,7 +228,6 @@ class AIStreamChatView(APIView):
         if not _check_project_member(project, request.user):
             return Response({'detail': '您不是该项目成员'}, status=status.HTTP_403_FORBIDDEN)
 
-        # 获取或创建对话
         if conversation_id:
             conversation = get_object_or_404(AIConversation, pk=conversation_id, user=request.user)
         else:
@@ -238,28 +237,108 @@ class AIStreamChatView(APIView):
 
         AIMessage.objects.create(conversation=conversation, role='user', content=message)
 
-        # 历史 + 上下文
         recent_msgs = conversation.messages.order_by('-created_at')[:20]
         history = [{'role': m.role, 'content': m.content} for m in reversed(recent_msgs)]
         context = build_project_context(project_id, message)
 
-        stream = get_streaming_answer(message, context, history=history)
+        import openai as oai
+
+        def sse(data: dict) -> str:
+            return f'data: {json.dumps(data, ensure_ascii=False)}\n\n'
 
         def generate():
+            messages = [{"role": "system", "content": SYSTEM_PROMPT_STREAM}]
+            if history:
+                for msg in history[-10:]:
+                    if msg.get('role') in ('user', 'assistant', 'tool'):
+                        messages.append({"role": msg['role'], "content": msg['content']})
+            messages.append({"role": "user", "content": f"项目上下文：\n{context}\n\n用户：{message}"})
+
             full_answer = []
-            for chunk in stream:
-                if chunk:
-                    full_answer.append(chunk)
-                    yield f'data: {json.dumps({"chunk": chunk}, ensure_ascii=False)}\n\n'
+            tool_calls_log = []
+            max_rounds = 3
+            round_num = 0
+
+            while round_num < max_rounds:
+                round_num += 1
+                try:
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=messages,
+                        tools=AVAILABLE_TOOLS,
+                        temperature=0.3,
+                        max_tokens=2000,
+                        timeout=60,
+                        stream=True,
+                    )
+                except Exception as e:
+                    logger.error(f"Stream AI API error: {e}")
+                    yield sse({"chunk": f"\n[AI 服务错误: {str(e)}]"})
+                    break
+
+                accumulated_content = ""
+                tool_calls_acc: dict[int, dict] = {}
+                finish_reason = None
+
+                for chunk in response:
+                    delta = chunk.choices[0].delta
+                    finish_reason = chunk.choices[0].finish_reason
+
+                    if delta.content:
+                        accumulated_content += delta.content
+                        yield sse({"chunk": delta.content})
+
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_acc:
+                                tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                            if tc_delta.id:
+                                tool_calls_acc[idx]["id"] = tc_delta.id
+                            if tc_delta.function:
+                                if tc_delta.function.name:
+                                    tool_calls_acc[idx]["name"] = tc_delta.function.name
+                                if tc_delta.function.arguments:
+                                    tool_calls_acc[idx]["arguments"] += tc_delta.function.arguments
+
+                if tool_calls_acc:
+                    assistant_msg = {"role": "assistant", "content": accumulated_content or None}
+                    tc_list = []
+                    for idx in sorted(tool_calls_acc.keys()):
+                        tc = tool_calls_acc[idx]
+                        tc_list.append({
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {"name": tc["name"], "arguments": tc["arguments"]}
+                        })
+                    assistant_msg["tool_calls"] = tc_list
+                    messages.append(assistant_msg)
+
+                    for tc in tc_list:
+                        tool_name = tc["function"]["name"]
+                        try:
+                            args = json.loads(tc["function"]["arguments"])
+                        except json.JSONDecodeError:
+                            args = {}
+                        yield sse({"tool_call": {"tool": tool_name, "args": args}})
+                        result = execute_tool(tool_name, args, project_id, request.user)
+                        yield sse({"tool_result": {"tool": tool_name, "result": result}})
+                        tool_calls_log.append({"tool": tool_name, "args": args, "result": result})
+                        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+                    continue
+
+                full_answer.append(accumulated_content)
+                break
+
             answer = ''.join(full_answer)
             try:
                 AIMessage.objects.create(
                     conversation=conversation, role='assistant',
-                    content=answer, references=[]
+                    content=answer, references=tool_calls_log
                 )
             except Exception:
                 pass
-            yield f'data: {json.dumps({"done": True, "conversation_id": conversation.id}, ensure_ascii=False)}\n\n'
+            yield sse({"done": True, "conversation_id": conversation.id, "tool_calls": tool_calls_log})
 
         response = StreamingHttpResponse(generate(), content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'

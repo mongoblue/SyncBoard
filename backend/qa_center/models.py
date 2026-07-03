@@ -1,125 +1,23 @@
 """
-QA Center 模型 —— 测试中心全部 21 个模型。
+QA Center 模型 —— 测试中心模型。
 
 按业务分组：
-  接口测试（旧）：ApiTestCase, ApiTestResult
-  接口测试（新）：ApiAutoTestSuite, ApiAutoTestCase, ApiAutoTestAssertion, ApiAutoTestExtractor,
-                    ApiAutoTestResult, ApiAutoTestCaseResult
-  UI 测试：       UiTestCase, TestScreenshot
-  性能测试：      PerformanceTestCase, PerformanceTestResult
-  编排与执行：    TestRunPlan, TestRun, TestRunCaseResult, TestEnvironment, TestGlobalVar
-  DevOps：        CiCdConfig, PipelineRun, TestTask
+  接口测试：ApiAutoTestSuite, ApiAutoTestCase, ApiAutoTestAssertion, ApiAutoTestExtractor,
+            ApiAutoTestResult, ApiAutoTestCaseResult
+  UI 测试： UiTestCase, TestScreenshot
+  性能测试：PerformanceTestCase, PerformanceTestResult
+  编排与执行：TestRunPlan, TestRun, TestRunCaseResult, TestEnvironment, TestGlobalVar
+  DevOps：  CiCdConfig, PipelineRun, TestTask
 
-新旧两套并存的注意点：
-  - ApiTestCase（旧）外键到 Project 和 Task（ManyToMany related_tasks）
-  - ApiAutoTestCase（新）外键到 ApiAutoTestSuite，无直接 Project FK（通过 suite 间接）
-  - TestRun 和 TestRunCaseResult（批次执行记录）关联的是旧 ApiTestCase
-  - ApiAutoTestResult（新版执行记录）关联的是新 ApiAutoTestCase
-  - 两套共用 TestEnvironment 和 TestGlobalVar
-
+注意：
+  - ApiAutoTestCase 同时关联 project（直接 FK）和 suite（可空），支持独立用例。
+  - 用例可通过 environment FK 绑定特定环境；为空时回退到项目默认环境。
+  - TestRun/TestRunCaseResult 不再关联 legacy ApiTestCase（已删除）。
 """
 from django.conf import settings
 from django.db import models
 
 from room.models import Project, Task
-
-
-class ApiTestCase(models.Model):
-    name = models.CharField(max_length=200, verbose_name='用例名称')
-    url = models.CharField(max_length=1000, verbose_name='请求URL')
-    method = models.CharField(
-        choices=[
-            ('GET', 'GET'),
-            ('POST', 'POST'),
-            ('PUT', 'PUT'),
-            ('PATCH', 'PATCH'),
-            ('DELETE', 'DELETE'),
-            ('HEAD', 'HEAD'),
-            ('OPTIONS', 'OPTIONS'),
-        ],
-        default='GET',
-        max_length=10,
-        verbose_name='请求方法',
-    )
-    headers = models.JSONField(blank=True, default=dict, verbose_name='请求头')
-    body = models.TextField(blank=True, verbose_name='请求体')
-    expected_status = models.IntegerField(blank=True, null=True, verbose_name='预期状态码')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
-    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
-    created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name='created_api_cases',
-        verbose_name='创建者',
-    )
-    project = models.ForeignKey(
-        Project,
-        on_delete=models.CASCADE,
-        related_name='api_test_cases',
-        verbose_name='所属项目',
-    )
-    content_type = models.CharField(
-        choices=[
-            ('application/json', 'JSON'),
-            ('application/x-www-form-urlencoded', 'Form'),
-            ('multipart/form-data', 'Multipart'),
-            ('text/plain', 'Text'),
-            ('text/xml', 'XML'),
-        ],
-        default='application/json',
-        max_length=50,
-        verbose_name='Content-Type',
-    )
-    description = models.TextField(blank=True, verbose_name='用例描述')
-    expected_response = models.JSONField(blank=True, default=dict, verbose_name='预期响应')
-    is_active = models.BooleanField(default=True, verbose_name='是否启用')
-    related_tasks = models.ManyToManyField(
-        Task,
-        blank=True,
-        related_name='linked_api_test_cases',
-        verbose_name='关联任务',
-    )
-    response_extractions = models.JSONField(
-        default=list, blank=True,
-        verbose_name='响应变量提取',
-        help_text='[{"json_path": "$.token", "var_name": "auth_token", "default": null}]'
-    )
-
-    class Meta:
-        verbose_name = 'API测试用例'
-        verbose_name_plural = 'API测试用例'
-        db_table = 'qa_api_test_cases'
-        ordering = ['-created_at']
-
-
-class ApiTestResult(models.Model):
-    status_code = models.IntegerField(verbose_name='响应状态码')
-    response_body = models.TextField(blank=True, verbose_name='响应体')
-    response_headers = models.JSONField(default=dict, verbose_name='响应头')
-    response_time_ms = models.IntegerField(verbose_name='响应时间(ms)')
-    passed = models.BooleanField(verbose_name='是否通过')
-    error_message = models.TextField(blank=True, verbose_name='错误信息')
-    executed_at = models.DateTimeField(auto_now_add=True, verbose_name='执行时间')
-    assertion_results = models.JSONField(blank=True, default=list, verbose_name='断言结果详情')
-    executed_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        null=True,
-        on_delete=models.SET_NULL,
-        verbose_name='执行者',
-    )
-    test_case = models.ForeignKey(
-        ApiTestCase,
-        on_delete=models.CASCADE,
-        related_name='results',
-        verbose_name='测试用例',
-    )
-
-    class Meta:
-        verbose_name = 'API测试结果'
-        verbose_name_plural = 'API测试结果'
-        db_table = 'qa_api_test_results'
-        ordering = ['-executed_at']
 
 
 class UiTestCase(models.Model):
@@ -204,6 +102,34 @@ class TestResult(models.Model):
     worker_pid = models.IntegerField(blank=True, null=True, verbose_name="Worker PID")
     temp_dir_path = models.CharField(max_length=512, blank=True, default="", verbose_name="临时目录")
     aborted = models.BooleanField(default=False, verbose_name="是否被中止")
+    lifecycle_state = models.CharField(
+        choices=[
+            ('pending', '等待执行'),
+            ('preparing', '准备中'),
+            ('probing', '连通性检查'),
+            ('starting', '启动中'),
+            ('ramping', '加压中'),
+            ('running', '运行中'),
+            ('collecting', '收集中'),
+            ('stopping', '正在停止'),
+            ('passed', '通过'),
+            ('failed', '未通过'),
+            ('error', '异常'),
+            ('stopped', '已停止'),
+            ('timeout', '超时'),
+        ],
+        default='pending',
+        max_length=20,
+        verbose_name='生命周期状态',
+        db_index=True,
+    )
+    lifecycle_reason = models.CharField(
+        max_length=256,
+        blank=True,
+        default="",
+        verbose_name="生命周期状态原因",
+        help_text="如 probe_failed / locust_start_failed / user_stopped",
+    )
     source = models.CharField(
         choices=[
             ('devops', 'DevOps执行'),
@@ -212,14 +138,6 @@ class TestResult(models.Model):
         default='single',
         max_length=20,
         verbose_name='结果来源',
-    )
-    api_test_case = models.ForeignKey(
-        ApiTestCase,
-        blank=True,
-        null=True,
-        on_delete=models.SET_NULL,
-        related_name='test_results',
-        verbose_name='关联API用例',
     )
     executed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -243,6 +161,15 @@ class TestResult(models.Model):
         on_delete=models.SET_NULL,
         related_name='test_results',
         verbose_name='关联UI用例',
+    )
+    api_auto_result = models.ForeignKey(
+        'ApiAutoTestResult',
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+        related_name='mirrored_test_results',
+        verbose_name='关联API自动化结果',
+        help_text='API 自动化执行镜像指针；非空时点击列表行应跳转 AutoResultDetail',
     )
 
     class Meta:
@@ -369,6 +296,36 @@ class PerformanceTestCase(models.Model):
     )
     headers = models.JSONField(blank=True, default=dict, verbose_name='请求头')
     body = models.TextField(blank=True, verbose_name='请求体')
+    query_params = models.JSONField(blank=True, default=dict, verbose_name='Query参数')
+    body_type = models.CharField(
+        choices=[
+            ('none', '无'),
+            ('json', 'JSON'),
+            ('form', '表单'),
+            ('raw', '原始文本'),
+        ],
+        default='json',
+        max_length=10,
+        verbose_name='请求体类型',
+    )
+    request_timeout = models.IntegerField(default=30, verbose_name='请求超时(秒)')
+    follow_redirects = models.BooleanField(default=True, verbose_name='跟随重定向')
+    verify_ssl = models.BooleanField(default=True, verbose_name='验证SSL证书')
+    auth_config = models.JSONField(
+        blank=True, default=dict, verbose_name='认证配置',
+        help_text='{"type":"bearer","token":"{{ENV_TOKEN}}"} / {"type":"basic","username":"","password":""}'
+    )
+    steps = models.JSONField(
+        blank=True, default=list, verbose_name='多步骤场景',
+        help_text='[{"name":"login","url":"/login","method":"POST","body":{...},"extract":{"token":"$.token"}},...]'
+    )
+    assertions = models.JSONField(
+        blank=True, default=list, verbose_name='断言配置',
+        help_text='[{"type":"status_code","op":"in","expect":[200,201]},{"type":"p95","op":"lt","expect":500}]'
+    )
+    think_time_min = models.FloatField(default=0.1, verbose_name='思考时间最小值(秒)')
+    think_time_max = models.FloatField(default=0.5, verbose_name='思考时间最大值(秒)')
+    weight = models.IntegerField(default=1, verbose_name='权重')
     concurrent_users = models.IntegerField(default=10, verbose_name='并发用户数')
     duration_seconds = models.IntegerField(default=60, verbose_name='测试持续时间(秒)')
     ramp_up_seconds = models.IntegerField(default=10, verbose_name='预热时间(秒)')
@@ -423,6 +380,8 @@ class PerformanceTestResult(models.Model):
     throughput_over_time = models.JSONField(blank=True, default=list, verbose_name='吞吐量时间序列')
     response_time_over_time = models.JSONField(blank=True, default=list, verbose_name='响应时间时间序列')
     error_details = models.JSONField(blank=True, default=list, verbose_name='错误详情')
+    step_results = models.JSONField(blank=True, default=list, verbose_name='步骤级结果')
+    assertion_results = models.JSONField(blank=True, default=list, verbose_name='断言结果')
     executed_at = models.DateTimeField(auto_now_add=True, verbose_name='执行时间')
     executed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -511,7 +470,17 @@ class ApiAutoTestResult(models.Model):
         ApiAutoTestSuite,
         on_delete=models.CASCADE,
         related_name='test_results',
+        null=True,
+        blank=True,
         verbose_name='测试套件',
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='api_auto_test_results',
+        null=True,
+        blank=True,
+        verbose_name='所属项目',
     )
 
     class Meta:
@@ -586,7 +555,27 @@ class ApiAutoTestCase(models.Model):
         ApiAutoTestSuite,
         on_delete=models.CASCADE,
         related_name='test_cases',
+        null=True,
+        blank=True,
         verbose_name='所属套件',
+    )
+    project = models.ForeignKey(
+        Project,
+        on_delete=models.CASCADE,
+        related_name='api_auto_cases',
+        null=True,
+        blank=True,
+        verbose_name='所属项目',
+        help_text='独立用例直接绑定项目；为空时回退到 suite.project',
+    )
+    environment = models.ForeignKey(
+        'TestEnvironment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='api_auto_cases',
+        verbose_name='绑定环境',
+        help_text='用例级环境覆盖；为空时回退到项目默认环境',
     )
 
     class Meta:
@@ -604,6 +593,21 @@ class ApiAutoTestCaseResult(models.Model):
     passed = models.BooleanField(verbose_name='是否通过')
     assertion_details = models.JSONField(default=list, verbose_name='断言详情')
     error_message = models.TextField(blank=True, verbose_name='错误信息')
+    trace_id = models.CharField(max_length=64, blank=True, default='', db_index=True, verbose_name='链路追踪ID')
+    raw_status = models.CharField(max_length=32, blank=True, default='', db_index=True, verbose_name='原始状态')
+    error_code = models.CharField(max_length=64, blank=True, default='', db_index=True, verbose_name='错误码')
+    request_snapshot = models.JSONField(default=dict, blank=True, verbose_name='请求快照')
+    response_snapshot = models.JSONField(default=dict, blank=True, verbose_name='响应快照')
+    curl = models.JSONField(default=dict, blank=True, verbose_name='Curl快照')
+    extracted_variables_preview = models.JSONField(default=dict, blank=True, verbose_name='提取变量预览')
+    result_metadata = models.JSONField(default=dict, blank=True, verbose_name='结果元数据')
+    failure_type = models.CharField(
+        max_length=32, blank=True, default='', db_index=True,
+        verbose_name='失败类型',
+        help_text='passed/assertion_failed/http_error/network_error/timeout/'
+                  'ssl_error/auth_error/server_error/framework_error/'
+                  'config_error/script_error/schema_failed/unknown_error',
+    )
     executed_at = models.DateTimeField(auto_now_add=True, verbose_name='执行时间')
     case = models.ForeignKey(
         ApiAutoTestCase,
@@ -730,6 +734,12 @@ class CiCdConfig(models.Model):
     )
     webhook_url = models.URLField(blank=True, verbose_name='Webhook URL')
     api_token = models.CharField(blank=True, max_length=255, verbose_name='API Token')
+    # Pipeline integration fields (Task 8)
+    ci_url = models.URLField(blank=True, verbose_name="CI Server URL")
+    ci_token = models.CharField(blank=True, max_length=255, verbose_name="CI API Token")
+    ci_project = models.CharField(blank=True, max_length=255, verbose_name="CI Project/Repo")
+    ci_job_name = models.CharField(blank=True, max_length=255, verbose_name="CI Job/Pipeline Name")
+    verify_ssl = models.BooleanField(default=True, verbose_name="Verify SSL")
     branch = models.CharField(default='main', max_length=100, verbose_name='监听分支')
     auto_trigger = models.BooleanField(default=False, verbose_name='自动触发')
     test_suite_ids = models.JSONField(default=list, verbose_name='关联测试套件')
@@ -761,45 +771,67 @@ class PipelineRun(models.Model):
     status = models.CharField(
         choices=[
             ('pending', 'Pending'),
+            ('queued', 'Queued'),
             ('running', 'Running'),
             ('passed', 'Passed'),
             ('failed', 'Failed'),
+            ('cancelled', 'Cancelled'),
+            ('skipped', 'Skipped'),
         ],
         default='pending',
         max_length=20,
-        verbose_name='状态',
+        verbose_name='??',
     )
-    commit_sha = models.CharField(blank=True, max_length=40, verbose_name='提交SHA')
-    branch = models.CharField(blank=True, max_length=100, verbose_name='分支')
-    log_output = models.TextField(blank=True, verbose_name='执行日志')
-    test_results_summary = models.JSONField(default=dict, verbose_name='测试结果摘要')
-    started_at = models.DateTimeField(null=True, verbose_name='开始时间')
-    completed_at = models.DateTimeField(null=True, verbose_name='完成时间')
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    commit_sha = models.CharField(blank=True, max_length=40, verbose_name='??SHA')
+    branch = models.CharField(blank=True, max_length=100, verbose_name='??')
+    # CI integration fields (Task 8)
+    ci_type = models.CharField(blank=True, max_length=20, verbose_name='CI??')
+    external_queue_id = models.CharField(blank=True, max_length=255, verbose_name='????ID')
+    external_run_id = models.CharField(blank=True, max_length=255, verbose_name='????ID')
+    external_url = models.URLField(blank=True, verbose_name='??URL')
+    error_message = models.TextField(blank=True, verbose_name='????')
+    is_mock = models.BooleanField(default=True, verbose_name='???????')
+    jobs_summary = models.JSONField(default=list, blank=True, verbose_name='Job??')
+    log_output = models.TextField(blank=True, verbose_name='????')
+    trace_id = models.CharField(max_length=64, blank=True, default='', db_index=True,
+                                 verbose_name='Trace ID')
+    test_results_summary = models.JSONField(default=dict, verbose_name='??????')
+    started_at = models.DateTimeField(null=True, verbose_name='????')
+    completed_at = models.DateTimeField(null=True, verbose_name='????')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='????')
     cicd_config = models.ForeignKey(
         CiCdConfig,
         on_delete=models.CASCADE,
         related_name='pipeline_runs',
-        verbose_name='CI/CD配置',
+        verbose_name='CI/CD??',
     )
     project = models.ForeignKey(
         Project,
         on_delete=models.CASCADE,
         related_name='pipeline_runs',
-        verbose_name='所属项目',
+        verbose_name='????',
     )
 
     class Meta:
-        verbose_name = 'Pipeline执行记录'
-        verbose_name_plural = 'Pipeline执行记录'
+        verbose_name = 'Pipeline????'
+        verbose_name_plural = 'Pipeline????'
         db_table = 'qa_pipeline_run'
         ordering = ['-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['cicd_config', 'external_run_id'],
+                condition=models.Q(external_run_id__gt=''),
+                name='uniq_cicd_external_run',
+            ),
+        ]
 
 
 class TestEnvironment(models.Model):
     name = models.CharField(max_length=100, verbose_name='环境名称')
     base_url = models.CharField(blank=True, max_length=500, verbose_name='Base URL')
     variables = models.JSONField(blank=True, default=dict, verbose_name='环境变量')
+    allowed_hosts = models.JSONField(blank=True, default=list, verbose_name='SSRF 允许主机')
+    allowed_cidrs = models.JSONField(blank=True, default=list, verbose_name='SSRF 允许网段')
     description = models.TextField(blank=True, verbose_name='描述')
     is_default = models.BooleanField(default=False, verbose_name='是否为默认环境')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -989,9 +1021,10 @@ class TestRunCaseResult(models.Model):
     case_type = models.CharField(max_length=20, choices=CASE_TYPE, default='api')
     sequence = models.IntegerField()
 
-    api_test_case = models.ForeignKey(
-        'ApiTestCase', null=True, on_delete=models.SET_NULL,
+    api_auto_case = models.ForeignKey(
+        'ApiAutoTestCase', null=True, blank=True, on_delete=models.SET_NULL,
         related_name='run_case_results',
+        verbose_name='关联API用例',
     )
     ui_test_case = models.ForeignKey(
         'UiTestCase', null=True, on_delete=models.SET_NULL,
@@ -1007,6 +1040,12 @@ class TestRunCaseResult(models.Model):
     request_snapshot = models.JSONField(default=dict, blank=True)
     curl = models.TextField(blank=True)
     error_message = models.TextField(blank=True)
+    trace_id = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    raw_status = models.CharField(max_length=32, blank=True, default='', db_index=True)
+    error_code = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    response_snapshot = models.JSONField(default=dict, blank=True)
+    extracted_variables_preview = models.JSONField(default=dict, blank=True)
+    result_metadata = models.JSONField(default=dict, blank=True)
 
     legacy_api_result_id = models.IntegerField(null=True)
     legacy_test_result_id = models.IntegerField(null=True)
@@ -1025,7 +1064,7 @@ class TestRunCaseResult(models.Model):
         ]
         indexes = [
             models.Index(fields=['test_run', 'status']),
-            models.Index(fields=['api_test_case', '-completed_at']),
+            models.Index(fields=['api_auto_case', '-completed_at']),
         ]
         verbose_name = '测试运行用例结果'
         verbose_name_plural = '测试运行用例结果'

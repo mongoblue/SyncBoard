@@ -43,7 +43,7 @@
               <el-button type="primary" link size="small" @click="handleEdit(row)">
                 编辑
               </el-button>
-              <el-button type="success" link size="small" @click="handleTest(row)">
+              <el-button type="success" link size="small" @click="handleTest(row)" :loading="testingId === row.id">
                 测试
               </el-button>
               <el-button type="danger" link size="small" @click="handleDelete(row)">
@@ -118,6 +118,61 @@
                 <el-icon><Setting /></el-icon>
                 配置 Headers ({{ Object.keys(formData.headers || {}).length }})
               </el-button>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-divider content-position="left">
+          <span style="font-size: 13px; color: var(--el-text-color-secondary);">
+            流水线集成设置 (可选)
+          </span>
+        </el-divider>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="CI Server URL">
+              <el-input v-model="formData.ci_url" placeholder="https://api.github.com" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="CI Project / Repository">
+              <el-input v-model="formData.ci_project" placeholder="owner/repo" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="Job / Pipeline 名称">
+              <el-input v-model="formData.ci_job_name" placeholder="ci.yml 或 workflow id" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="验证 SSL 证书">
+              <el-switch v-model="formData.verify_ssl" active-text="验证" inactive-text="跳过" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="20">
+          <el-col :span="12">
+            <el-form-item label="CI API Token">
+              <el-input
+                v-model="formData.ci_token"
+                type="password"
+                show-password
+                placeholder="输入流水线 Token"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="API Token (Webhook)">
+              <el-input
+                v-model="formData.api_token"
+                type="password"
+                show-password
+                placeholder="Webhook 认证 Token"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -222,12 +277,14 @@ import {
   updateCiCdConfig,
   deleteCiCdConfig,
   getCiCdTypeText,
+  testCiCdWebhook,
 } from '@/api/devops';
 import service from '@/utils/request';
 
 interface Props {
   modelValue: boolean;
   configs: CiCdConfig[];
+  projectId: string;
 }
 
 const props = defineProps<Props>();
@@ -247,6 +304,7 @@ const showForm = ref(false);
 const saving = ref(false);
 const isEditing = ref(false);
 const editingId = ref<number | null>(null);
+const testingId = ref<number | null>(null);
 
 const formData = ref<CreateCiCdConfigRequest & { headers: Record<string, string> }>({
   name: '',
@@ -257,6 +315,12 @@ const formData = ref<CreateCiCdConfigRequest & { headers: Record<string, string>
   auto_trigger: false,
   test_suite: [],
   headers: {},
+  ci_url: '',
+  ci_token: '',
+  ci_project: '',
+  ci_job_name: '',
+  verify_ssl: true,
+  api_token: '',
 });
 
 const formRules: FormRules = {
@@ -291,7 +355,7 @@ const getCiCdTypeType = (type: string): 'primary' | 'success' | 'warning' => {
 const loadTestCases = async () => {
   try {
     const [apiRes, uiRes] = await Promise.all([
-      service.get('/qa/api-cases/'),
+      service.get('/qa/auto-cases/'),
       service.get('/qa/ui-cases/'),
     ]);
     apiTestCases.value = apiRes.results || apiRes || [];
@@ -329,6 +393,12 @@ const handleAdd = () => {
     auto_trigger: false,
     test_suite: [],
     headers: {},
+    ci_url: '',
+    ci_token: '',
+    ci_project: '',
+    ci_job_name: '',
+    verify_ssl: true,
+    api_token: '',
   };
   headerKeys.value = {};
   headerValues.value = {};
@@ -348,6 +418,12 @@ const handleEdit = (config: CiCdConfig) => {
     auto_trigger: config.auto_trigger,
     test_suite: config.test_suite || [],
     headers: { ...config.headers },
+    ci_url: config.ci_url || '',
+    ci_token: '',
+    ci_project: config.ci_project || '',
+    ci_job_name: config.ci_job_name || '',
+    verify_ssl: config.verify_ssl ?? true,
+    api_token: '',
   };
 
   // 初始化 header keys/values
@@ -363,18 +439,18 @@ const handleEdit = (config: CiCdConfig) => {
 
 // 测试配置
 const handleTest = async (config: CiCdConfig) => {
+  testingId.value = config.id;
   try {
-    // 模拟测试 Webhook
-    ElMessage.info(`正在测试 ${config.name} 的连接...`);
-
-    // 实际项目中应该调用后端测试接口
-    // await testCiCdWebhook(config.id);
-
-    setTimeout(() => {
-      ElMessage.success('连接测试成功！');
-    }, 1500);
+    const result = await testCiCdWebhook(config.id) as any;
+    if (result.reachable) {
+      ElMessage.success(`连接成功！延迟 ${result.latency_ms ?? '?'}ms`);
+    } else {
+      ElMessage.error(`连接失败：${result.error || '未知错误'}`);
+    }
   } catch (error: any) {
-    ElMessage.error(error.response?.data?.error || '测试失败');
+    ElMessage.error(error.response?.data?.error || '测试请求失败');
+  } finally {
+    testingId.value = null;
   }
 };
 
@@ -419,10 +495,14 @@ const handleSave = async () => {
         }
       });
 
-      const data = {
+      const data: any = {
         ...formData.value,
         headers,
       };
+
+      if (!isEditing.value) {
+        data.write_only_project_id = props.projectId;
+      }
 
       if (isEditing.value && editingId.value) {
         await updateCiCdConfig(editingId.value, data);

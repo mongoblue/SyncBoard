@@ -375,7 +375,7 @@ const fetchTaskDetail = async () => {
 const loadTestCases = async () => {
   try {
     const [apiRes, uiRes] = await Promise.all([
-      service.get('/qa/api-cases/'),
+      service.get('/qa/auto-cases/'),
       service.get('/qa/ui-cases/'),
     ]);
     apiTestCases.value = apiRes.results || apiRes || [];
@@ -477,6 +477,15 @@ const goBack = () => {
 
 const viewExecutionDetail = (row: any) => {
   const projectId = route.params.projectId || task.value?.project;
+  // 优先跳转到新引擎
+  if (row.test_run_id) {
+    router.push(`/projects/${projectId}/qa/test-runs/${row.test_run_id}`);
+    return;
+  }
+  if (row.api_auto_result_id && task.value?.test_type === 'api') {
+    router.push(`/projects/${projectId}/qa/auto-results/${row.api_auto_result_id}`);
+    return;
+  }
   router.push(`/projects/${projectId}/qa/test-results/${row.id}`);
 };
 

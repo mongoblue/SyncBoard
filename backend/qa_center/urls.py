@@ -1,10 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import DataFactoryView, RunTestView
-from .views_api_test import ApiTestCaseViewSet, ApiTestResultViewSet, ApiTestCaseBatchRunView
 from .views_ui_test import UiTestCaseViewSet, ui_run_screenshot, ui_run_screenshot_by_index
 from .views_test_result import TestResultViewSet
-from .views_performance import PerformanceTestCaseViewSet, PerformanceTestResultViewSet
+from .views_performance import PerformanceTestCaseViewSet, PerformanceTestResultViewSet, performance_run_debug
 from .views_api_auto_test import (
     ApiAutoTestSuiteViewSet,
     ApiAutoTestCaseViewSet,
@@ -19,16 +18,22 @@ from .views_devops import (
     DashboardStatsView,
     RecentExecutionsView,
     CiCdIntegrationView,
+    CiCdTestConnectionView,
     TestTaskView,
     TestTaskExecuteView,
     TestTaskStatusView,
     TestTaskHistoryView,
+    TestTaskLogsView,
+    TestTaskCancelView,
     QuickTestView,
     PipelineRunListView,
     PipelineRunDetailView,
+    PipelineRunCancelView,
+    PipelineRunLogsView,
     PipelineRunTriggerView,
     PipelineRunWebhookView,
     ProjectQualityReportView,
+    RuntimeModeView,
 )
 from .views_run_plan import TestRunPlanViewSet
 from .views_environment import TestEnvironmentViewSet, TestGlobalVarViewSet
@@ -42,14 +47,13 @@ from .views_test_run import (
 )
 
 router = DefaultRouter()
-router.register(r'api-cases', ApiTestCaseViewSet, basename='api_test_case')
-router.register(r'api-results', ApiTestResultViewSet, basename='api_test_result')
 router.register(r'ui-cases', UiTestCaseViewSet, basename='ui_test_case')
 router.register(r'test-results', TestResultViewSet, basename='test_result')
 router.register(r'performance-cases', PerformanceTestCaseViewSet, basename='performance_test_case')
 router.register(r'performance-results', PerformanceTestResultViewSet, basename='performance_test_result')
 router.register(r'auto-suites', ApiAutoTestSuiteViewSet, basename='api_auto_suite')
 router.register(r'auto-cases', ApiAutoTestCaseViewSet, basename='api_auto_case')
+router.register(r'api-cases', ApiAutoTestCaseViewSet, basename='legacy_api_test_case')
 router.register(r'auto-assertions', ApiAutoTestAssertionViewSet, basename='api_auto_assertion')
 router.register(r'auto-extractors', ApiAutoTestExtractorViewSet, basename='api_auto_extractor')
 router.register(r'auto-results', ApiAutoTestResultViewSet, basename='api_auto_result')
@@ -61,7 +65,6 @@ router.register(r'global-vars', TestGlobalVarViewSet, basename='test_global_var'
 urlpatterns = [
     path('data-factory/', DataFactoryView.as_view(), name='data_factory'),
     path('run-test/', RunTestView.as_view(), name='run_test'),
-    path('api-cases/run-batch/', ApiTestCaseBatchRunView.as_view(), name='api_case_run_batch'),
     path('runs/<int:run_id>/cancel/', cancel_test_run, name='test_run_cancel'),
     path('runs/<int:run_id>/rerun/', rerun_test_run, name='test_run_rerun'),
     path('runs/', list_test_runs, name='test_run_list'),
@@ -79,14 +82,21 @@ urlpatterns = [
     path('devops/tasks/<int:task_id>/execute/', TestTaskExecuteView.as_view(), name='devops_task_execute'),
     path('devops/tasks/<int:task_id>/status/', TestTaskStatusView.as_view(), name='devops_task_status'),
     path('devops/tasks/<int:task_id>/history/', TestTaskHistoryView.as_view(), name='devops_task_history'),
+    path('devops/tasks/<int:task_id>/logs/', TestTaskLogsView.as_view(), name='devops_task_logs'),
+    path('devops/tasks/<int:task_id>/cancel/', TestTaskCancelView.as_view(), name='devops_task_cancel'),
     path('link-task/', TestCaseLinkTaskView.as_view(), name='test_link_task'),
     path('unlink-task/', TestCaseUnlinkTaskView.as_view(), name='test_unlink_task'),
     path('devops/pipeline-runs/', PipelineRunListView.as_view(), name='pipeline_run_list'),
     path('devops/pipeline-runs/<int:run_id>/', PipelineRunDetailView.as_view(), name='pipeline_run_detail'),
+    path('devops/pipeline-runs/<int:run_id>/cancel/', PipelineRunCancelView.as_view(), name='pipeline_run_cancel'),
+    path('devops/pipeline-runs/<int:run_id>/logs/', PipelineRunLogsView.as_view(), name='pipeline_run_logs'),
     path('devops/quality-report/', ProjectQualityReportView.as_view(), name='quality_report'),
     path('devops/cicd-config/<int:config_id>/trigger/', PipelineRunTriggerView.as_view(), name='cicd_trigger'),
     path('devops/cicd-config/<int:config_id>/webhook/', PipelineRunWebhookView.as_view(), name='cicd_webhook'),
+    path('devops/cicd-config/<int:config_id>/test/', CiCdTestConnectionView.as_view(), name='cicd_test_connection'),
     path('ui-run/screenshot/', ui_run_screenshot, name='ui_run_screenshot'),
     path('ui-run/<str:task_id>/screenshot/<int:index>/', ui_run_screenshot_by_index, name='ui_run_screenshot_by_index'),
     path('devops/quick-test/', QuickTestView.as_view(), name='devops_quick_test'),
+    path('devops/runtime-mode/', RuntimeModeView.as_view(), name='devops_runtime_mode'),
+    path('performance-runs/<int:execution_id>/debug/', performance_run_debug, name='performance_run_debug'),
 ]

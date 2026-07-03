@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.utils import timezone
 
-from .models import TestResult, TestScreenshot, UiTestCase, ApiTestCase
+from .models import TestResult, TestScreenshot, UiTestCase
 from .serializers import (
     TestResultListSerializer,
     TestResultDetailSerializer,
@@ -44,7 +44,7 @@ class TestResultViewSet(viewsets.ModelViewSet):
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         obj = get_object_or_404(
             TestResult.objects.select_related(
-                'project', 'executed_by', 'api_test_case', 'ui_test_case'
+                'project', 'executed_by', 'ui_test_case'
             ).prefetch_related('screenshots'),
             **{self.lookup_field: self.kwargs[lookup_url_kwarg]},
         )
@@ -89,7 +89,7 @@ class TestResultViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(created_at__lte=end_date)
 
         return queryset.select_related(
-            'project', 'executed_by', 'api_test_case', 'ui_test_case'
+            'project', 'executed_by', 'ui_test_case'
         ).prefetch_related('screenshots')
 
     def get_serializer_class(self):
@@ -103,15 +103,8 @@ class TestResultViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """创建时设置执行者"""
         project = serializer.validated_data.get('project')
-        api_case = serializer.validated_data.get('api_test_case')
         ui_case = serializer.validated_data.get('ui_test_case')
         effective_project = project
-
-        if api_case:
-            ensure_project_id_access(self.request.user, api_case.project_id)
-            if effective_project and effective_project.id != api_case.project_id:
-                raise ValidationError({'api_test_case': 'API用例不属于当前项目'})
-            effective_project = api_case.project
 
         if ui_case:
             ensure_project_id_access(self.request.user, ui_case.project_id)

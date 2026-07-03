@@ -56,16 +56,20 @@ export const useAuthStore = defineStore('auth', () => {
   });
 
   // 1. 登录动作
-  const login = async (form: any) => {
+  // 返回值：true 表示登录成功；字符串表示失败原因（401 / 5xx / 网络）
+  const login = async (form: any): Promise<boolean | 'invalid_credentials' | 'server_error' | 'network_error'> => {
     try {
       const data = await service.post<any, UserInfo>('/auth/login/', form);
       user.value = data;
       // 登录成功后获取权限
       await fetchPermissions();
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('登录失败', error);
-      return false;
+      const status = error?.response?.status;
+      if (status === 401) return 'invalid_credentials';
+      if (status && status >= 500) return 'server_error';
+      return 'network_error';
     }
   };
 

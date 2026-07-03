@@ -64,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRecorderSocket } from '@/composables/useRecorderSocket'
 
@@ -154,6 +154,11 @@ function confirmAssert() {
   assertDialogVisible.value = false
   pendingAssert.value = null
 }
+
+// 面板显示时自动开始录制，避免用户需要点两次（外层按钮 + 面板内按钮）
+onMounted(() => {
+  if (urlInput.value) setTimeout(() => onStart(), 300)
+})
 </script>
 
 <style scoped>

@@ -11,10 +11,68 @@ from rest_framework.response import Response
 
 from .models import TestRunPlan, ApiAutoTestCase, TestEnvironment
 from .serializers import TestRunPlanSerializer, TestRunPlanExecuteSerializer
+from .api_execution.runtime_guard import RuntimeGuard
+from .feature_flags import (
+    use_unified_runner_for_runplan_parallel,
+    use_unified_runner_for_runplan_serial,
+)
 from .run_plan_executor import run_plan
 from room.project_access import ensure_project_id_access, project_access_q
 
 logger = logging.getLogger(__name__)
+
+
+def _execute_run_plan_async_legacy(*, plan, user, overrides):
+    def _runner():
+        try:
+            run_plan(
+                plan.id, user=user,
+                parallel=overrides.get('parallel'),
+                max_workers=overrides.get('max_workers'),
+                stop_on_failure=overrides.get('stop_on_failure'),
+                environment_id=overrides.get('environment_id'),
+            )
+        except Exception as e:  # pragma: no cover
+            logger.exception('[RunPlan] background execute failed: %s', e)
+
+    t = threading.Thread(target=_runner, name=f'runplan-{plan.id}', daemon=True)
+    t.start()
+
+
+def _execute_run_plan_async_unified_serial(*, plan, user, overrides):
+    def _runner():
+        try:
+            run_plan(
+                plan.id, user=user,
+                parallel=False,
+                max_workers=overrides.get('max_workers'),
+                stop_on_failure=overrides.get('stop_on_failure'),
+                environment_id=overrides.get('environment_id'),
+                use_unified_serial=True,
+            )
+        except Exception as e:  # pragma: no cover
+            logger.exception('[RunPlan] unified serial background execute failed: %s', e)
+
+    t = threading.Thread(target=_runner, name=f'runplan-unified-{plan.id}', daemon=True)
+    t.start()
+
+
+def _execute_run_plan_async_unified_parallel(*, plan, user, overrides):
+    def _runner():
+        try:
+            run_plan(
+                plan.id, user=user,
+                parallel=True,
+                max_workers=overrides.get('max_workers'),
+                stop_on_failure=overrides.get('stop_on_failure'),
+                environment_id=overrides.get('environment_id'),
+                use_unified_parallel=True,
+            )
+        except Exception as e:  # pragma: no cover
+            logger.exception('[RunPlan] unified parallel background execute failed: %s', e)
+
+    t = threading.Thread(target=_runner, name=f'runplan-unified-parallel-{plan.id}', daemon=True)
+    t.start()
 
 
 class TestRunPlanViewSet(viewsets.ModelViewSet):
@@ -69,6 +127,7 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
         ser = TestRunPlanExecuteSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         overrides = ser.validated_data
+        guard = RuntimeGuard()
 
         environment_id = overrides.get('environment_id')
         if environment_id is not None and not TestEnvironment.objects.filter(
@@ -80,30 +139,43 @@ class TestRunPlanViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # 异步执行，立即返回 result_id 占位会比较复杂；这里同步创建 ApiAutoTestResult，
-        # 然后在线程里跑实际请求。前端通过 WebSocket 跟进进度。
-        # 不过为了简化先实现：开线程后立刻返回 202，前端订阅 run_plan_progress。
         user = request.user if request.user.is_authenticated else None
+        effective_parallel = overrides.get('parallel')
+        if effective_parallel is None:
+            effective_parallel = plan.parallel
 
-        def _runner():
-            try:
-                run_plan(
-                    plan.id, user=user,
-                    parallel=overrides.get('parallel'),
-                    max_workers=overrides.get('max_workers'),
-                    stop_on_failure=overrides.get('stop_on_failure'),
-                    environment_id=overrides.get('environment_id'),
-                )
-            except Exception as e:  # pragma: no cover
-                logger.exception('[RunPlan] background execute failed: %s', e)
-
-        t = threading.Thread(target=_runner, name=f'runplan-{plan.id}', daemon=True)
-        t.start()
+        if effective_parallel and use_unified_runner_for_runplan_parallel():
+            _execute_run_plan_async_unified_parallel(plan=plan, user=user, overrides=overrides)
+            runtime_mode = (
+                guard.build_runtime_mode(is_mock=True)
+                if guard.choose_default_transport() == "mock_transport"
+                else guard.build_runtime_mode(is_mock=False)
+            )
+        elif not effective_parallel and use_unified_runner_for_runplan_serial():
+            _execute_run_plan_async_unified_serial(plan=plan, user=user, overrides=overrides)
+            runtime_mode = (
+                guard.build_runtime_mode(is_mock=True)
+                if guard.choose_default_transport() == "mock_transport"
+                else guard.build_runtime_mode(is_mock=False)
+            )
+        elif guard.is_strict():
+            return Response(
+                {
+                    'detail': 'Unified runner is required for this entrypoint in strict environments',
+                    'error_code': 'runner_required',
+                    'runtime_mode': guard.build_runtime_mode(guarded_rejected=True),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        else:
+            _execute_run_plan_async_legacy(plan=plan, user=user, overrides=overrides)
+            runtime_mode = guard.build_runtime_mode(is_mock=False)
 
         return Response(
             {
                 'detail': '已开始执行，请通过 WebSocket /ws/qa/dashboard/<project_id>/ 订阅 run_plan_progress 事件',
                 'plan_id': plan.id,
+                'runtime_mode': runtime_mode,
             },
             status=status.HTTP_202_ACCEPTED,
         )

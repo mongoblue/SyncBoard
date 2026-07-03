@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from .models import TestEnvironment, TestGlobalVar
 from .serializers import TestEnvironmentSerializer, TestGlobalVarSerializer
+from .environment_security import ensure_project_admin, write_allowlist_audit_log
 from room.project_access import ensure_project_id_access, project_access_q
 
 
@@ -73,11 +74,37 @@ class TestEnvironmentViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def perform_update(self, serializer):
+        instance_before = self.get_object()
+        before_hosts = list(instance_before.allowed_hosts or [])
+        before_cidrs = list(instance_before.allowed_cidrs or [])
+        updating_allowlist = (
+            'allowed_hosts' in serializer.validated_data
+            or 'allowed_cidrs' in serializer.validated_data
+        )
+        if updating_allowlist:
+            ensure_project_admin(self.request.user, instance_before.project)
         instance = serializer.save()
         if instance.is_default:
             TestEnvironment.objects.filter(
                 project=instance.project, is_default=True,
             ).exclude(pk=instance.pk).update(is_default=False)
+        if updating_allowlist:
+            request_id = (
+                self.request.META.get('HTTP_X_REQUEST_ID')
+                or self.request.META.get('HTTP_X_TRACE_ID')
+                or ''
+            )
+            write_allowlist_audit_log(
+                user=self.request.user,
+                environment=instance,
+                before_hosts=before_hosts,
+                after_hosts=instance.allowed_hosts or [],
+                before_cidrs=before_cidrs,
+                after_cidrs=instance.allowed_cidrs or [],
+                trace_id_or_request_id=request_id,
+                client_ip=self.request.META.get('REMOTE_ADDR'),
+                user_agent=self.request.META.get('HTTP_USER_AGENT', ''),
+            )
 
     @action(detail=True, methods=['post'])
     @transaction.atomic

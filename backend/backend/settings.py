@@ -30,7 +30,9 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'unsafe-default-key')
 DEBUG = os.environ.get('DEBUG', 'False') == 'True'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+# ALLOWED_HOSTS: 开发/测试环境默认包含 testserver（Django test client 默认 Host）。
+# 生产环境必须列出显式主机名，禁止使用 "*"（DEBUG=False 时 Django 会拒绝 "*"）。
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',')
 
 INSTALLED_APPS = [
     'channels',
@@ -40,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_celery_beat',
     'rest_framework',
     'room',
     'qa_center',
@@ -201,6 +204,7 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'anon': os.environ.get('ANON_THROTTLE_RATE', '100/min'),
         'user': os.environ.get('USER_THROTTLE_RATE', '1000/min'),
+        'screenshot': os.environ.get('SCREENSHOT_THROTTLE_RATE', '120/min'),
     },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
@@ -235,3 +239,76 @@ LOGGING = {
     },
 }
 
+
+
+
+
+
+
+
+
+
+
+# QA Center Feature Flags (production upgrade)
+USE_CELERY_TASKS = os.environ.get("USE_CELERY_TASKS", "False").lower() == "true"
+USE_REAL_CI = os.environ.get("USE_REAL_CI", "False").lower() == "true"
+USE_SEMAPHORE = os.environ.get("USE_SEMAPHORE", "False").lower() == "true"
+USE_UNIFIED_API_RUNNER = os.environ.get("USE_UNIFIED_API_RUNNER", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_API_AUTO = os.environ.get("USE_UNIFIED_RUNNER_FOR_API_AUTO", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_API_AUTO_CASE = os.environ.get("USE_UNIFIED_RUNNER_FOR_API_AUTO_CASE", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_API_AUTO_SUITE = os.environ.get("USE_UNIFIED_RUNNER_FOR_API_AUTO_SUITE", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_RUNPLAN = os.environ.get("USE_UNIFIED_RUNNER_FOR_RUNPLAN", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_RUNPLAN_SERIAL = os.environ.get("USE_UNIFIED_RUNNER_FOR_RUNPLAN_SERIAL", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_RUNPLAN_PARALLEL = os.environ.get("USE_UNIFIED_RUNNER_FOR_RUNPLAN_PARALLEL", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_ASYNC_TRIGGERS = os.environ.get("USE_UNIFIED_RUNNER_FOR_ASYNC_TRIGGERS", "True").lower() == "true"
+USE_UNIFIED_RUNNER_FOR_LEGACY = os.environ.get("USE_UNIFIED_RUNNER_FOR_LEGACY", "True").lower() == "true"
+PERF_MAX_CONCURRENT = int(os.environ.get("PERF_MAX_CONCURRENT", "5"))
+UI_TEST_MAX_CONCURRENT_RUNNERS = int(os.environ.get("UI_TEST_MAX_CONCURRENT_RUNNERS", "2"))
+# ── 压力测试 URL 预检配置 ─────────────────────────────────────
+PERF_ALLOW_LOCALHOST = os.environ.get("PERF_ALLOW_LOCALHOST", "false").lower() == "true"
+PERF_ALLOWED_HOSTS = [
+    h.strip() for h in os.environ.get("PERF_ALLOWED_HOSTS", "").split(",") if h.strip()
+]
+PERF_BLOCK_PRIVATE_CIDRS = os.environ.get("PERF_BLOCK_PRIVATE_CIDRS", "true").lower() == "true"
+PERF_PROBE_TIMEOUT_SECONDS = float(os.environ.get("PERF_PROBE_TIMEOUT_SECONDS", "5"))
+PERF_BLOCKED_SCHEMES = tuple(
+    s.strip() for s in os.environ.get(
+        "PERF_BLOCKED_SCHEMES",
+        "file,ftp,gopher,javascript,data,vbscript",
+    ).split(",") if s.strip()
+)
+PERF_BLOCKED_HOSTS = tuple(
+    h.strip() for h in os.environ.get(
+        "PERF_BLOCKED_HOSTS",
+        "169.254.169.254,metadata.google.internal,metadata,100.100.100.200",
+    ).split(",") if h.strip()
+)
+PERF_BLOCKED_CIDRS = tuple(
+    c.strip() for c in os.environ.get(
+        "PERF_BLOCKED_CIDRS",
+        "169.254.0.0/16,100.64.0.0/10",
+    ).split(",") if c.strip()
+)
+# ── 生产级执行器配置 ─────────────────────────────────────────
+PERF_EXTRA_TIMEOUT_SECONDS = int(os.environ.get("PERF_EXTRA_TIMEOUT_SECONDS", "30"))
+PERF_GRACEFUL_STOP_TIMEOUT = int(os.environ.get("PERF_GRACEFUL_STOP_TIMEOUT", "5"))
+PERF_ARTIFACT_RETENTION_DAYS = int(os.environ.get("PERF_ARTIFACT_RETENTION_DAYS", "7"))
+PERF_KEEP_FAILED_ARTIFACTS = os.environ.get("PERF_KEEP_FAILED_ARTIFACTS", "true").lower() == "true"
+# API 校验上限
+PERF_MAX_USERS_PER_TEST = int(os.environ.get("PERF_MAX_USERS_PER_TEST", "10000"))
+PERF_MAX_DURATION_SECONDS = int(os.environ.get("PERF_MAX_DURATION_SECONDS", "3600"))
+PERF_MAX_BODY_BYTES = int(os.environ.get("PERF_MAX_BODY_BYTES", str(1024 * 1024)))  # 1MB
+PERF_MAX_HEADERS_COUNT = int(os.environ.get("PERF_MAX_HEADERS_COUNT", "50"))
+# 项目配额默认值
+PERF_PROJECT_MAX_CONCURRENT = int(os.environ.get("PERF_PROJECT_MAX_CONCURRENT", "2"))
+PERF_PROJECT_MAX_USERS = int(os.environ.get("PERF_PROJECT_MAX_USERS", "1000"))
+PERF_PROJECT_MAX_DURATION = int(os.environ.get("PERF_PROJECT_MAX_DURATION", "600"))
+PERF_PROJECT_DAILY_RUNS = int(os.environ.get("PERF_PROJECT_DAILY_RUNS", "50"))
+# ── v2 分布式执行器配置 ─────────────────────────────────────
+PERF_RUNNER_BACKEND = os.environ.get("PERF_RUNNER_BACKEND", "local")  # local | docker | k8s
+PERF_K8S_NAMESPACE = os.environ.get("PERF_K8S_NAMESPACE", "default")
+PERF_ARTIFACT_STORAGE = os.environ.get("PERF_ARTIFACT_STORAGE", "local")  # local | s3 | minio
+PERF_K8S_DEFAULT_CPU_LIMIT = os.environ.get("PERF_K8S_DEFAULT_CPU_LIMIT", "2")
+PERF_K8S_DEFAULT_MEMORY_LIMIT = os.environ.get("PERF_K8S_DEFAULT_MEMORY_LIMIT", "4Gi")
+PERF_DOCKER_IMAGE = os.environ.get("PERF_DOCKER_IMAGE", "syncboard/locust-worker:latest")
+DEVOPS_WEBHOOK_MAX_BODY_BYTES = int(os.environ.get("DEVOPS_WEBHOOK_MAX_BODY_BYTES", str(256 * 1024)))

@@ -270,6 +270,7 @@
     <CiCdConfigDialog
       v-model="showCiCdDialog"
       :configs="ciCdConfigs"
+      :project-id="projectId"
       @refresh="loadCiCdConfigs"
     />
 
@@ -376,7 +377,7 @@ const getTriggerTypeText = (type: string): string => {
 // 加载仪表板统计数据
 const loadStats = async () => {
   try {
-    const data = await getDashboardStats(7);
+    const data = await getDashboardStats(projectId.value, 7);
     stats.value = data;
   } catch (error) {
     console.error('加载统计数据失败', error);
@@ -386,7 +387,7 @@ const loadStats = async () => {
 // 加载最近执行记录
 const loadRecentExecutions = async () => {
   try {
-    const data = await getRecentExecutions(5);
+    const data = await getRecentExecutions(projectId.value, 5);
     recentExecutions.value = data;
   } catch (error) {
     console.error('加载最近执行记录失败', error);
@@ -396,7 +397,7 @@ const loadRecentExecutions = async () => {
 // 加载 CI/CD 配置
 const loadCiCdConfigs = async () => {
   try {
-    const data = await getCiCdConfigs();
+    const data = await getCiCdConfigs(projectId.value);
     ciCdConfigs.value = data;
   } catch (error) {
     console.error('加载 CI/CD 配置失败', error);
@@ -406,7 +407,7 @@ const loadCiCdConfigs = async () => {
 // 加载测试任务
 const loadTestTasks = async () => {
   try {
-    const data = await getTestTasks();
+    const data = await getTestTasks(projectId.value);
     testTasks.value = data;
   } catch (error) {
     console.error('加载测试任务失败', error);
@@ -426,8 +427,16 @@ const refreshData = async () => {
   ElMessage.success('数据已刷新');
 };
 
-// 查看执行详情
+// 查看执行详情 — 优先跳转到新引擎 (TestRunDetail / AutoResultDetail)
 const viewExecutionDetail = (row: RecentExecution) => {
+  if (row.test_run_id) {
+    router.push({ name: 'TestRunDetail', params: { id: row.test_run_id } });
+    return;
+  }
+  if (row.api_auto_result_id && row.test_type === 'api') {
+    router.push({ name: 'AutoResultDetail', params: { id: row.api_auto_result_id } });
+    return;
+  }
   router.push({
     name: 'TestResultDetail',
     params: { id: row.id },

@@ -94,7 +94,7 @@ class Command(BaseCommand):
                     test_run=run,
                     case_type='api',
                     sequence=idx,
-                    api_test_case_id=item.get('case_id') or tr.api_test_case_id,
+                    api_auto_case_id=item.get('case_id'),
                     status='passed' if item.get('passed') else 'failed',
                     duration_ms=item.get('response_time_ms'),
                     status_code=item.get('response', {}).get('status_code'),

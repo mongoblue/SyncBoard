@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="ai-chat-page">
     <div class="chat-layout">
       <!-- 左侧：对话列表 -->
@@ -345,31 +345,11 @@ const sendMessageNormal = async (msg: string) => {
 
 const sendMessageStream = async (msg: string) => {
   isSending.value = true;
-  const aiMsg: ChatMessage = { role: 'assistant', content: '', timestamp: Date.now(), references: [], streaming: true };
+  const aiMsg: ChatMessage = {
+    role: 'assistant', content: '', timestamp: Date.now(),
+    references: [], streaming: true, toolCalls: [],
+  };
   messages.value.push(aiMsg);
-
-  let buffer = '';
-  let streamDone = false;
-  const flushTimer = window.setInterval(() => {
-    if (buffer.length === 0) {
-      if (streamDone) {
-        window.clearInterval(flushTimer);
-        activeTimers.delete(flushTimer);
-        aiMsg.streaming = false;
-        isSending.value = false;
-        scrollToBottomIfNear();
-      }
-      return;
-    }
-    // 兜底:buffer 严重积压(流已结束很久还没追上)时加速,避免无限拖延
-    const take = buffer.length > 600
-      ? Math.max(CHARS_PER_TICK, Math.ceil(buffer.length / 100))
-      : CHARS_PER_TICK;
-    aiMsg.content += buffer.slice(0, take);
-    buffer = buffer.slice(take);
-    scrollToBottomIfNear();
-  }, TICK_MS);
-  activeTimers.add(flushTimer);
 
   try {
     const resp = await fetch('/api/ai/chat/stream/', {
@@ -378,30 +358,70 @@ const sendMessageStream = async (msg: string) => {
       credentials: 'include',
       body: JSON.stringify({ project_id: projectId.value, question: msg, conversation_id: currentConvId.value }),
     });
+    if (!resp.ok) {
+      aiMsg.content = '[请求失败: ' + resp.status + ']';
+      aiMsg.streaming = false;
+      isSending.value = false;
+      return;
+    }
     const reader = resp.body?.getReader();
     const decoder = new TextDecoder();
     if (!reader) throw new Error('No reader');
 
+    let buffer = '';
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const text = decoder.decode(value, { stream: true });
-      for (const line of text.split('\n')) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6));
-            if (data.done) {
-              if (data.conversation_id) { currentConvId.value = data.conversation_id; fetchConversations(); }
-              aiMsg.references = data.references || [];
-            } else if (data.chunk) {
-              buffer += data.chunk;
+      buffer += text;
+      // 按完整行解析 SSE
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 保留不完整的最后一行
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.done) {
+            if (data.conversation_id) {
+              currentConvId.value = data.conversation_id;
+              fetchConversations();
             }
-          } catch {}
-        }
+            if (data.tool_calls?.length) {
+              aiMsg.toolCalls = data.tool_calls;
+            }
+            aiMsg.streaming = false;
+            isSending.value = false;
+          } else if (data.chunk) {
+            // 真正实时流式：直接追加内容
+            aiMsg.content += data.chunk;
+          } else if (data.tool_call) {
+            // 工具调用开始
+            aiMsg.toolCalls = aiMsg.toolCalls || [];
+            aiMsg.toolCalls.push({
+              tool: data.tool_call.tool,
+              args: data.tool_call.args,
+              result: null,
+              running: true,
+            });
+          } else if (data.tool_result) {
+            // 工具调用结果
+            const tcList = aiMsg.toolCalls || [];
+            const found = tcList.find((t: any) => t.tool === data.tool_result.tool && t.running);
+            if (found) {
+              found.result = data.tool_result.result;
+              found.running = false;
+            }
+          }
+        } catch { /* 跳过解析失败的行 */ }
       }
+      scrollToBottomIfNear();
     }
-  } catch { buffer += '\n[流式响应中断]'; }
-  finally { streamDone = true; }
+  } catch {
+    aiMsg.content += '\n[流式响应中断]';
+  } finally {
+    aiMsg.streaming = false;
+    isSending.value = false;
+  }
 };
 
 // 分析报告
