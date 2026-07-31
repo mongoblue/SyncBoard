@@ -9,17 +9,26 @@ TestResult）。镜像不重复写明细——明细查 ApiAutoTestCaseResult，
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from qa_center.models import ApiAutoTestResult, TestResult, TestRun, TestRunCaseResult
 
 
-def _select_preferred_mirror(*, auto_result: ApiAutoTestResult, task_id: str = "") -> TestResult | None:
+def _select_preferred_mirror(
+    *,
+    auto_result: ApiAutoTestResult,
+    task_id: str = "",
+    exclude_id: Optional[int] = None,
+) -> TestResult | None:
     mirrors = TestResult.objects.filter(api_auto_result=auto_result).defer(
         "lifecycle_state",
         "lifecycle_reason",
     )
+    if exclude_id is not None:
+        mirrors = mirrors.exclude(id=exclude_id)
     ordering = (
         Coalesce("started_at", "created_at").desc(),
         "-created_at",

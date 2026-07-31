@@ -4,6 +4,20 @@ from django.contrib.auth.models import User
 from room.models import Project, Column, Tag
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache_between_tests():
+    """清空 Django cache，避免 webhook 去重/限流等跨测试累积。
+
+    webhook 去重（30s 窗口）与限流（5/60s）按 config id 计数，
+    测试重建的 config id 从 1 复用，缓存残留会导致后续测试误判 429。
+    """
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def test_password():
     return 'testpass123'

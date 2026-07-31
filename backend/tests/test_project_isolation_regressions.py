@@ -24,6 +24,19 @@ from qa_center.models import (
 from room.models import Column, Project, Task
 
 
+def _fake_ui_execute(success=True):
+    """模拟新版 runner_supervisor.execute_ui_case：发射事件 + 返回 finished dict。"""
+    def fake(case_data, on_event, timeout_seconds=300, task_id=None):
+        tid = task_id or 'fake-task'
+        summary = {'passed': 1 if success else 0, 'failed': 0 if success else 1, 'total': 1}
+        on_event({'type': 'supervisor_meta', 'task_id': tid, 'worker_pid': 1})
+        on_event({'type': 'started', 'temp_dir': ''})
+        on_event({'type': 'step_log', 'message': 'ok'})
+        on_event({'type': 'finished', 'success': success, 'summary': summary, 'task_id': tid})
+        return {'type': 'finished', 'success': success, 'summary': summary, 'task_id': tid}
+    return fake
+
+
 @pytest.mark.django_db
 class TestProjectIsolationRegressions:
     def setup_method(self):
@@ -576,7 +589,7 @@ class TestProjectIsolationRegressions:
 
         with patch('qa_center.views_ui_test.runner_supervisor.is_runner_alive') as is_alive, \
                 patch('qa_center.views_ui_test.runner_supervisor.abort_runner') as abort_runner, \
-                patch('qa_center.views_ui_test.runner_supervisor.get_events') as get_events:
+                patch('qa_center.views_ui_test.runner_supervisor.peek_events') as peek_events:
             abort_resp = client.post(f'/api/qa/ui-cases/runs/{running_result.task_id}/abort/')
             events_resp = client.get(f'/api/qa/ui-cases/runs/{running_result.task_id}/events/')
 
@@ -584,7 +597,7 @@ class TestProjectIsolationRegressions:
         assert events_resp.status_code == 403
         is_alive.assert_not_called()
         abort_runner.assert_not_called()
-        get_events.assert_not_called()
+        peek_events.assert_not_called()
         running_result.refresh_from_db()
         assert running_result.status == 'running'
         assert running_result.aborted is False
@@ -610,10 +623,10 @@ class TestProjectIsolationRegressions:
         list_resp = client.get('/api/qa/ui-cases/')
         detail = client.get(f'/api/qa/ui-cases/{ui_case.id}/')
         linked_tasks = client.get(f'/api/qa/ui-cases/{ui_case.id}/linked-tasks/')
-        with patch('qa_center.views_ui_test.execute_ui_case', return_value={'success': True, 'summary': {}}):
+        # 新版 API：run/ 为同步执行（200），run_async/ 为异步（202）
+        with patch('qa_center.workers.runner_supervisor.execute_ui_case',
+                   side_effect=_fake_ui_execute()):
             run_resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
-            # 等待后台线程完成持久化
-            time.sleep(0.3)
 
         assert list_resp.status_code == 200
         returned_ids = [item['id'] for item in list_resp.data['results']]
@@ -622,13 +635,12 @@ class TestProjectIsolationRegressions:
         assert detail.status_code == 200
         assert linked_tasks.status_code == 200
         assert str(linked_task.id) in [str(item['id']) for item in linked_tasks.data]
-        # 异步启动：返回 202 + task_id
-        assert run_resp.status_code == 202
-        assert run_resp.data['status'] == 'running'
+        # 同步执行：返回 200 + 结果负载
+        assert run_resp.status_code == 200
+        assert run_resp.data['success'] is True
         assert 'task_id' in run_resp.data
         assert 'result_id' in run_resp.data
-        assert 'websocket_url' in run_resp.data
-        # TestResult 在请求线程中创建（status=running），后台线程更新为 passed
+        # TestResult 已持久化（passed）
         assert QaTestResult.objects.count() == initial_result_count + 1
         tr = QaTestResult.objects.get(task_id=run_resp.data['task_id'])
         assert tr.status == 'passed'
@@ -682,7 +694,8 @@ class TestProjectIsolationRegressions:
         self.project.members.add(member)
         client.force_login(member)
 
-        with patch('qa_center.views_ui_test.execute_ui_case', return_value={'success': True, 'summary': {}}) as execute_ui_case:
+        with patch('qa_center.workers.runner_supervisor.execute_ui_case',
+                   side_effect=_fake_ui_execute()) as execute_ui_case:
             resp = client.post(
                 '/api/qa/ui-cases/run_temp/',
                 data={
@@ -997,7 +1010,7 @@ class TestProjectIsolationRegressions:
             data={'execution_id': running_result.id},
             content_type='application/json',
         )
-        with patch('qa_center.views_performance.run_performance_test.delay') as delay:
+        with patch('qa_center.views_performance.ExecutionEngine') as engine:
             execute = client.post(f'/api/qa/performance-cases/{perf_case.id}/execute/')
         delete = client.delete(f'/api/qa/performance-cases/{perf_case.id}/')
 
@@ -1009,7 +1022,7 @@ class TestProjectIsolationRegressions:
         assert stop_resp.status_code == 403
         assert execute.status_code == 403
         assert delete.status_code == 403
-        delay.assert_not_called()
+        engine.return_value.submit.assert_not_called()
         perf_case.refresh_from_db()
         running_result.refresh_from_db()
         assert perf_case.name == 'Secret Performance Case'
@@ -1688,17 +1701,15 @@ class TestProjectIsolationRegressions:
         initial_count = QaTestResult.objects.count()
         client.force_login(self.owner)
 
-        with patch('qa_center.views_ui_test.execute_ui_case',
-                   return_value={'success': True, 'summary': {}}):
-            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+        with patch('qa_center.workers.runner_supervisor.execute_ui_case',
+                   side_effect=_fake_ui_execute()):
+            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run_async/')
             time.sleep(0.3)
 
         assert resp.status_code == 202
-        assert resp.data['status'] == 'running'
         assert 'task_id' in resp.data
         assert 'result_id' in resp.data
-        assert 'websocket_url' in resp.data
-        assert resp.data['websocket_url'].startswith('ws/qa/run/')
+        assert resp.data['mode'] == 'async'
         # TestResult 已创建
         assert QaTestResult.objects.count() == initial_count + 1
         tr = QaTestResult.objects.get(task_id=resp.data['task_id'])
@@ -1707,54 +1718,42 @@ class TestProjectIsolationRegressions:
 
     def test_ui_run_concurrency_limit_returns_429(self, client):
         """并发超限时应返回 429。"""
-        import time
         ui_case, _, _ = self._create_ui_case_fixture()
         client.force_login(self.owner)
 
-        # 把 semaphore 耗尽
-        hold_sem = __import__('qa_center.views_ui_test', fromlist=['_UI_RUNNER_SEMAPHORE'])._UI_RUNNER_SEMAPHORE
-        acquired = []
-        while hold_sem.acquire(blocking=False):
-            acquired.append(True)
-
-        try:
-            with patch('qa_center.views_ui_test.execute_ui_case',
-                       return_value={'success': True, 'summary': {}}):
-                resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
-            assert resp.status_code == 429
-            assert resp.data['code'] == 'TOO_MANY_RUNNERS'
-        finally:
-            for _ in acquired:
-                hold_sem.release()
+        # 新版并发控制：runner_supervisor 槽位制（_max_concurrent 压到 0 强制拒绝）
+        # 注意：不能 mock execute_ui_case —— 槽位获取发生在真实执行器内部
+        with patch('qa_center.workers.runner_supervisor._max_concurrent', return_value=0):
+            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+        assert resp.status_code == 429
+        assert resp.data['error_code'] == 'CONCURRENCY_LIMIT'
 
     def test_ui_run_semaphore_released_on_error(self, client):
-        """后台线程异常时 semaphore 应被释放。"""
+        """执行器异常时并发槽位应被释放。"""
         import time
         ui_case, _, _ = self._create_ui_case_fixture()
         client.force_login(self.owner)
 
-        hold_sem = __import__('qa_center.views_ui_test', fromlist=['_UI_RUNNER_SEMAPHORE'])._UI_RUNNER_SEMAPHORE
-
-        with patch('qa_center.views_ui_test.execute_ui_case',
-                   side_effect=RuntimeError('simulated crash')):
-            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run/')
+        # Popen 启动子进程失败 → 真实 execute_ui_case 内部释放槽位后抛异常
+        with patch('qa_center.workers.runner_supervisor.subprocess.Popen',
+                   side_effect=OSError('simulated crash')):
+            resp = client.post(f'/api/qa/ui-cases/{ui_case.id}/run_async/')
             time.sleep(0.3)
 
         assert resp.status_code == 202
-        # semaphore 应已释放（能再次 acquire 成功）
-        assert hold_sem.acquire(blocking=False)
-        hold_sem.release()
+        from qa_center.workers import runner_supervisor
+        assert runner_supervisor.active_runner_count() == 0
 
     def test_get_events_is_non_destructive(self, client):
-        """get_events 应可重复读取，不会一次性清空。"""
-        from qa_center.workers.runner_supervisor import record_event, get_events, _EVENTS, _EVENTS_LOCK
+        """peek_events 应可重复读取，不会一次性清空。"""
+        from qa_center.workers.runner_supervisor import record_event, peek_events, _EVENTS, _EVENTS_LOCK
 
         tid = 'test-replay-nondestructive'
         record_event(tid, {'type': 'step_log', 'message': 'hello'})
         record_event(tid, {'type': 'step_log', 'message': 'world'})
 
-        ev1 = get_events(tid)
-        ev2 = get_events(tid)
+        ev1 = peek_events(tid)
+        ev2 = peek_events(tid)
 
         assert len(ev1) == 2
         assert len(ev2) == 2

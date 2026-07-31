@@ -163,8 +163,11 @@ class TestRunExtractors:
 class TestSummarize:
     def test_basic(self):
         out = ex.summarize_extractions({'a': 1, 'b': 'hello'})
-        assert {'name': 'a', 'value_preview': '1', 'is_none': False} in out
-        assert {'name': 'b', 'value_preview': 'hello', 'is_none': False} in out
+        by_name = {item['name']: item for item in out}
+        assert by_name['a']['value_preview'] == '1'
+        assert by_name['a']['is_none'] is False
+        assert by_name['b']['value_preview'] == 'hello'
+        assert by_name['b']['is_none'] is False
 
     def test_long_value_truncated(self):
         out = ex.summarize_extractions({'big': 'x' * 300})

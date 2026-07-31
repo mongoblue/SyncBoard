@@ -325,6 +325,7 @@ class TestExecutionService:
         linked_result = _select_preferred_mirror(
             auto_result=test_result.api_auto_result,
             task_id=task_result_id,
+            exclude_id=test_result.id,
         ) if test_result.api_auto_result_id else None
         if linked_result is None:
             linked_candidates = TestResult.objects.filter(

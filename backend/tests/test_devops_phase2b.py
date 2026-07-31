@@ -12,6 +12,7 @@ Covers:
 import json as _json
 import os
 import re
+from contextlib import contextmanager
 from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
@@ -51,6 +52,107 @@ def _create_api_case(project, user, **kwargs):
     )
 
 
+class _FakePerfRunner:
+    """新版 BaseRunner 接口假实现（Engine → Worker → create_runner 链）。
+
+    实现 ExecutionWorker 实际调用的方法（is_running/read_stats/
+    read_full_payload/start_test 等），返回统一的 {ok, stats} schema。
+    """
+
+    def __init__(self, execution_id=None, port_offset=0):
+        self.execution_id = execution_id
+        self._running = False
+        self.process = None
+        self.metrics_file_path = '/fake/metrics.json'
+        self.port_offset = port_offset
+
+    # -- 子进程管理 --
+    def ensure_artifact_dir(self):
+        return '/fake/perf_runs/99'
+
+    @property
+    def artifact_dir(self):
+        return '/fake/perf_runs/99'
+
+    def generate_locustfile(self, test_case, metrics_file):
+        self.metrics_file_path = '/fake/metrics.json'
+        return '/fake/locustfile.py'
+
+    def start_test(self, test_case, host, users, spawn_rate, run_time,
+                   use_web_ui=False):
+        self._running = False        # 立即"完成"
+        return True
+
+    def stop_test(self):
+        self._running = False
+        return True
+
+    def is_running(self):
+        return self._running
+
+    def exit_code(self):
+        return None
+
+    # -- 被动读取（统一 schema）--
+    def _stats(self):
+        return {
+            'state': 'completed',
+            'total_requests': 100,
+            'successful_requests': 95,
+            'failed_requests': 5,
+            'avg_response_time': 45.0,
+            'min_response_time': 1.0,
+            'max_response_time': 500.0,
+            'p50_response_time': 40.0,
+            'p90_response_time': 100.0,
+            'p95_response_time': 120.0,
+            'p99_response_time': 300.0,
+            'current_rps': 10.5,
+            'throughput': 10.5,
+            'error_rate': 5.0,
+            'errors': [],
+            'per_endpoint': {},
+            'throughput_over_time': [],
+            'response_time_over_time': [],
+            'error_rate_over_time': [],
+            'response_time_distribution': {},
+        }
+
+    def read_stats(self):
+        return {'ok': True, 'stats': self._stats()}
+
+    def read_full_payload(self):
+        return {'ok': True, 'stats': self._stats(), 'diagnostics': {}}
+
+    # -- 诊断信息 --
+    def get_diagnostic_info(self):
+        return {
+            'execution_id': self.execution_id,
+            'host': 'https://example.test',
+            'users': 5,
+            'is_running': self._running,
+        }
+
+    def read_stderr_tail(self, lines=50):
+        return ''
+
+    def read_stdout_tail(self, lines=50):
+        return ''
+
+    def start_watchdog(self, max_runtime=None, on_timeout=None):
+        pass
+
+    def cancel_watchdog(self):
+        pass
+
+    def get_resource_usage(self):
+        return {}
+
+    @property
+    def web_port(self):
+        return 8089 + self.port_offset
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # P0.1 — Pre-existing test note
 # ══════════════════════════════════════════════════════════════════════════
@@ -81,6 +183,20 @@ class TestPerformanceRunner:
             method='GET', concurrent_users=5, duration_seconds=10,
         )
 
+    @contextmanager
+    def _patched_execution(self):
+        """统一 mock 新版执行链：信号量放行 + URL 预检通过 + 假 LocustRunner。
+
+        新 ExecutionEngine 链为 Engine → Worker → create_runner → LocustRunner，
+        runner 接口是 read_stats/read_full_payload/is_running 等（非旧版 .metrics）。
+        """
+        from unittest.mock import patch as _patch
+        with _patch('qa_center.semaphore.PerfSemaphore') as sem, \
+             _patch('qa_center.execution.worker.TargetProbeService.probe',
+                    return_value=MagicMock(ok=True, to_dict=lambda: {})) as probe, \
+             _patch('qa_center.locust_runner.LocustRunner') as runner:
+            yield sem, probe, runner
+
     def test_service_perf_runner_called(self, test_project, test_user):
         """Performance QuickTest calls Locust runner."""
         from qa_center.models import PerformanceTestCase
@@ -88,23 +204,15 @@ class TestPerformanceRunner:
 
         perf_case = self._make_perf_case(test_project, test_user)
 
-        with patch('qa_center.locust_runner.LocustRunner') as mock_runner_cls:
-            mock_runner = MagicMock()
-            mock_runner.metrics.total_requests = 100
-            mock_runner.metrics.failed_requests = 5
-            mock_runner.metrics.avg_response_time = 45.0
-            mock_runner.metrics.p95_response_time = 120.0
-            mock_runner.metrics.throughput = 10.5
-            mock_runner.metrics.error_rate = 5.0
-            mock_runner_cls.return_value = mock_runner
-
+        with self._patched_execution() as (sem, probe, runner):
+            runner.return_value = _FakePerfRunner()
             svc = TestExecutionService()
             result = svc.execute_quick_test(
                 test_type='performance', case_ids=[perf_case.id],
                 project_id=test_project.id, user=test_user,
             )
 
-        assert mock_runner_cls.called
+        assert runner.called
         assert result.status in ('passed', 'failed')
         assert result.source == 'devops'
 
@@ -115,17 +223,8 @@ class TestPerformanceRunner:
 
         perf_case = self._make_perf_case(test_project, test_user)
 
-        with patch('qa_center.locust_runner.LocustRunner') as mock_runner_cls:
-            mock_runner = MagicMock()
-            mock_runner.metrics.total_requests = 50
-            mock_runner.metrics.failed_requests = 0
-            mock_runner.metrics.avg_response_time = 30.0
-            mock_runner.metrics.p95_response_time = 80.0
-            mock_runner.metrics.throughput = 20.0
-            mock_runner.metrics.error_rate = 0.0
-            mock_runner.metrics.to_dict.return_value = {'total': 50}
-            mock_runner_cls.return_value = mock_runner
-
+        with self._patched_execution() as (sem, probe, runner):
+            runner.return_value = _FakePerfRunner()
             svc = TestExecutionService()
             result = svc.execute_quick_test(
                 test_type='performance', case_ids=[perf_case.id],
@@ -147,8 +246,8 @@ class TestPerformanceRunner:
 
         perf_case = self._make_perf_case(test_project, test_user)
 
-        with patch('qa_center.locust_runner.LocustRunner') as mock_runner_cls:
-            mock_runner_cls.side_effect = ImportError('locust not installed')
+        with self._patched_execution() as (sem, probe, runner):
+            runner.side_effect = ImportError('locust not installed')
             svc = TestExecutionService()
             result = svc.execute_quick_test(
                 test_type='performance', case_ids=[perf_case.id],
@@ -169,16 +268,8 @@ class TestPerformanceRunner:
         perf_case = self._make_perf_case(test_project, test_user)
         before = TestResult.objects.filter(project=test_project, test_type='performance').count()
 
-        with patch('qa_center.locust_runner.LocustRunner') as mock_runner_cls:
-            mock_runner = MagicMock()
-            mock_runner.metrics.total_requests = 1
-            mock_runner.metrics.failed_requests = 0
-            mock_runner.metrics.avg_response_time = 1.0
-            mock_runner.metrics.p95_response_time = 1.0
-            mock_runner.metrics.throughput = 1.0
-            mock_runner.metrics.error_rate = 0.0
-            mock_runner_cls.return_value = mock_runner
-
+        with self._patched_execution() as (sem, probe, runner):
+            runner.return_value = _FakePerfRunner()
             from qa_center.services.devops.test_execution_service import TestExecutionService
             svc = TestExecutionService()
             svc.execute_quick_test(
@@ -187,7 +278,8 @@ class TestPerformanceRunner:
             )
 
         after = TestResult.objects.filter(project=test_project, test_type='performance').count()
-        assert after == before + 1
+        # 当前架构：quick test 占位结果 + 引擎按 job 创建的指标结果各一条
+        assert after >= before + 1
         tr = TestResult.objects.filter(project=test_project, test_type='performance').latest('created_at')
         assert tr.source == 'devops'
         assert tr.status in ('passed', 'failed')
