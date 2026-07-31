@@ -329,6 +329,19 @@ class Command(BaseCommand):
             }
         )
 
+        # 测试套件
+        Menu.objects.update_or_create(
+            name='测试套件',
+            defaults={
+                'code': 'qa:suite:list',
+                'path': '/qa/suites',
+                'type': 'menu',
+                'icon': 'FolderOpened',
+                'parent': qa_dir,
+                'order': 2,
+            }
+        )
+
         # UI测试
         Menu.objects.get_or_create(
             name='UI测试',
@@ -425,7 +438,7 @@ class Command(BaseCommand):
         if created:
             # 测试人员有质量中心权限
             tester_menus = menus.filter(
-                code__in=['board:list', 'member:list', 'qa:manage', 'qa:api:list', 'qa:ui:list', 'qa:result:list']
+                code__in=['board:list', 'member:list', 'qa:manage', 'qa:api:list', 'qa:suite:list', 'qa:ui:list', 'qa:result:list']
             )
             tester_role.menus.set(tester_menus)
             self.stdout.write('  创建角色: 测试人员')

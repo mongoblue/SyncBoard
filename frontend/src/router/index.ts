@@ -103,6 +103,12 @@ const routes = [
                 meta: { permission: 'qa:api:list' },
             },
             {
+                path: 'qa/suites',
+                name: 'SuiteList',
+                component: () => import("../views/qa/SuiteList.vue"),
+                meta: { permission: 'qa:suite:list' },
+            },
+            {
                 path: 'qa/auto-cases/create',
                 name: 'AutoCaseCreate',
                 component: () => import("../views/qa/AutoCaseDetail.vue"),
