@@ -15,7 +15,7 @@
         :key="run.id"
         class="timeline-item"
         :class="'status-' + run.status"
-        @click="selectedRun = run"
+        @click="openDetail(run)"
       >
         <div class="timeline-dot"></div>
         <div class="timeline-content">
@@ -63,6 +63,15 @@
           </div>
         </div>
 
+        <div v-if="selectedRun.jobs_summary?.length" class="test-summary">
+          <h4>构建步骤</h4>
+          <div v-for="job in selectedRun.jobs_summary" :key="job.name || job.id" class="test-detail">
+            <el-tag size="small" :type="job.status === 'passed' ? 'success' : job.status === 'failed' ? 'danger' : 'info'">
+              {{ job.name }}: {{ statusLabel(job.status) }}
+            </el-tag>
+          </div>
+        </div>
+
         <div v-if="selectedRun.log_output" class="log-section">
           <h4>构建日志</h4>
           <pre class="log-output">{{ selectedRun.log_output }}</pre>
@@ -94,6 +103,15 @@ const fetchRuns = async () => {
     runs.value = (data as any).results || [];
   } catch { /* silent */ }
   finally { loading.value = false; }
+};
+
+// 打开详情：先用列表快照展示，再拉取完整详情（含构建日志）补充
+const openDetail = async (run: any) => {
+  selectedRun.value = run;
+  try {
+    const data: any = await service.get(`/qa/devops/pipeline-runs/${run.id}/`);
+    selectedRun.value = { ...run, ...data };
+  } catch { /* 保持列表快照 */ }
 };
 
 watch(() => selectedRun.value, (v) => {

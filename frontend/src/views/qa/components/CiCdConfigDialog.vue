@@ -38,13 +38,16 @@
               <span v-else class="text-gray">-</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="270" fixed="right">
             <template #default="{ row }">
               <el-button type="primary" link size="small" @click="handleEdit(row)">
                 编辑
               </el-button>
               <el-button type="success" link size="small" @click="handleTest(row)" :loading="testingId === row.id">
                 测试
+              </el-button>
+              <el-button type="warning" link size="small" @click="handleTrigger(row)" :loading="triggeringId === row.id">
+                触发
               </el-button>
               <el-button type="danger" link size="small" @click="handleDelete(row)">
                 删除
@@ -278,6 +281,7 @@ import {
   deleteCiCdConfig,
   getCiCdTypeText,
   testCiCdWebhook,
+  triggerCiCd,
 } from '@/api/devops';
 import service from '@/utils/request';
 
@@ -305,6 +309,7 @@ const saving = ref(false);
 const isEditing = ref(false);
 const editingId = ref<number | null>(null);
 const testingId = ref<number | null>(null);
+const triggeringId = ref<number | null>(null);
 
 const formData = ref<CreateCiCdConfigRequest & { headers: Record<string, string> }>({
   name: '',
@@ -451,6 +456,21 @@ const handleTest = async (config: CiCdConfig) => {
     ElMessage.error(error.response?.data?.error || '测试请求失败');
   } finally {
     testingId.value = null;
+  }
+};
+
+// 手动触发 Pipeline
+const handleTrigger = async (config: CiCdConfig) => {
+  triggeringId.value = config.id;
+  try {
+    const result = await triggerCiCd(config.id) as any;
+    const runId = result.run_id ?? result.id;
+    ElMessage.success(`已触发 Pipeline（run #${runId ?? '?'}），执行中`);
+    emit('refresh');
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.error || error.response?.data?.detail || '触发失败');
+  } finally {
+    triggeringId.value = null;
   }
 };
 
