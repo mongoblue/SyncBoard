@@ -332,6 +332,7 @@ def test_execute_api_cases_via_unified_passes_devops_source_to_single_case_orche
         user=None,
         test_result=orchestrator_factory.call_args.kwargs["test_result"],
         source="devops",
+        skip_sync=False,
     )
     assert results == [
         {
@@ -766,15 +767,6 @@ def test_thread_fallback_execution_updates_task_last_result_to_real_mirror(
         failure_type="passed",
         result_metadata={"provider": "http"},
     )
-    mirrored = TestResult.objects.create(
-        test_type="api",
-        name=auto_result.name,
-        status="passed",
-        source="devops",
-        project=mock_project,
-        api_auto_result=auto_result,
-        task_id=str(task.id),
-    )
 
     with patch("qa_center.api_execution.orchestrators.create_api_auto_single_case_orchestrator") as orchestrator_factory:
         orchestrator = orchestrator_factory.return_value
@@ -786,5 +778,9 @@ def test_thread_fallback_execution_updates_task_last_result_to_real_mirror(
         TestTaskExecuteView()._execute_test_task(task, placeholder)
 
     task.refresh_from_db()
-    assert task.last_result_id == mirrored.id
+    # last_result 应指向本次执行创建的父级镜像（而非占位符或历史镜像）
+    assert task.last_result_id is not None
     assert task.last_result_id != placeholder.id
+    last = TestResult.objects.get(id=task.last_result_id)
+    assert last.api_auto_result_id is not None
+    assert last.api_auto_result.name == f"{task.name} - 执行 #0"

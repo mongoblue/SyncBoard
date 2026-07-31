@@ -46,6 +46,14 @@ class TestTargetProbeService:
     # ── DNS 解析 ─────────────────────────────────────────────
 
     def test_dns_resolves_public_host(self):
+        # 集成测试：需要外网 DNS。无外网环境（CI 沙箱/离线）优雅跳过。
+        import socket
+
+        try:
+            socket.gethostbyname('example.com')
+        except socket.gaierror:
+            pytest.skip('当前环境无法解析外部域名，跳过公共 DNS 集成测试')
+
         svc = TargetProbeService()
         r = svc.probe('https://example.com/', timeout=10)
         assert r.dns_resolved is True

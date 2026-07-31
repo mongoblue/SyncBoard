@@ -20,6 +20,7 @@ OPERATOR_ALIASES = {
     "has": "contains",
     "member_of": "in",
     "not-member-of": "not_in",
+    "not in": "not_in",
     "not_contains": "not_contains",
     "exists": "exists",
     "not_exists": "not_exists",
@@ -146,3 +147,15 @@ def normalize_operator(op: str | None) -> str:
     if normalized == "ne":
         return "neq"
     return normalized
+
+
+def evaluate_operator(actual: Any, operator: str, expected: Any) -> bool:
+    """协议无关的操作符求值入口：按名查找操作符并执行。
+
+    未知操作符返回 False（不抛异常），与断言引擎的容错约定一致。
+    """
+    try:
+        fn = OPERATORS[normalize_operator(operator)]
+    except KeyError:
+        return False
+    return bool(fn(actual, expected))

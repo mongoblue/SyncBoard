@@ -161,8 +161,10 @@ def test_run_performance_test_persists_result(test_project, test_user):
     class _ProbeOkResponse:
         status_code = 200
 
-    with patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
+    with patch('qa_center.semaphore.PerfSemaphore') as sem_cls, \
+         patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
          patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
+        sem_cls.return_value.acquire.return_value = True
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,
@@ -235,8 +237,10 @@ def test_run_performance_test_marks_failed_when_error_rate_exceeds(test_project,
     class _ProbeOkResponse:
         status_code = 200
 
-    with patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
+    with patch('qa_center.semaphore.PerfSemaphore') as sem_cls, \
+         patch('qa_center.execution.worker.create_runner', return_value=_FakeRunner(execution_id=tr.id)), \
          patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
+        sem_cls.return_value.acquire.return_value = True
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,
@@ -334,8 +338,10 @@ def test_run_performance_test_marks_user_stopped_run_as_error_and_aborted(test_p
         status_code = 200
         ok = True
 
-    with patch('qa_center.execution.worker.create_runner', return_value=_StoppedRunner(execution_id=tr.id)), \
+    with patch('qa_center.semaphore.PerfSemaphore') as sem_cls, \
+         patch('qa_center.execution.worker.create_runner', return_value=_StoppedRunner(execution_id=tr.id)), \
          patch('qa_center.execution.worker.TargetProbeService.probe', return_value=MagicMock(ok=True, to_dict=lambda: {})):
+        sem_cls.return_value.acquire.return_value = True
         result = run_performance_test(
             execution_id=tr.id,
             test_case_id=case.id,

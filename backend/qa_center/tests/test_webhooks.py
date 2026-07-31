@@ -62,17 +62,27 @@ def test_pipeline_webhook_duplicate_external_run_id_returns_duplicate(cicd_confi
         "status": "passed",
     }
 
+    # 安全加固后 webhook 要求：ci_token HMAC 签名 + X-CI-Token 双因子
+    body = json.dumps(payload).encode("utf-8")
+    signature = hmac.new(
+        cicd_config.ci_token.encode("utf-8"), body, hashlib.sha256
+    ).hexdigest()
+    headers = {
+        "HTTP_X_HUB_SIGNATURE_256": f"sha256={signature}",
+        "HTTP_X_CI_TOKEN": cicd_config.api_token,
+    }
+
     first = client.post(
         f"/api/qa/devops/cicd-config/{cicd_config.id}/webhook/",
-        payload,
-        format="json",
-        HTTP_X_CI_TOKEN=cicd_config.api_token,
+        body,
+        content_type="application/json",
+        **headers,
     )
     second = client.post(
         f"/api/qa/devops/cicd-config/{cicd_config.id}/webhook/",
-        payload,
-        format="json",
-        HTTP_X_CI_TOKEN=cicd_config.api_token,
+        body,
+        content_type="application/json",
+        **headers,
     )
 
     assert first.status_code == 201

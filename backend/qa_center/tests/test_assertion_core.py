@@ -16,10 +16,10 @@ from qa_center.assertion_core import (
         ("eq", "eq"),
         ("==", "eq"),
         ("=", "eq"),
-        ("neq", "ne"),
-        ("ne", "ne"),
-        ("!=", "ne"),
-        ("<>", "ne"),
+        ("neq", "neq"),
+        ("ne", "neq"),
+        ("!=", "neq"),
+        ("<>", "neq"),
         ("gt", "gt"),
         (">", "gt"),
         ("lt", "lt"),
@@ -66,20 +66,19 @@ def test_evaluate_operator_supports_protocol_agnostic_operators(
 
 def test_assertion_ir_and_result_ir_are_protocol_agnostic():
     assertion = AssertionIR(
-        kind="field_compare",
-        subject="queue.state",
+        type="field_compare",
+        scope="queue.state",
         operator="eq",
         expected="ready",
         metadata={"protocol": "grpc"},
     )
     result = AssertionResultIR(
-        kind=assertion.kind,
-        subject=assertion.subject,
+        type=assertion.type,
+        scope=assertion.scope,
         operator=assertion.operator,
         expected=assertion.expected,
         actual="draining",
         passed=False,
-        message="state mismatch",
         metadata={"protocol": "grpc"},
     )
 
