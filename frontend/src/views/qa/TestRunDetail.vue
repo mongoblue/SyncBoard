@@ -46,6 +46,77 @@
         </template>
       </el-table-column>
     </el-table>
+
+    <el-drawer
+      v-model="drawerOpen"
+      title="用例详情"
+      size="620px"
+      destroy-on-close
+    >
+      <div v-loading="caseLoading">
+        <template v-if="caseDetail">
+          <div class="case-detail-header">
+            <h3>{{ caseDetail.name }}</h3>
+            <el-tag :type="tagType(caseDetail.status)" effect="dark">{{ caseDetail.status }}</el-tag>
+          </div>
+
+          <el-descriptions :column="2" border size="small">
+            <el-descriptions-item label="状态码">{{ caseDetail.status_code ?? '--' }}</el-descriptions-item>
+            <el-descriptions-item label="耗时">{{ caseDetail.duration_ms ? caseDetail.duration_ms + 'ms' : '--' }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ caseDetail.case_type }}</el-descriptions-item>
+            <el-descriptions-item label="序列">#{{ caseDetail.sequence }}</el-descriptions-item>
+          </el-descriptions>
+
+          <div v-if="caseDetail.error_message" class="case-detail-error">
+            <el-alert type="error" :title="caseDetail.error_message" :closable="false" show-icon />
+          </div>
+
+          <template v-if="caseDetail.assertion_results?.length">
+            <h4>断言结果</h4>
+            <el-table :data="caseDetail.assertion_results" size="small" stripe max-height="240">
+              <el-table-column prop="assertion_type" label="类型" />
+              <el-table-column prop="operator" label="操作符" width="100" />
+              <el-table-column label="通过" width="80">
+                <template #default="{ row }">
+                  <el-tag :type="row.passed ? 'success' : 'danger'" size="small">{{ row.passed ? '通过' : '失败' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="expected_value" label="期望" show-overflow-tooltip />
+              <el-table-column prop="actual_value" label="实际" show-overflow-tooltip />
+            </el-table>
+          </template>
+
+          <div class="case-detail-raw">
+            <CollapsibleRawJson
+              v-if="caseDetail.request_snapshot"
+              :data="caseDetail.request_snapshot"
+              label="请求快照"
+              name="req"
+            />
+            <CollapsibleRawJson
+              v-if="caseDetail.response_body"
+              :data="caseDetail.response_body"
+              label="响应体"
+              name="resp"
+              :default-open="caseDetail.status !== 'passed'"
+            />
+            <CollapsibleRawJson
+              v-if="caseDetail.response_headers"
+              :data="caseDetail.response_headers"
+              label="响应头"
+              name="headers"
+            />
+            <CollapsibleRawJson
+              v-if="caseDetail.curl"
+              :data="caseDetail.curl"
+              label="cURL"
+              name="curl"
+            />
+          </div>
+        </template>
+        <el-empty v-else-if="!caseLoading" description="无详情数据" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -56,6 +127,7 @@ import { ArrowLeft } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { testRunApi, type TestRun, type TestRunCaseResult } from '@/api/testrun'
 import RunProgressBar from './components/RunProgressBar.vue'
+import CollapsibleRawJson from './components/result/CollapsibleRawJson.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -65,6 +137,9 @@ const cases = ref<TestRunCaseResult[]>([])
 const loading = ref(false)
 const filterStatus = ref('')
 const statuses = ['pending', 'running', 'passed', 'failed', 'error', 'skipped']
+const drawerOpen = ref(false)
+const caseLoading = ref(false)
+const caseDetail = ref<TestRunCaseResult | null>(null)
 let ws: WebSocket | null = null
 
 const runId = computed(() => Number(route.params.id))
@@ -97,8 +172,19 @@ async function cancelRun() {
   } catch { /* user cancel */ }
 }
 
-function goCaseDetail(row: TestRunCaseResult) {
-  router.push(`/projects/${run.value!.project_id}/qa/test-runs/${runId.value}/cases/${row.id}`)
+async function goCaseDetail(row: TestRunCaseResult) {
+  // 原实现跳转 /qa/test-runs/:id/cases/:caseResultId 未注册路由 → 空白页
+  // 改为抽屉内直接加载用例详情（GET /qa/runs/:id/cases/:caseResultId）
+  drawerOpen.value = true
+  caseLoading.value = true
+  caseDetail.value = null
+  try {
+    caseDetail.value = await testRunApi.caseDetail(runId.value, row.id)
+  } catch {
+    ElMessage.error('加载用例详情失败')
+  } finally {
+    caseLoading.value = false
+  }
 }
 
 function goBack() { router.back() }
@@ -162,4 +248,9 @@ onBeforeUnmount(closeWs)
 .header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
 .header h2 { margin: 0; flex: 1; }
 .filters { margin: 16px 0; }
+.case-detail-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.case-detail-header h3 { margin: 0; flex: 1; }
+.case-detail-error { margin-top: 12px; }
+.case-detail-raw { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.case-detail-raw h4 { margin: 8px 0 4px; }
 </style>
