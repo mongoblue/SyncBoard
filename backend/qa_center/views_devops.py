@@ -677,6 +677,166 @@ class TestTaskView(APIView):
         return Response({'message': '删除成功'})
 
 
+def _run_test_task_worker(task, test_result):
+    """后台线程执行体：委托 TestExecutionService，异常时落库 + 通知。"""
+    from .services.devops.test_execution_service import TestExecutionService
+    svc = TestExecutionService()
+    try:
+        svc.execute_test_task(task, test_result)
+    except Exception as e:
+        test_result.status = 'error'
+        test_result.completed_at = timezone.now()
+        test_result.error_message = str(e)[:500]
+        test_result.test_log = json.dumps({
+            'error': str(e)[:500],
+        }, ensure_ascii=False)
+        test_result.save()
+
+        task.status = 'failed'
+        task.save()
+
+        _send_notification(task.project or test_result.project, 'test_failure',
+            f'测试执行异常：{task.name} — {str(e)[:100]}')
+
+
+def _start_test_task_execution(task, user):
+    """启动 TestTask 执行：校验 → 状态更新 → 创建 TestResult → 后台线程。
+
+    手动执行（TestTaskExecuteView）与 Webhook 触发共用同一执行路径。
+    返回 DRF Response（200/400/409）。
+    """
+    guard = RuntimeGuard()
+
+    if task.status == 'running':
+        return Response(
+            {'error': '任务已在执行中'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    test_config = task.test_config or {}
+    api_case_ids = test_config.get('api_cases', [])
+    ui_case_ids = test_config.get('ui_cases', [])
+
+    try:
+        validate_test_task_config_cases(task.test_config, task.project)
+    except ValidationError as exc:
+        return Response({'error': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Require at least one real test case — refuse to execute empty tasks
+    if not api_case_ids and not ui_case_ids:
+        return Response(
+            {'error': '该任务未绑定任何真实测试用例，不能执行'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # 更新任务状态
+    task.status = 'running'
+    task.execution_count += 1
+    task.last_executed = timezone.now()
+    task.save()
+
+    test_result = None
+    execution_id = None
+
+    if settings.USE_CELERY_TASKS:
+        from .tasks_test_exec import execute_test_task as execute_test_task_task
+
+        execute_test_task_task.apply_async(args=[task.id], queue='qa_long')
+        runtime_mode = guard.build_runtime_mode(
+            celery_eager=getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False)
+        )
+    else:
+        # 创建测试结果记录
+        test_result = TestResult.objects.create(
+            test_type=task.test_type,
+            name=f"{task.name} - 执行 #{task.execution_count}",
+            source='devops',
+            project=task.project,
+            status='running',
+            test_params=task.test_config,
+            executed_by=user,
+            started_at=timezone.now(),
+            task_id=str(task.id),
+        )
+        execution_id = test_result.id
+        if guard.require_celery_for_runtime_entrypoint():
+            return Response(
+                {
+                    'detail': 'Celery is required for this runtime entrypoint in strict environments',
+                    'error_code': 'runner_required',
+                    'runtime_mode': guard.build_runtime_mode(guarded_rejected=True),
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        # 启动后台线程执行测试
+        thread = threading.Thread(
+            target=_run_test_task_worker,
+            args=(task, test_result)
+        )
+        thread.daemon = True
+        thread.start()
+        runtime_mode = guard.build_runtime_mode(thread_fallback=True)
+
+    return Response({
+        'message': '测试任务已启动',
+        'execution_id': execution_id,
+        'task': TestTaskListSerializer(task).data,
+        'runtime_mode': runtime_mode,
+    })
+
+
+class TestTaskWebhookTriggerView(APIView):
+    """TestTask Webhook 触发端点（无会话认证，token 即凭证）。
+
+    POST /api/qa/devops/tasks/{task_id}/webhook/{token}/
+    外部系统（CI/CD、监控、调度平台）POST 该 URL 即触发任务执行。
+    """
+
+    permission_classes = []
+
+    def post(self, request, task_id, token):
+        # ── 限流（每任务 5 次/60s，防止滥用） ──────────────────────────
+        from django.core.cache import cache
+        window = int(time.time()) // 60
+        cache_key = f'testtask:webhook:{task_id}:{window}'
+        count = cache.get(cache_key, 0)
+        if count >= 5:
+            log_webhook_audit('rate_limited', f'task:{task_id}', count=count, limit=5, window_sec=60)
+            return Response(
+                {'error': 'Too many requests'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        cache.set(cache_key, count + 1, 120)
+
+        # ── 查找任务 ──────────────────────────────────────────────────
+        try:
+            task = TestTask.objects.select_related('project', 'created_by').get(
+                pk=task_id, is_active=True,
+            )
+        except TestTask.DoesNotExist:
+            return Response(
+                {'error': '测试任务不存在或未启用'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # ── token 校验（常量时间比较） ────────────────────────────────
+        if task.trigger_type != 'webhook':
+            return Response(
+                {'error': '该任务未启用 Webhook 触发'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if not hmac.compare_digest(str(token).strip(), str(task.webhook_token)):
+            log_webhook_audit('invalid_token', f'task:{task_id}')
+            return Response(
+                {'error': 'Invalid token'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── 触发执行（复用手动执行路径） ──────────────────────────────
+        return _start_test_task_execution(task, task.created_by)
+
+
 class TestTaskExecuteView(APIView):
     """
     测试任务执行 API
@@ -685,112 +845,17 @@ class TestTaskExecuteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, task_id):
-        guard = RuntimeGuard()
         task = _get_accessible_test_task(request.user, task_id)
         if task is None:
             return Response(
                 {'error': '任务不存在'},
                 status=status.HTTP_404_NOT_FOUND
             )
-
-        if task.status == 'running':
-            return Response(
-                {'error': '任务已在执行中'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        test_config = task.test_config or {}
-        api_case_ids = test_config.get('api_cases', [])
-        ui_case_ids = test_config.get('ui_cases', [])
-
-        try:
-            validate_test_task_config_cases(task.test_config, task.project)
-        except ValidationError as exc:
-            return Response({'error': exc.detail}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Require at least one real test case — refuse to execute empty tasks
-        if not api_case_ids and not ui_case_ids:
-            return Response(
-                {'error': '该任务未绑定任何真实测试用例，不能执行'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # 更新任务状态
-        task.status = 'running'
-        task.execution_count += 1
-        task.last_executed = timezone.now()
-        task.save()
-
-        test_result = None
-        execution_id = None
-
-        if settings.USE_CELERY_TASKS:
-            from .tasks_test_exec import execute_test_task as execute_test_task_task
-
-            execute_test_task_task.apply_async(args=[task.id], queue='qa_long')
-            runtime_mode = guard.build_runtime_mode(
-                celery_eager=getattr(settings, 'CELERY_TASK_ALWAYS_EAGER', False)
-            )
-        else:
-            # 创建测试结果记录
-            test_result = TestResult.objects.create(
-                test_type=task.test_type,
-                name=f"{task.name} - 执行 #{task.execution_count}",
-                source='devops',
-                project=task.project,
-                status='running',
-                test_params=task.test_config,
-                executed_by=request.user,
-                started_at=timezone.now(),
-                task_id=str(task.id),
-            )
-            execution_id = test_result.id
-            if guard.require_celery_for_runtime_entrypoint():
-                return Response(
-                    {
-                        'detail': 'Celery is required for this runtime entrypoint in strict environments',
-                        'error_code': 'runner_required',
-                        'runtime_mode': guard.build_runtime_mode(guarded_rejected=True),
-                    },
-                    status=status.HTTP_409_CONFLICT,
-                )
-
-            # 启动后台线程执行测试
-            thread = threading.Thread(
-                target=self._execute_test_task,
-                args=(task, test_result)
-            )
-            thread.daemon = True
-            thread.start()
-            runtime_mode = guard.build_runtime_mode(thread_fallback=True)
-
-        return Response({
-            'message': '测试任务已启动',
-            'execution_id': execution_id,
-            'task': TestTaskListSerializer(task).data,
-            'runtime_mode': runtime_mode,
-        })
+        return _start_test_task_execution(task, request.user)
 
     def _execute_test_task(self, task, test_result):
         """在后台执行测试任务 — delegates to TestExecutionService."""
-        from .services.devops.test_execution_service import TestExecutionService
-        svc = TestExecutionService()
-        try:
-            svc.execute_test_task(task, test_result)
-        except Exception as e:
-            test_result.status = 'error'
-            test_result.completed_at = timezone.now()
-            test_result.error_message = str(e)[:500]
-            test_result.test_log = json.dumps({
-                'error': str(e)[:500],
-            }, ensure_ascii=False)
-            test_result.save()
-
-            task.status = 'failed'
-            task.save()
-
-            _send_notification(task.project or test_result.project, 'test_failure',
-                f'测试执行异常：{task.name} — {str(e)[:100]}')
+        _run_test_task_worker(task, test_result)
 
 
 class TestTaskStatusView(APIView):

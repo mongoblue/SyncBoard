@@ -138,6 +138,7 @@ export interface TestTask {
   created_by_name: string;
   cron_expression: string | null;
   webhook_url: string | null;
+  webhook_token?: string | null;
   test_config: {
     api_cases?: number[];
     ui_cases?: number[];

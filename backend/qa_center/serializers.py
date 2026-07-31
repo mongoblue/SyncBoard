@@ -419,6 +419,7 @@ class TestTaskDetailSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source='project.name', read_only=True)
     last_result_detail = TestResultListSerializer(source='last_result', read_only=True)
     schedule_backend = serializers.SerializerMethodField()
+    webhook_token = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = TestTask
@@ -426,6 +427,7 @@ class TestTaskDetailSerializer(serializers.ModelSerializer):
             'id', 'name', 'description', 'test_type', 'test_type_display',
             'trigger_type', 'trigger_type_display', 'status', 'status_display',
             'project', 'project_name', 'test_config', 'cron_expression', 'webhook_url',
+            'webhook_token',
             'execution_count', 'last_executed', 'last_result_detail',
             'notify_on_success', 'notify_on_failure', 'notification_channels',
             'is_active', 'created_by', 'created_by_name', 'created_at', 'updated_at',

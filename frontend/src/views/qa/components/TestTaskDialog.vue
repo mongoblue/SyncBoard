@@ -103,6 +103,29 @@
         </div>
       </el-form-item>
 
+      <!-- Webhook 配置 -->
+      <el-form-item v-if="formData.trigger_type === 'webhook'" label="Webhook 接收地址">
+        <template v-if="webhookTriggerUrl">
+          <el-input :model-value="webhookTriggerUrl" readonly>
+            <template #append>
+              <el-button @click="copyWebhookUrl">
+                <el-icon><CopyDocument /></el-icon>
+              </el-button>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            外部系统 POST 该地址即触发本任务执行（token 即凭证，保存后生效）
+          </div>
+        </template>
+        <el-alert
+          v-else
+          type="info"
+          :closable="false"
+          show-icon
+          title="保存后生成专属 Webhook 接收地址"
+        />
+      </el-form-item>
+
       <!-- 测试用例选择 -->
       <el-form-item label="选择测试用例">
         <div class="test-cases-selector">
@@ -225,6 +248,7 @@ import {
   Pointer,
   Timer,
   Link,
+  CopyDocument,
 } from '@element-plus/icons-vue';
 import type { TestTask, CreateTestTaskRequest, TestType } from '@/types/devops';
 import {
@@ -279,6 +303,24 @@ interface FormData {
 const formRef = ref<FormInstance>();
 const saving = ref(false);
 const isEditing = computed(() => !!props.task);
+
+// Webhook 接收地址（创建后才有 task.id + token）
+const webhookTriggerUrl = computed(() => {
+  const task = props.task as (TestTask & { webhook_token?: string }) | null;
+  if (!task?.id || !task.webhook_token) return '';
+  const base = window.location.origin;
+  return `${base}/api/qa/devops/tasks/${task.id}/webhook/${task.webhook_token}/`;
+});
+
+const copyWebhookUrl = async () => {
+  if (!webhookTriggerUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(webhookTriggerUrl.value);
+    ElMessage.success('Webhook 地址已复制');
+  } catch {
+    ElMessage.error('复制失败');
+  }
+};
 
 const formData = ref<FormData>({
   name: '',

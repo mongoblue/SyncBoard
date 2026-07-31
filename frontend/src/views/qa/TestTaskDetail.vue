@@ -46,6 +46,17 @@
             <el-descriptions-item label="创建时间">{{ formatDateTime(task?.created_at || null) }}</el-descriptions-item>
             <el-descriptions-item label="执行次数">{{ task?.execution_count || 0 }}</el-descriptions-item>
             <el-descriptions-item label="最后执行">{{ formatDateTime(task?.last_executed || null) }}</el-descriptions-item>
+            <el-descriptions-item v-if="task?.trigger_type === 'webhook' && webhookTriggerUrl" label="Webhook 接收地址" :span="2">
+              <div class="webhook-url-row">
+                <el-input :model-value="webhookTriggerUrl" readonly size="small">
+                  <template #append>
+                    <el-button size="small" @click="copyWebhookUrl">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
+                </el-input>
+              </div>
+            </el-descriptions-item>
             <el-descriptions-item label="任务描述" :span="2">{{ task?.description || '暂无描述' }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
@@ -277,6 +288,7 @@ import {
   Refresh,
   CircleCheck,
   CircleClose,
+  CopyDocument,
 } from '@element-plus/icons-vue';
 import {
   getTestTask,
@@ -310,6 +322,22 @@ const currentExecution = ref<any>(null);
 const executionHistory = ref<any[]>([]);
 const liveLogs = ref<any[]>([]);
 const apiTestCases = ref<any[]>([]);
+
+// Webhook 接收地址
+const webhookTriggerUrl = computed(() => {
+  if (!task.value?.id || !task.value.webhook_token) return '';
+  return `${window.location.origin}/api/qa/devops/tasks/${task.value.id}/webhook/${task.value.webhook_token}/`;
+});
+
+const copyWebhookUrl = async () => {
+  if (!webhookTriggerUrl.value) return;
+  try {
+    await navigator.clipboard.writeText(webhookTriggerUrl.value);
+    ElMessage.success('Webhook 地址已复制');
+  } catch {
+    ElMessage.error('复制失败');
+  }
+};
 const uiTestCases = ref<any[]>([]);
 const activeLogIndex = ref<number[]>([]);
 let statusTimer: ReturnType<typeof setInterval> | null = null;
@@ -546,6 +574,10 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.webhook-url-row {
+  width: 100%;
+}
+
 .test-task-detail {
   padding: 20px;
 }

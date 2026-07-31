@@ -16,6 +16,7 @@ QA Center 模型 —— 测试中心模型。
 """
 from django.conf import settings
 from django.db import models
+import uuid
 
 from room.models import Project, Task
 
@@ -238,6 +239,12 @@ class TestTask(models.Model):
     )
     cron_expression = models.CharField(blank=True, max_length=100, verbose_name='Cron表达式（定时任务）')
     webhook_url = models.CharField(blank=True, max_length=500, verbose_name='Webhook URL')
+    webhook_token = models.UUIDField(
+        default=uuid.uuid4,
+        unique=True,
+        verbose_name='Webhook 触发令牌',
+        help_text='外部系统触发本任务时的凭证（无会话认证端点使用）',
+    )
     test_config = models.JSONField(blank=True, default=dict, verbose_name='测试配置')
     status = models.CharField(
         choices=[
