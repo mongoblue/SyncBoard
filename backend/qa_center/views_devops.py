@@ -586,6 +586,26 @@ class TestTaskView(APIView):
             if project:
                 ensure_project_id_access(request.user, project.id)
             task = serializer.save()
+
+            # 定时任务：校验 cron 并注册 celery-beat PeriodicTask
+            if task.trigger_type == 'scheduled':
+                from .services.devops.test_execution_service import TestExecutionService
+                svc = TestExecutionService()
+                viability = svc.check_scheduled_task_viability(task)
+                if viability:
+                    task.delete()
+                    return Response(
+                        {'error': viability},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                register_error = svc.register_scheduled_task(task)
+                if register_error:
+                    task.delete()
+                    return Response(
+                        {'error': register_error},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
             return Response(
                 TestTaskListSerializer(task).data,
                 status=status.HTTP_201_CREATED
@@ -610,6 +630,26 @@ class TestTaskView(APIView):
         serializer = TestTaskUpdateSerializer(task, data=request.data, partial=True)
         if serializer.is_valid():
             task = serializer.save()
+
+            # 同步定时调度：scheduled → 注册/更新；其他触发方式 → 清理旧调度
+            from .services.devops.test_execution_service import TestExecutionService
+            svc = TestExecutionService()
+            if task.trigger_type == 'scheduled':
+                viability = svc.check_scheduled_task_viability(task)
+                if viability:
+                    return Response(
+                        {'error': viability},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                register_error = svc.register_scheduled_task(task)
+                if register_error:
+                    return Response(
+                        {'error': register_error},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                svc.unregister_scheduled_task(task)
+
             return Response(TestTaskDetailSerializer(task).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -627,6 +667,11 @@ class TestTaskView(APIView):
                 {'error': '任务正在执行中，无法删除'},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # 删除前清理定时调度
+        if task.trigger_type == 'scheduled':
+            from .services.devops.test_execution_service import TestExecutionService
+            TestExecutionService().unregister_scheduled_task(task)
 
         task.delete()
         return Response({'message': '删除成功'})
