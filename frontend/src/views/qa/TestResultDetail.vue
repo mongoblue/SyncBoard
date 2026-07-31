@@ -9,6 +9,10 @@
         <h2>测试结果详情</h2>
       </div>
       <div class="header-actions">
+        <el-button @click="downloadReport">
+          <el-icon><Download /></el-icon>
+          下载报告
+        </el-button>
         <el-button @click="loadData">
           <el-icon><Refresh /></el-icon>
           刷新
@@ -638,6 +642,11 @@ const loadData = async () => {
   } catch (error) {
     ElMessage.error('加载测试结果失败');
   }
+};
+
+// 下载 HTML 测试报告
+const downloadReport = () => {
+  window.open(`/api/qa/test-results/${resultId.value}/download_report/`, '_blank');
 };
 
 // 获取状态类型

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from django.conf import settings
 from django.db.models import Q
-from django.http import FileResponse
+from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -26,6 +26,150 @@ from .serializers import (
     TestScreenshotSerializer
 )
 from room.project_access import ensure_project_id_access, project_access_q
+
+_STATUS_LABELS = {
+    'passed': '通过',
+    'failed': '失败',
+    'error': '错误',
+    'running': '运行中',
+    'pending': '待执行',
+    'cancelled': '已取消',
+    'skipped': '已跳过',
+}
+
+_TYPE_LABELS = {
+    'api': '接口测试',
+    'ui': 'UI测试',
+    'performance': '性能测试',
+    'regression': '回归测试',
+}
+
+
+def _escape_html(text) -> str:
+    """HTML 转义（防 XSS）。"""
+    if text is None:
+        return ''
+    return (
+        str(text)
+        .replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+        .replace("'", '&#39;')
+    )
+
+
+def _build_test_report_html(test_result: TestResult) -> str:
+    """生成自包含 HTML 测试报告（概要 + 用例结果表 + 详情）。"""
+    import json as json_mod
+
+    status_label = _STATUS_LABELS.get(test_result.status, test_result.status)
+    type_label = _TYPE_LABELS.get(test_result.test_type, test_result.test_type)
+
+    # 解析结构化 test_log
+    summary = {}
+    results = []
+    try:
+        log_data = json_mod.loads(test_result.test_log or '{}')
+        summary = log_data.get('summary', {}) or {}
+        results = log_data.get('results', []) or []
+    except (json_mod.JSONDecodeError, TypeError):
+        results = []
+
+    total = summary.get('total', len(results))
+    passed = summary.get('passed', 0)
+    failed = summary.get('failed', 0)
+    pass_rate = summary.get('pass_rate', 0)
+
+    duration = test_result.duration_ms
+    duration_txt = f'{duration} ms' if duration is not None else '--'
+
+    def _fmt_time(dt):
+        return dt.strftime('%Y-%m-%d %H:%M:%S') if dt else '--'
+
+    # 用例结果行
+    rows = []
+    for idx, item in enumerate(results, start=1):
+        status = '通过' if item.get('passed') else '失败'
+        cls = 'row-pass' if item.get('passed') else 'row-fail'
+        error_msg = _escape_html(item.get('error_message', ''))
+        metrics = ''
+        if 'metrics' in item and isinstance(item['metrics'], dict):
+            m = item['metrics']
+            metrics = (
+                f"<div class='metrics'>RPS {m.get('current_rps', m.get('throughput', '--'))}"
+                f" · avg {m.get('avg_response_time', '--')}ms"
+                f" · p95 {m.get('p95_response_time', '--')}ms"
+                f" · 错误率 {m.get('error_rate', '--')}%</div>"
+            )
+        rows.append(
+            f"<tr class='{cls}'>"
+            f"<td>{idx}</td>"
+            f"<td>{_escape_html(item.get('case_name', f'用例 #{item.get("case_id", "?")}'))}</td>"
+            f"<td>{_escape_html(item.get('type', ''))}</td>"
+            f"<td>{status}</td>"
+            f"<td>{_escape_html(item.get('status_code', '--'))}</td>"
+            f"<td>{_escape_html(item.get('response_time_ms', '--'))}</td>"
+            f"<td>{metrics}{error_msg}</td>"
+            f"</tr>"
+        )
+    rows_html = '\n'.join(rows) if rows else "<tr><td colspan='7' style='text-align:center;color:#999'>无用例明细</td></tr>"
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>测试报告 - {_escape_html(test_result.name)}</title>
+<style>
+  body {{ font-family: -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif; margin: 32px; color: #1f2328; }}
+  h1 {{ font-size: 20px; margin: 0 0 4px; }}
+  .sub {{ color: #57606a; font-size: 13px; margin-bottom: 24px; }}
+  .cards {{ display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }}
+  .card {{ border: 1px solid #d0d7de; border-radius: 8px; padding: 12px 20px; min-width: 120px; }}
+  .card .label {{ font-size: 12px; color: #57606a; }}
+  .card .value {{ font-size: 18px; font-weight: 600; }}
+  .card .value.pass {{ color: #1a7f37; }}
+  .card .value.fail {{ color: #cf222e; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+  th, td {{ border: 1px solid #d0d7de; padding: 8px 10px; text-align: left; }}
+  th {{ background: #f6f8fa; }}
+  .row-pass td:first-child {{ border-left: 3px solid #1a7f37; }}
+  .row-fail td:first-child {{ border-left: 3px solid #cf222e; }}
+  .metrics {{ color: #57606a; font-size: 12px; }}
+  .meta {{ margin-top: 24px; font-size: 12px; color: #57606a; }}
+</style>
+</head>
+<body>
+<h1>{_escape_html(test_result.name)}</h1>
+<div class="sub">FlowSpace QA 测试报告 · 生成时间 {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}</div>
+
+<div class="cards">
+  <div class="card"><div class="label">状态</div><div class="value">{_escape_html(status_label)}</div></div>
+  <div class="card"><div class="label">类型</div><div class="value">{_escape_html(type_label)}</div></div>
+  <div class="card"><div class="label">用例数</div><div class="value">{total}</div></div>
+  <div class="card"><div class="label">通过</div><div class="value pass">{passed}</div></div>
+  <div class="card"><div class="label">失败</div><div class="value fail">{failed}</div></div>
+  <div class="card"><div class="label">通过率</div><div class="value">{pass_rate}%</div></div>
+  <div class="card"><div class="label">耗时</div><div class="value">{_escape_html(duration_txt)}</div></div>
+</div>
+
+<table>
+  <thead><tr><th>#</th><th>用例</th><th>类型</th><th>结果</th><th>状态码</th><th>耗时(ms)</th><th>详情</th></tr></thead>
+  <tbody>
+{rows_html}
+  </tbody>
+</table>
+
+<div class="meta">
+  执行人：{_escape_html(test_result.executed_by.username if test_result.executed_by else '--')}
+  · 开始：{_fmt_time(test_result.started_at)}
+  · 完成：{_fmt_time(test_result.completed_at)}
+  · 环境：{_escape_html(test_result.test_environment or '--')}
+  · 错误率：{_escape_html(test_result.error_rate if test_result.error_rate is not None else '--')}%
+</div>
+</body>
+</html>"""
+    return html
 
 
 class TestResultViewSet(viewsets.ModelViewSet):
@@ -356,12 +500,13 @@ class TestResultViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def download_report(self, request, pk=None):
         """
-        下载测试报告（预留接口，后续实现导出功能）
+        下载测试报告（自包含 HTML，可直接分享/归档）
 
         GET /api/qa/test-results/{id}/download_report/
         """
-        # TODO: 实现导出功能
-        return Response(
-            {'message': '导出功能开发中'},
-            status=status.HTTP_501_NOT_IMPLEMENTED
-        )
+        test_result = self.get_object()
+        html = _build_test_report_html(test_result)
+        filename = f"test-report-{test_result.id}-{timezone.now().strftime('%Y%m%d-%H%M%S')}.html"
+        response = HttpResponse(html, content_type='text/html; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
