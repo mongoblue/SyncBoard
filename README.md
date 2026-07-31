@@ -1,6 +1,6 @@
 # FlowSpace (SyncBoard) - 项目协作看板系统
 
-FlowSpace 是一个基于 Django + Vue 3 的企业级全栈项目协作平台，集成了看板管理、实时同步、AI 智能助手、QA 质量中心、DevOps 平台、RBAC 权限管理和迭代管理。
+FlowSpace 是一个基于 Django + Vue 3 的企业级全栈项目协作平台，集成了看板管理、实时同步、AI 智能助手、QA 质量中心、DevOps 平台、Bug 追踪、RBAC 权限管理和迭代管理。
 
 ---
 
@@ -16,10 +16,11 @@ FlowSpace 是一个基于 Django + Vue 3 的企业级全栈项目协作平台，
 | 主数据库 | MySQL 8.0 |
 | 全文搜索 | Haystack + Elasticsearch 7.x |
 | 中文分词 | jieba + Ngram 自定义后端 |
+| AI 集成 | DeepSeek API (OpenAI 兼容, 流式 SSE + Tool Calling) |
 | 测试 | pytest + pytest-django + Playwright + Locust |
 | 文件处理 | Pillow (头像/附件安全处理) |
 | 静态文件 | Whitenoise |
-| AI | DeepSeek API (OpenAI 兼容, 支持流式 SSE) |
+| AI | DeepSeek API (OpenAI 兼容, 支持流式 SSE + Tool Calling) |
 
 ### 前端
 | 组件 | 技术 |
@@ -50,93 +51,193 @@ FlowSpace 是一个基于 Django + Vue 3 的企业级全栈项目协作平台，
 ```
 SyncBoard/
 ├── .github/workflows/
-│   ├── ci.yml                      # CI: lint/安全/单元测试/E2E
-│   └── cd.yml                      # CD: 自动部署 staging/production
+│   ├── ci.yml.disabled             # CI: lint/安全/单元测试/E2E (暂禁用)
+│   └── cd.yml.disabled             # CD: 自动部署 staging/production (暂禁用)
 ├── backend/
 │   ├── backend/
 │   │   ├── settings.py             # Django 配置 (分页/限流/CORS/ES/Celery)
+│   │   ├── asgi.py                 # ASGI 入口 (HTTP → Django, WS → Channels)
+│   │   ├── wsgi.py                 # WSGI 入口 (传统部署)
+│   │   ├── urls.py                 # 根路由 (4 应用 + admin + media)
 │   │   ├── authentication.py       # CSRF豁免会话认证
-│   │   ├── api_errors.py           # 统一错误码
+│   │   ├── api_errors.py           # 统一错误码响应
 │   │   ├── utils.py                # 自定义异常处理器
-│   │   ├── throttles.py            # 登录限流
+│   │   ├── throttles.py            # 登录/AI/WS 限流
 │   │   ├── celery.py               # Celery 初始化
 │   │   ├── tasks.py                # 搜索索引异步任务
 │   │   ├── signal_processors.py    # Celery 信号处理器
 │   │   └── conftest.py             # pytest WebSocket 实时上报
 │   ├── room/                       # 核心业务 (看板/协作/AI/权限)
-│   │   ├── models.py               # 22 个数据模型
+│   │   ├── models.py               # 17 个数据模型
 │   │   ├── serializers.py          # 20+ 序列化器
-│   │   ├── ai_utils.py             # RAG + 流式 AI
-│   │   ├── views/                  # 模块化视图 (14 个文件)
+│   │   ├── ai_utils.py             # RAG + 流式 AI + Tool Calling
+│   │   ├── project_access.py       # 项目成员鉴权辅助
+│   │   ├── views/                  # 模块化视图 (15 个文件)
 │   │   │   ├── auth.py             # 认证
 │   │   │   ├── board.py            # 看板列/任务
-│   │   │   ├── project.py          # 项目/RAG问答
-│   │   │   ├── tag.py              # 标签 (含项目门控)
-│   │   │   ├── user.py             # 用户列表
-│   │   │   ├── notification.py     # 通知
-│   │   │   ├── comment.py          # 任务评论 + WebSocket
+│   │   │   ├── project.py          # 项目 CRUD + 邀请
+│   │   │   ├── tag.py              # 标签 (项目门控)
+│   │   │   ├── user.py             # 用户列表/头像
+│   │   │   ├── notification.py     # 通知 (含标记已读)
+│   │   │   ├── comment.py          # 任务评论 + WS 广播
 │   │   │   ├── activity.py         # 任务动态日志
-│   │   │   ├── attachment.py       # 任务附件
-│   │   │   ├── project_role.py     # 项目角色/成员
+│   │   │   ├── attachment.py       # 文件附件 (含安全处理)
+│   │   │   ├── project_role.py     # 项目角色/成员管理
 │   │   │   ├── sprint.py           # 迭代/Sprint + 燃尽图
-│   │   │   ├── ai.py               # AI 多轮对话 + 流式 + 分析
+│   │   │   ├── ai.py               # AI 多轮对话 + 流式 SSE + 分析
+│   │   │   ├── api_docs.py         # 项目 API 文档管理
 │   │   │   └── mixins.py           # 项目权限 Mixin
-│   │   ├── consumers.py            # Board WebSocket (鉴权)
-│   │   ├── consumers_chat.py       # Chat WebSocket (鉴权)
-│   │   ├── consumers_global.py     # Global 通知 WebSocket
+│   │   ├── consumers.py            # Board WS (看板实时同步, 鉴权)
+│   │   ├── consumers_chat.py       # Chat WS (项目聊天, Redis Stream)
+│   │   ├── consumers_global.py     # Global WS (全局通知广播)
+│   │   ├── routing.py              # WS 路由配置
+│   │   ├── search_indexes.py       # Haystack 搜索索引
 │   │   └── urls.py                 # 50+ API 路由
 │   ├── qa_center/                  # QA 质量中心 + DevOps
-│   │   ├── models.py               # 15 个模型
-│   │   ├── serializers.py          #
-│   │   ├── views_*.py              # 10 个视图文件
-│   │   ├── test_executor.py        # 测试执行
-│   │   ├── api_auto_executor.py    # 自动化测试引擎 + 自动建Bug
-│   │   ├── locust_runner.py        # 无界面 Locust
-│   │   ├── bug_utils.py            # 测试失败→Bug自动创建
-│   │   └── utils/                  # recorder.py, runner.py
+│   │   ├── models.py               # 20 个模型 (测试用例/结果/环境/CI/CD)
+│   │   ├── serializers.py          # 序列化器
+│   │   ├── views.py                # 数据工厂 + 执行入口
+│   │   ├── views_api_auto_test.py  # API 测试 ViewSet + 执行
+│   │   ├── views_ui_test.py        # UI 测试 ViewSet + 截图
+│   │   ├── views_performance.py    # 性能测试 ViewSet
+│   │   ├── views_test_result.py    # 测试结果 ViewSet
+│   │   ├── views_test_link.py      # 测试↔任务关联
+│   │   ├── views_devops.py         # DevOps 面板/CI/CD/Pipeline
+│   │   ├── views_run_plan.py       # 测试运行计划
+│   │   ├── views_environment.py    # 环境/全局变量管理
+│   │   ├── views_test_run.py       # 测试运行生命周期
+│   │   ├── tasks.py                # Celery 测试任务
+│   │   ├── tasks_test_exec.py      # 执行引擎 Celery 任务
+│   │   ├── consumers.py            # QA Dashboard/Recorder/Perf WS
+│   │   ├── routing.py              # QA WS 路由
+│   │   ├── api_execution/          # API 执行引擎 (orchestrator/runner/transport)
+│   │   ├── assertion_core/         # 断言引擎 (IR/操作符)
+│   │   ├── execution/              # 通用执行引擎 (lifecycle/runner/workers)
+│   │   ├── pipeline/               # CI/CD 客户端 (GitHub/GitLab/Jenkins)
+│   │   ├── services/devops/        # DevOps 服务层
+│   │   ├── webhooks.py             # Webhook 安全 (HMAC/去重/限流)
+│   │   ├── ssrf.py                 # SSRF 出站请求防护
+│   │   ├── template_engine.py      # 变量模板引擎
+│   │   ├── feature_flags.py        # 功能开关
+│   │   └── locust_runner.py        # Locust 无界面压测
+│   ├── bug_tracker/                # 缺陷追踪
+│   │   ├── models.py               # Bug, BugTransition, BugComment
+│   │   ├── views.py                # BugViewSet (CRUD + 流转 + 分配 + 统计)
+│   │   ├── serializers.py          # List/Create/Update/Detail 四层序列化器
+│   │   ├── state_machine.py        # 9 状态状态机 + 转换规则
+│   │   ├── seed.py                 # 演示数据生成
+│   │   └── urls.py                 # ViewSet 路由
 │   ├── system/                     # 系统 RBAC 管理
 │   │   ├── models.py               # Menu, Role, SystemUserProfile
-│   │   ├── permissions.py          # HasSystemPermission
-│   │   └── views.py                # 权限执行视图
-│   ├── tests/                      # 25+ 测试用例
-│   ├── e2e/                        # Playwright E2E (4个)
-│   └── performance/                # Locust 脚本
+│   │   ├── permissions.py          # HasSystemPermission 强制执行
+│   │   ├── views.py                # 权限执行视图 (8×4 方法级鉴权)
+│   │   └── urls.py                 # 路由配置
+│   ├── tests/                      # 37+ pytest 测试文件
+│   ├── performance/                # Locust 性能测试脚本
+│   ├── Dockerfile                  # 后端容器 (Playwright 基础镜像)
+│   ├── entrypoint.sh               # Docker 启动脚本
+│   ├── requirements.txt            # Python 依赖
+│   ├── pytest.ini                  # pytest 配置
+│   └── manage.py                   # Django 管理入口
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── App.vue                 # 根组件 (暗色模式切换)
-│   │   ├── main.ts
-│   │   ├── router/index.ts         # 路由 (懒加载 + meta.permission 权限守卫)
+│   │   ├── main.ts                 # 应用入口 (Pinia/Router/ElementPlus)
+│   │   ├── router/index.ts         # 路由 (40+ 路由, 懒加载 + 权限守卫)
 │   │   ├── stores/
-│   │   │   ├── Auth.ts             # 认证 + 权限
-│   │   │   ├── notification.ts     # 通知 WebSocket
-│   │   │   ├── board/              # 模块化看板 Store (task/column/tag/user)
+│   │   │   ├── Auth.ts             # 认证 + 权限 (菜单/角色/用户)
+│   │   │   ├── notification.ts     # 全局通知 WebSocket
+│   │   │   ├── board/              # 模块化看板 Store
+│   │   │   │   ├── index.ts        # 聚合 Store + WS 连接管理
+│   │   │   │   ├── column.ts       # 列 CRUD
+│   │   │   │   ├── task.ts         # 任务 CRUD
+│   │   │   │   ├── tag.ts          # 标签 CRUD
+│   │   │   │   ├── user.ts         # 用户列表
+│   │   │   │   └── types.ts        # 类型定义
 │   │   │   └── composables/
-│   │   ├── views/                  # 30+ 页面
-│   │   │   ├── Board.vue           # 主看板 (拖拽/搜索/筛选)
+│   │   │       └── useWebSocket.ts # 可复用 WS 客户端 (心跳/重连/观察者)
+│   │   ├── views/                  # 47 个页面组件
+│   │   │   ├── Board.vue           # 主看板 (~944行, 拖拽/搜索/筛选)
 │   │   │   ├── ProjectSprints.vue  # 迭代管理
 │   │   │   ├── SprintBoard.vue     # 迭代看板 + 燃尽图
-│   │   │   ├── ProjectQualityReport.vue  # 质量报告
+│   │   │   ├── ProjectQualityReport.vue  # 五维质量报告
 │   │   │   ├── AIChat.vue          # AI 助手 (流式/多轮/分析)
 │   │   │   ├── Members.vue         # 成员管理 (角色选择)
-│   │   │   ├── qa/                 # QA 中心 (11 个页面)
+│   │   │   ├── Chat.vue            # 项目实时聊天
+│   │   │   ├── Settings.vue        # 项目设置 (重命名/删除)
+│   │   │   ├── Notifications.vue   # 通知列表
+│   │   │   ├── ProjectApiDocs.vue  # API 文档查看器
+│   │   │   ├── qa/                 # QA 中心 (14 个页面)
+│   │   │   │   ├── QA.vue          # 质量中心仪表板
+│   │   │   │   ├── AutoCaseList.vue / AutoCaseDetail.vue
+│   │   │   │   ├── UiCaseList.vue / UiCaseDetail.vue
+│   │   │   │   ├── TestResultHub.vue / TestResultList.vue / TestResultDetail.vue
+│   │   │   │   ├── TestRunList.vue / TestRunDetail.vue
+│   │   │   │   ├── DevOpsPlatform.vue
+│   │   │   │   ├── PerformanceTestResult.vue
+│   │   │   │   └── components/     # QA 子组件 (14 个)
+│   │   │   ├── bug/                # Bug 追踪 (4 个页面 + 17 个子组件)
+│   │   │   │   ├── BugWorkbench.vue    # 统一 Bug 工作台
+│   │   │   │   ├── BugList.vue         # 全部 Bug
+│   │   │   │   ├── MyBugs.vue          # 我的 Bug
+│   │   │   │   ├── BugDetail.vue       # Bug 详情/编辑
+│   │   │   │   └── components/         # BugTable, BugFilterBar, BugStatsCards 等
 │   │   │   └── system/             # 系统管理 (3 个页面)
-│   │   ├── components/
-│   │   │   ├── TaskDetailDrawer.vue # 任务详情 (评论/动态/附件/关联测试)
-│   │   │   ├── PipelineTimeline.vue # CI/CD 执行历史
-│   │   │   ├── ChatDrawer.vue      # 聊天浮动抽屉
-│   │   │   ├── Chatbot.vue         # AI 聊天机器人
-│   │   │   └── TestConsole.vue     # QA 终端
-│   │   ├── directives/permission.ts # 响应式权限指令
-│   │   ├── styles/
-│   │   │   ├── variables.css       # 设计令牌
-│   │   │   └── global.css          # 全局 + 响应式 + Dark Mode
-│   │   └── utils/                  # request.ts, sanitize.ts
+│   │   │       ├── MenuManagement.vue
+│   │   │       ├── RoleManagement.vue
+│   │   │       └── UserManagement.vue
+│   │   ├── components/             # 共享组件
+│   │   │   ├── TaskDetailDrawer.vue # 任务详情抽屉 (评论/动态/附件)
+│   │   │   ├── PipelineTimeline.vue # CI/CD 流水线时间线
+│   │   │   ├── ChatDrawer.vue      # 聊天浮动面板
+│   │   │   └── TestConsole.vue     # 测试控制台
+│   │   ├── composables/            # 可组合函数
+│   │   │   ├── useRecorderSocket.ts # UI 录制器 WS 状态机
+│   │   │   └── wsHost.ts           # WS URL 构建 (dev/prod)
+│   │   ├── directives/             # 自定义指令
+│   │   │   └── permission.ts       # v-permission 系列指令
+│   │   ├── api/                    # API 服务模块
+│   │   │   ├── bug.ts              # Bug CRUD + 统计
+│   │   │   ├── devops.ts           # DevOps 仪表板/CI/CD/任务
+│   │   │   ├── runplan.ts          # 测试运行计划
+│   │   │   ├── testrun.ts          # 测试运行
+│   │   │   └── autoresult.ts       # 自动化测试结果
+│   │   ├── styles/                 # 全局样式
+│   │   │   ├── variables.css       # 设计令牌 (light + dark)
+│   │   │   ├── global.css          # 全局/响应式/Dark Mode
+│   │   │   ├── components.css      # 原子化 UI 类
+│   │   │   └── element-overrides.css # Element Plus 全局覆写
+│   │   ├── types/                  # TypeScript 类型
+│   │   ├── utils/                  # 工具函数
+│   │   │   ├── request.ts          # Axios 实例 (CSRF/拦截器)
+│   │   │   ├── sanitize.ts         # XSS 安全工具
+│   │   │   ├── error.ts            # 错误消息提取
+│   │   │   └── echartsTheme.ts     # ECharts 主题
+│   │   └── __tests__/              # 11 个 Vitest 单元测试
+│   ├── Dockerfile                  # 前端容器 (多阶段: Node → Nginx)
+│   ├── nginx.conf                  # Nginx 反向代理配置
+│   ├── vite.config.ts              # Vite 构建配置
+│   ├── vitest.config.ts            # Vitest 测试配置
 │   └── package.json
 │
-├── docker-compose.yml
+├── e2e/                            # Playwright E2E 测试 (10 个文件)
+├── api_auto_test_skeleton/         # 独立 pytest API 自动化测试项目
+├── test_server/                    # Mock API 测试服务器
+├── docs/                           # 项目文档 (16 个 Markdown)
+│   ├── 01-项目架构.md
+│   ├── 02-数据模型.md
+│   ├── 03-WebSocket实时同步.md
+│   ├── LEARNING_ROADMAP.md         # 学习路线
+│   ├── CODE_MAP.md                 # 代码地图
+│   ├── PROJECT_DEEP_DIVE.md        # 技术深潜
+│   ├── bug-module-dev-doc.md       # Bug 模块开发文档
+│   ├── devops-module.md            # DevOps 模块文档
+│   └── ...
+├── docker-compose.yml              # 6 服务编排 (MySQL/Redis/ES/Celery/Backend/Frontend)
 ├── API文档.md
 ├── DEVELOPMENT_ROADMAP.md
+├── CODE_REVIEW.md
 └── README.md
 ```
 
@@ -186,23 +287,31 @@ SyncBoard/
 - **测试任务调度**: 手动/定时 Cron/Webhook 触发
 - **Dashboard**: 趋势/分布/通过率统计
 
-### 7. 项目质量报告
+### 7. Bug Tracker（缺陷追踪）
+- **9 状态状态机**: open → confirmed → in_progress → fixed → testing → verified → closed（含 rejected/duplicate 终止态）
+- **工作台视图**: 统一 Bug 列表 + 我的 Bug + 统计卡片 + 筛选栏
+- **流转管理**: 严格状态转换规则引擎，`BugTransition` 审计日志
+- **自动建 Bug**: 测试失败/错误 → 自动创建关联缺陷（source_test_type/source_case_id/source_result_id 可溯源）
+- **生命周期可视化**: BugDetail 页展示完整流转时间线 + 生命周期进度条
+- **多维度筛选**: 按状态/严重程度/优先级/负责人/报告人过滤
+
+### 8. 项目质量报告
 - **五维评分**: 测试覆盖 / 通过率 / 性能 / Bug密度 / 部署成功率
 - **雷达图 + 趋势图**: ECharts 可视化
 - **30天趋势**: 每日测试通过率变化
 
-### 8. 迭代/Sprint 管理
+### 9. 迭代/Sprint 管理
 - 迭代 CRUD + 任务添加/移除
 - **燃尽图**: 理想线 vs 实际剩余 (ECharts)
 - 完成进度条 + 任务状态追踪
 
-### 9. RBAC 权限管理
+### 10. RBAC 权限管理
 - **系统级**: Menu/Role/User → HasSystemPermission 强制执行
 - **项目级**: ProjectRole (4级) / ProjectMember → HasProjectRole
 - **前端**: 路由权限守卫 + `v-permission` 响应式指令
 - **WebSocket**: 项目成员鉴权 (connect 时检查)
 
-### 10. 安全特性
+### 11. 安全特性
 - DRF 全局限流 (匿名100/min, 认证1000/min) + 登录 5/min
 - 系统管理 API 按方法鉴权 (8 View × 4 HTTP 方法)
 - WebSocket 项目鉴权 (非成员 → close 4003)
@@ -210,7 +319,7 @@ SyncBoard/
 - XSS 防护 + CSRF Token + CORS 白名单
 - 审计日志 (user/action/resource/ip)
 
-### 11. 用户体验
+### 12. 用户体验
 - **Dark Mode**: 切换按钮 + localStorage + 跟随系统
 - **响应式**: 768px/1024px 断点，看板列纵向堆叠，侧边栏折叠
 - **统一状态**: LoadingState / ErrorState / EmptyState 模式
@@ -221,24 +330,31 @@ SyncBoard/
 ## 快速开始
 
 ### 环境要求
-- Python 3.11+ | Node.js 20.19+ | MySQL 8.0 | Redis 7 | ES 7.17 (可选)
+- Python 3.11+ | Node.js 20.19+ | MySQL 8.0 | Redis 7
+- Elasticsearch 7.17 (可选 — 仅全文搜索功能需要)
 
-### Docker 启动基础设施
+### Docker 启动基础设施 (推荐)
 
 ```bash
-docker-compose up -d    # MySQL + Redis + ES + Celery Worker
+# 启动 MySQL + Redis + Elasticsearch + Celery Worker
+docker-compose up -d db redis elasticsearch celery_worker
+
+# 或仅启动必要服务
+docker-compose up -d db redis
 ```
 
 ### 后端
 
 ```bash
 cd backend
-python -m venv venv && source venv/bin/activate   # or .\venv\Scripts\activate
+python -m venv venv && source venv/bin/activate   # Windows: .\venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env    # 编辑数据库/AI 配置
+cp .env.example .env    # 编辑数据库/Redis/AI 配置
 python manage.py migrate
 python manage.py createsuperuser
-python manage.py seed_ci_data     # 可选: 示例数据
+python manage.py seed_ci_data          # 可选: 示例项目数据
+python manage.py seed_bugs_demo        # 可选: 示例 Bug 数据
+python manage.py init_rbac_data        # 可选: 初始化 RBAC 权限数据
 uvicorn backend.asgi:application --host 0.0.0.0 --port 8000 --reload
 ```
 
@@ -247,8 +363,12 @@ uvicorn backend.asgi:application --host 0.0.0.0 --port 8000 --reload
 ```bash
 cd frontend
 npm install
-npm run dev    # http://localhost:5173
+npm run dev    # http://localhost:5173 (已配置代理到后端 8000)
 ```
+
+> 前端开发服务器会自动将 `/api`、`/ws`、`/media` 请求代理到后端 `localhost:8000`。
+>
+> **首次启动建议**: 后端启动后访问 `http://localhost:8000/admin/` 用超级用户登录，然后访问 `http://localhost:5173` 使用前端。
 
 ---
 
@@ -314,18 +434,43 @@ npm run dev    # http://localhost:5173
 | `/api/qa/api-cases/` | ViewSet | API 测试用例 |
 | `/api/qa/ui-cases/` | ViewSet | UI 测试用例 |
 | `/api/qa/auto-suites/` | ViewSet | 自动化测试套件 |
+| `/api/qa/auto-assertions/` | ViewSet | 断言配置 |
+| `/api/qa/auto-extractors/` | ViewSet | 变量提取器 |
+| `/api/qa/auto-results/` | ViewSet | 测试结果详情 |
+| `/api/qa/run-plans/` | ViewSet | 测试运行计划 |
+| `/api/qa/environments/` | ViewSet | 测试环境管理 |
+| `/api/qa/global-vars/` | ViewSet | 全局变量 |
+| `/api/qa/runs/` | GET/POST | 测试运行列表/创建 |
+| `/api/qa/runs/{id}/cancel/` | POST | 取消运行 |
+| `/api/qa/runs/{id}/rerun/` | POST | 重新运行 |
 | `/api/qa/auto-execute/` | POST | 执行自动化测试 |
 | `/api/qa/link-task/` | POST | 关联测试↔任务 |
 | `/api/qa/unlink-task/` | POST | 取消关联 |
+| `/api/qa/data-factory/` | GET | 随机测试数据生成 |
+
+### Bug Tracker（缺陷追踪）
+| `/api/bugs/` | GET/POST | Bug 列表/创建 |
+| `/api/bugs/{id}/` | GET/PATCH/DELETE | Bug 详情/更新/删除 |
+| `/api/bugs/{id}/transition/` | POST | 状态流转 (状态机) |
+| `/api/bugs/{id}/assign/` | POST | 分配负责人 |
+| `/api/bugs/{id}/comments/` | GET/POST | Bug 评论 |
+| `/api/bugs/my/` | GET | 我的 Bug |
+| `/api/bugs/stats/` | GET | Bug 统计面板 |
+| `/api/bugs/seed-demo/` | POST | 生成演示数据 |
 
 ### DevOps
 | `/api/qa/devops/stats/` | GET | 仪表板统计 |
 | `/api/qa/devops/cicd-config/` | CRUD | CI/CD 配置 (DB持久化) |
+| `/api/qa/devops/cicd-config/{id}/trigger/` | POST | 手动触发 Pipeline |
+| `/api/qa/devops/cicd-config/{id}/webhook/` | POST | Webhook 回调 |
+| `/api/qa/devops/cicd-config/{id}/test/` | POST | 测试连接 |
+| `/api/qa/devops/tasks/` | CRUD | 测试任务管理 |
+| `/api/qa/devops/tasks/{id}/execute/` | POST | 执行测试任务 |
+| `/api/qa/devops/tasks/{id}/history/` | GET | 任务执行历史 |
 | `/api/qa/devops/pipeline-runs/` | GET | Pipeline 执行历史 |
 | `/api/qa/devops/pipeline-runs/{id}/` | GET | 执行详情 |
-| `/api/qa/devops/cicd-config/{id}/trigger/` | POST | 手动触发 |
-| `/api/qa/devops/cicd-config/{id}/webhook/` | POST | Webhook 回调 |
 | `/api/qa/devops/quality-report/` | GET | 项目质量报告 |
+| `/api/qa/devops/quick-test/` | POST | 快速测试 |
 
 ### 系统管理
 | `/api/system/menus/` | CRUD | 菜单管理 (鉴权) |
@@ -336,11 +481,13 @@ npm run dev    # http://localhost:5173
 | 路径 | 用途 | 鉴权 |
 |------|------|------|
 | `/ws/board/{project_id}/` | 看板实时同步 | ✅ 项目成员 |
-| `/ws/chat/{project_id}/` | 项目聊天 + 历史 | ✅ 项目成员 |
-| `/ws/global/` | 全局通知 | ✅ 认证 |
-| `/ws/qa/dashboard/` | 测试日志 | ✅ 认证 |
-| `/ws/qa/recorder/` | UI 录制器 | ✅ 认证 |
-| `/ws/qa/performance/{id}/` | 性能实时指标 | ✅ 认证 |
+| `/ws/chat/{project_id}/` | 项目聊天 + 历史 (Redis Stream) | ✅ 项目成员 |
+| `/ws/global/` | 全局通知广播 | ✅ 认证 |
+| `/ws/qa/dashboard/{project_id}/` | QA 仪表板实时日志 | ✅ 认证 |
+| `/ws/qa/recorder/{project_id}/` | UI 录制器双向通信 | ✅ 认证 |
+| `/ws/qa/performance/{exec_id}/` | 性能测试实时指标 | ✅ 认证 |
+| `/ws/qa/test-run/{run_id}/` | 测试运行进度推送 | ✅ 认证 |
+| `/ws/qa/run/{task_id}/` | UI 自动化执行进度 | ✅ 认证 |
 
 ---
 
