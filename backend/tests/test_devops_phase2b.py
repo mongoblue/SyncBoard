@@ -380,9 +380,12 @@ class TestCancelUpgrade:
         svc = TestExecutionService()
         result = svc.cancel_task(task)
         assert result['cancelled'] is True
-        assert result['cancel_mode'] == 'mark_only'
+        assert result['cancel_mode'] == 'cooperative'
         task.refresh_from_db()
-        assert task.status == 'failed'
+        assert task.status == 'cancelled'
+        tr.refresh_from_db()
+        assert tr.aborted is True
+        assert tr.status == 'cancelled'
 
     def test_cancel_completed_task_rejected(self, test_project, test_user):
         from qa_center.services.devops.test_execution_service import TestExecutionService
@@ -407,7 +410,7 @@ class TestCancelUpgrade:
         resp = auth_client.post(f'/api/qa/devops/tasks/{task.id}/cancel/')
         assert resp.status_code == 200
         assert 'cancel_mode' in resp.data
-        assert resp.data['cancel_mode'] == 'mark_only'
+        assert resp.data['cancel_mode'] == 'cooperative'
 
 
 # ══════════════════════════════════════════════════════════════════════════

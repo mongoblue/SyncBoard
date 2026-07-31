@@ -624,8 +624,9 @@ class TestTaskExecutionService:
         assert resp.status_code == 200
         task.refresh_from_db()
         linked.refresh_from_db()
-        assert task.status == 'failed'
-        assert linked.status == 'failed'
+        assert task.status == 'cancelled'
+        assert linked.status == 'cancelled'
+        assert linked.aborted is True
         assert linked.error_message == '任务被手动取消'
         assert linked.completed_at is not None
 
@@ -669,8 +670,10 @@ class TestTaskExecutionService:
         task.refresh_from_db()
         foreign.refresh_from_db()
         linked.refresh_from_db()
-        assert task.status == 'failed'
-        assert linked.status == 'failed'
+        # 协作取消：任务与归属结果标记为已取消，foreign 结果不受影响
+        assert task.status == 'cancelled'
+        assert linked.status == 'cancelled'
+        assert linked.aborted is True
         assert linked.error_message == '任务被手动取消'
         assert foreign.status == 'running'
     """Performance and Regression must not fake success."""

@@ -90,6 +90,9 @@
         <el-option label="运行中" value="running">
           <el-tag type="info" size="small">运行中</el-tag>
         </el-option>
+        <el-option label="已取消" value="cancelled">
+          <el-tag type="warning" size="small">已取消</el-tag>
+        </el-option>
       </el-select>
 
       <el-select

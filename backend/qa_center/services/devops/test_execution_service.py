@@ -134,6 +134,10 @@ def validate_cron_expression(cron_expr: str) -> bool:
     return bool(_CRON_RE.match(cron_expr.strip()))
 
 
+class TaskCancelled(Exception):
+    """协作取消信号：执行过程中检测到取消请求。"""
+
+
 # ── Service ─────────────────────────────────────────────────────────────
 
 class TestExecutionService:
@@ -242,6 +246,16 @@ class TestExecutionService:
 
     # ── TestTask orchestration ──────────────────────────────────────────
 
+    def _check_cancelled(self, test_result: TestResult) -> None:
+        """协作取消检查点：检测到取消请求（TestResult.aborted）则抛 TaskCancelled。
+
+        执行器在每组用例之间调用；运行中的性能用例由 ExecutionWorker 自身
+        轮询 aborted 标记停止。
+        """
+        test_result.refresh_from_db(fields=['aborted'])
+        if test_result.aborted:
+            raise TaskCancelled()
+
     def execute_test_task(self, task: TestTask, test_result: TestResult) -> None:
         """Execute all cases configured in a TestTask."""
         test_config = task.test_config or {}
@@ -256,50 +270,73 @@ class TestExecutionService:
         ctx = self._build_context(task=task, user=task.created_by,
                                    trigger_source='task_execution')
 
-        if api_case_ids:
-            # 创建父级 ApiAutoTestResult，统一收纳所有 case 结果
-            parent_auto_result = None
-            try:
-                from qa_center.models import ApiAutoTestResult as AATR
-                parent_auto_result = AATR.objects.create(
-                    suite=None,
-                    project=task.project,
-                    name=f"{task.name} - 执行 #{task.execution_count}",
-                    status='running',
-                    total_cases=len(api_case_ids),
-                    executed_by=task.created_by,
-                    started_at=timezone.now(),
+        try:
+            self._check_cancelled(test_result)
+
+            if api_case_ids:
+                # 创建父级 ApiAutoTestResult，统一收纳所有 case 结果
+                parent_auto_result = None
+                try:
+                    from qa_center.models import ApiAutoTestResult as AATR
+                    parent_auto_result = AATR.objects.create(
+                        suite=None,
+                        project=task.project,
+                        name=f"{task.name} - 执行 #{task.execution_count}",
+                        status='running',
+                        total_cases=len(api_case_ids),
+                        executed_by=task.created_by,
+                        started_at=timezone.now(),
+                    )
+                except Exception:
+                    logger.exception("创建父级 ApiAutoTestResult 失败")
+
+                api_results, api_passed, api_failed = self._run_api_cases(
+                    api_case_ids, task.project, task.created_by,
+                    task_id=str(task.id), events=events, ctx=ctx,
+                    parent_result=parent_auto_result,
                 )
-            except Exception:
-                logger.exception("创建父级 ApiAutoTestResult 失败")
+                all_results.extend(api_results)
+                passed_count += api_passed
+                failed_count += api_failed
 
-            api_results, api_passed, api_failed = self._run_api_cases(
-                api_case_ids, task.project, task.created_by,
-                task_id=str(task.id), events=events, ctx=ctx,
-                parent_result=parent_auto_result,
-            )
-            all_results.extend(api_results)
-            passed_count += api_passed
-            failed_count += api_failed
+                # 将父级结果关联到 DevOps 任务记录
+                if parent_auto_result is not None:
+                    test_result.api_auto_result = parent_auto_result
 
-            # 将父级结果关联到 DevOps 任务记录
-            if parent_auto_result is not None:
-                test_result.api_auto_result = parent_auto_result
+            self._check_cancelled(test_result)
 
-        if ui_case_ids:
-            ui_results, ui_passed, ui_failed = self._run_ui_cases(ui_case_ids)
-            all_results.extend(ui_results)
-            passed_count += ui_passed
-            failed_count += ui_failed
+            if ui_case_ids:
+                ui_results, ui_passed, ui_failed = self._run_ui_cases(ui_case_ids)
+                all_results.extend(ui_results)
+                passed_count += ui_passed
+                failed_count += ui_failed
 
-        if perf_case_ids:
-            perf_results, perf_passed, perf_failed = self._run_performance_cases(
-                perf_case_ids, task.project, task.created_by, events=events,
-                task_id=str(task.id),
-            )
-            all_results.extend(perf_results)
-            passed_count += perf_passed
-            failed_count += perf_failed
+            self._check_cancelled(test_result)
+
+            if perf_case_ids:
+                perf_results, perf_passed, perf_failed = self._run_performance_cases(
+                    perf_case_ids, task.project, task.created_by, events=events,
+                    task_id=str(task.id),
+                )
+                all_results.extend(perf_results)
+                passed_count += perf_passed
+                failed_count += perf_failed
+        except TaskCancelled:
+            # 协作取消：停止执行，标记任务与结果为已取消
+            test_result.status = 'cancelled'
+            test_result.completed_at = timezone.now()
+            test_result.error_message = '任务被手动取消'
+            test_result.test_log = _build_structured_log(all_results, {
+                'total': passed_count + failed_count,
+                'passed': passed_count,
+                'failed': failed_count,
+                'pass_rate': round((passed_count / (passed_count + failed_count) * 100), 2)
+                if (passed_count + failed_count) > 0 else 0,
+            }, events=events)
+            test_result.save()
+            task.status = 'cancelled'
+            task.save()
+            return
 
         total = passed_count + failed_count
         pass_rate = round((passed_count / total * 100), 2) if total > 0 else 0
@@ -721,9 +758,9 @@ class TestExecutionService:
     def cancel_task(self, task: TestTask) -> dict:
         """Cancel a running task. Returns status info dict.
 
-        Currently implements mark-only cancellation (no physical thread/Celery
-        interruption). The cancellation flag is saved on the task so that
-        cooperating runners can check it.
+        协作取消：置取消信号（TestResult.aborted）+ 标记任务/结果为已取消。
+        - 运行中的性能用例：ExecutionWorker 轮询 aborted 自动停止
+        - API/UI 批次：execute_test_task 的批次间检查点停止后续用例
         """
         if task.status != 'running':
             return {
@@ -732,23 +769,38 @@ class TestExecutionService:
                 'reason': '只能取消正在执行中的任务',
             }
 
-        # Set cancellation flag — runners can check task.aborted / task.status
-        task.status = 'failed'
+        # 置取消信号并标记所有运行中结果
+        task.status = 'cancelled'
         task.save(update_fields=['status'])
 
-        active_result = self._resolve_task_result(task)
-        if active_result and active_result.status == 'running':
-            active_result.status = 'failed'
-            active_result.error_message = '任务被手动取消'
-            active_result.completed_at = timezone.now()
-            active_result.save(
-                update_fields=['status', 'error_message', 'completed_at'],
-            )
+        cancelled_count = 0
+
+        def _mark_cancelled(active: TestResult) -> None:
+            nonlocal cancelled_count
+            active.aborted = True
+            active.status = 'cancelled'
+            active.error_message = '任务被手动取消'
+            active.completed_at = timezone.now()
+            active.save(update_fields=[
+                'aborted', 'status', 'error_message', 'completed_at',
+            ])
+            cancelled_count += 1
+
+        for active in TestResult.objects.filter(
+            task_id=str(task.id), status='running',
+        ):
+            _mark_cancelled(active)
+
+        # 兼容老数据：last_result 链路的结果可能未带 task_id
+        fallback = self._resolve_task_result(task)
+        if fallback is not None and fallback.status == 'running' and not fallback.aborted:
+            _mark_cancelled(fallback)
 
         return {
             'cancelled': True,
-            'cancel_mode': 'mark_only',
-            'message': '任务已标记为取消（当前仅支持标记取消，不支持物理中断）',
+            'cancel_mode': 'cooperative',
+            'cancelled_results': cancelled_count,
+            'message': '已发送取消信号，运行中的用例将尽快停止',
         }
 
     # ── Logs ──────────────────────────────────────────────────────────────

@@ -105,6 +105,14 @@ export const testCiCdWebhook = (id: number): Promise<{ success: boolean; message
   return service.post(`${BASE_URL}/cicd-config/${id}/test/`) as Promise<{ success: boolean; message: string }>;
 };
 
+/**
+ * 手动触发 CI/CD Pipeline
+ * @param id 配置ID
+ */
+export const triggerCiCd = (id: number): Promise<{ run_id: number; message: string }> => {
+  return service.post(`${BASE_URL}/cicd-config/${id}/trigger/`) as Promise<{ run_id: number; message: string }>;
+};
+
 // ==================== 测试任务管理 ====================
 
 /**
@@ -219,6 +227,7 @@ export const getStatusType = (status: string): 'success' | 'danger' | 'warning' 
     'pending': 'info',
     'idle': 'info',
     'completed': 'success',
+    'cancelled': 'warning',
   };
   return typeMap[status] || 'info';
 };
@@ -236,6 +245,7 @@ export const getStatusText = (status: string): string => {
     'pending': '待执行',
     'idle': '空闲',
     'completed': '已完成',
+    'cancelled': '已取消',
   };
   return textMap[status] || status;
 };
