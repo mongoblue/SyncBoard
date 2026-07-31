@@ -263,7 +263,7 @@ USE_UNIFIED_RUNNER_FOR_RUNPLAN_PARALLEL = os.environ.get("USE_UNIFIED_RUNNER_FOR
 USE_UNIFIED_RUNNER_FOR_ASYNC_TRIGGERS = os.environ.get("USE_UNIFIED_RUNNER_FOR_ASYNC_TRIGGERS", "True").lower() == "true"
 USE_UNIFIED_RUNNER_FOR_LEGACY = os.environ.get("USE_UNIFIED_RUNNER_FOR_LEGACY", "True").lower() == "true"
 PERF_MAX_CONCURRENT = int(os.environ.get("PERF_MAX_CONCURRENT", "5"))
-UI_TEST_MAX_CONCURRENT_RUNNERS = int(os.environ.get("UI_TEST_MAX_CONCURRENT_RUNNERS", "2"))
+UI_TEST_MAX_CONCURRENT_RUNNERS = int(os.environ.get("UI_TEST_MAX_CONCURRENT_RUNNERS", "3"))
 # ── 压力测试 URL 预检配置 ─────────────────────────────────────
 PERF_ALLOW_LOCALHOST = os.environ.get("PERF_ALLOW_LOCALHOST", "false").lower() == "true"
 PERF_ALLOWED_HOSTS = [

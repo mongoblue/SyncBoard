@@ -55,3 +55,7 @@ api_auto_test_skeleton/reports/
 
 # 示例数据文件（可以重新生成）
 api_test_examples*.json
+
+# 本地测试数据库与代码生成脚本（不提交）
+backend/test_ui_prod.sqlite3
+_build_views_part1.ps1

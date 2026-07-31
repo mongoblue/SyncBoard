@@ -376,7 +376,7 @@ class UiRunConsumer(AsyncWebsocketConsumer):
         # 回放历史事件（非破坏性读取），确保晚连接的客户端能拿到已有事件
         loop = asyncio.get_running_loop()
         buffered = await loop.run_in_executor(
-            None, runner_supervisor.get_events, self.task_id
+            None, runner_supervisor.peek_events, self.task_id
         )
         for ev in buffered:
             await self.send(text_data=json.dumps({"type": "run_event", "data": ev}))

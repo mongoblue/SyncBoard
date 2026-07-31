@@ -1,4 +1,4 @@
-"""
+﻿"""
 Runner Worker — 子进程执行 UI 测试用例。
 stdin 读 1 行 JSON 输入，stdout 流式输出事件 (JSON Lines)。
 """
@@ -55,7 +55,6 @@ def setup_temp_dir() -> str:
 
 def cleanup_temp_dir(td: str) -> None:
     import shutil
-    # DEBUG 模式下保留 temp_dir 方便事后取证
     if os.environ.get("UI_TEST_DEBUG"):
         logger.info("UI_TEST_DEBUG 开启，保留 temp_dir=%s", td)
         return
@@ -63,53 +62,70 @@ def cleanup_temp_dir(td: str) -> None:
         shutil.rmtree(td, ignore_errors=True)
 
 
-def _execute_single_step(page, step: dict, emit_fn):
+def _to_int(value, default=0):
+    try:
+        return int(float(str(value).strip()))
+    except Exception:
+        return default
+
+
+def _close_open_selects(page) -> None:
+    try:
+        if page.locator(".el-select-dropdown:visible").count() > 0:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(120)
+            if page.locator(".el-select-dropdown:visible").count() > 0:
+                page.evaluate("document.body.click()")
+                page.wait_for_timeout(120)
+    except Exception:
+        pass
+
+
+def _execute_single_step(page, step: dict, emit_fn, frame_holder: dict):
     from playwright.sync_api import expect
 
-    action = (step.get("action") or "").lower()
-    selector = step.get("selector", "")
+    action = (step.get("action") or "").lower().strip()
+    # 别名归一
+    if action == "drag_and_drop":
+        action = "drag"
+    if action == "context_click":
+        action = "right_click"
+
+    selector = step.get("selector", "") or ""
     value = step.get("value", "")
     url = step.get("url", "")
     attribute = step.get("attribute", "")
     expected_value = step.get("expected_value", "")
 
-    # 兼容 el-select multiple：选中后下拉不自动关闭，会遮挡后续 click。
-    # 进入非 select 步骤前，若有可见的 .el-select-dropdown，强制关闭它。
+    # 当前作用域：主 page 或 iframe frame
+    scope = frame_holder.get("scope") or page
+
     if action != "select":
-        try:
-            if page.locator(".el-select-dropdown:visible").count() > 0:
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(120)
-                # Esc 偶尔被嵌套元素消化，二次兜底：触发 v-click-outside
-                if page.locator(".el-select-dropdown:visible").count() > 0:
-                    page.evaluate("document.body.click()")
-                    page.wait_for_timeout(120)
-        except Exception:
-            pass
+        _close_open_selects(page)
 
     def _wait(sel, timeout=10000):
-        loc = page.locator(sel)
+        loc = scope.locator(sel)
         loc.wait_for(state="visible", timeout=timeout)
         return loc
 
     if action == "goto" and url:
         page.goto(url, wait_until="networkidle", timeout=30000)
+        frame_holder["scope"] = page
     elif action == "wait":
-        page.wait_for_timeout(int(value) if str(value).isdigit() else 1000)
+        page.wait_for_timeout(_to_int(value, 1000))
     elif action in ("click", "click_if_visible"):
         _wait(selector).click(timeout=10000)
     elif action in ("dblclick", "double_click"):
         _wait(selector).dblclick(timeout=10000)
+    elif action == "right_click":
+        _wait(selector).click(button="right", timeout=10000)
     elif action == "fill":
-        _wait(selector).fill(value or "")
+        _wait(selector).fill("" if value is None else str(value))
     elif action == "select":
         loc = _wait(selector)
         try:
-            # 原生 <select>
-            loc.select_option(value or "")
+            loc.select_option("" if value is None else str(value))
         except Exception:
-            # 多选连续 select：下拉可能已展开，再点 wrapper 反而会关闭。
-            # 仅在未展开时点击触发展开。
             try:
                 already_open = page.locator(".el-select-dropdown:visible").count() > 0
             except Exception:
@@ -117,27 +133,90 @@ def _execute_single_step(page, step: dict, emit_fn):
             if not already_open:
                 loc.click(timeout=10000)
             page.locator(
-                ".el-select-dropdown__item:visible", has_text=value or ""
+                ".el-select-dropdown__item:visible", has_text="" if value is None else str(value)
             ).first.click(timeout=5000)
+    elif action == "upload":
+        # value 为文件路径；selector 指向 input[type=file] 或可触发文件选择的控件
+        path = "" if value is None else str(value)
+        loc = scope.locator(selector)
+        try:
+            loc.set_input_files(path, timeout=10000)
+        except Exception:
+            # 有些上传控件不是 file input 本身
+            with page.expect_file_chooser(timeout=5000) as fc_info:
+                loc.click(timeout=10000)
+            fc_info.value.set_files(path)
+    elif action == "keydown":
+        key = "" if value is None else str(value)
+        if selector:
+            _wait(selector).press(key)
+        else:
+            page.keyboard.press(key)
     elif action == "hover":
         _wait(selector).hover()
     elif action == "scroll":
-        page.evaluate(f"window.scrollTo(0, {value or 0})")
+        y = _to_int(value, 0)
+        page.evaluate("y => window.scrollTo(0, y)", y)
+    elif action == "iframe_switch":
+        # value 为空：切回主页面；否则按 name/id/selector 找 frame
+        target = "" if value is None else str(value).strip()
+        if not target:
+            frame_holder["scope"] = page
+        else:
+            frame = None
+            try:
+                frame = page.frame(name=target)
+            except Exception:
+                frame = None
+            if frame is None:
+                try:
+                    handle = page.query_selector(target)
+                    if handle is not None:
+                        frame = handle.content_frame()
+                except Exception:
+                    frame = None
+            if frame is None:
+                raise ValueError(f"SELECTOR_NOT_FOUND:iframe {target}")
+            frame_holder["scope"] = frame
+    elif action == "alert_handle":
+        mode = ("" if value is None else str(value)).strip().lower() or "accept"
+        dialog = getattr(page, "_pending_dialog", None)
+        # Playwright 推荐 once 监听；这里用 once 处理下一个 dialog，并尽量立即处理已出现的
+        def _handle(dlg):
+            try:
+                if mode in ("dismiss", "cancel"):
+                    dlg.dismiss()
+                elif mode not in ("accept", "ok") and mode:
+                    dlg.accept(mode)
+                else:
+                    dlg.accept()
+            except Exception:
+                try:
+                    dlg.dismiss()
+                except Exception:
+                    pass
+
+        page.once("dialog", _handle)
+        # 若用户在上一步已触发弹窗，这里无同步句柄可取；依赖 once 处理后续。
+        # 为兼容“先出现 dialog 再执行本步”，额外 wait 很短时间。
+        page.wait_for_timeout(50)
     elif action == "assert_visible":
-        expect(page.locator(selector)).to_be_visible()
+        expect(scope.locator(selector)).to_be_visible()
+    elif action == "assert_exists":
+        expect(scope.locator(selector)).to_have_count(1)
     elif action == "assert_text":
-        expect(page.locator(selector)).to_have_text(expected_value or value)
+        expect(scope.locator(selector)).to_have_text(expected_value or value)
     elif action == "assert_contains_text":
-        expect(page.locator(selector)).to_contain_text(expected_value or value)
+        expect(scope.locator(selector)).to_contain_text(expected_value or value)
     elif action == "assert_attribute":
-        expect(page.locator(selector)).to_have_attribute(attribute, expected_value)
+        expect(scope.locator(selector)).to_have_attribute(attribute, expected_value)
     elif action == "assert_url":
         expect(page).to_have_url(expected_value or value)
     elif action == "assert_count":
-        expect(page.locator(selector)).to_have_count(int(value))
+        expect(scope.locator(selector)).to_have_count(_to_int(value, 0))
     elif action == "drag":
-        target_sel = step.get("target_selector", selector)
-        _wait(selector).drag_to(_wait(target_sel), timeout=15000)
+        target_sel = step.get("target_selector") or value or selector
+        _wait(selector).drag_to(_wait(str(target_sel)), timeout=15000)
     elif action == "screenshot":
         pass
     else:
@@ -151,11 +230,10 @@ def _classify_error(exc: Exception) -> str:
     if "executable" in lower and "doesn" in lower:
         return "BROWSER_NOT_INSTALLED"
     if cls == "TimeoutError" or "Timeout" in cls:
-        # Playwright 在元素操作前的 wait_for 超时 = 元素不存在 / 不可见
         if "locator" in lower or "waiting for" in lower:
             return "SELECTOR_NOT_FOUND"
         return "STEP_TIMEOUT"
-    if "找不到" in msg or "locator" in lower:
+    if msg.startswith("SELECTOR_NOT_FOUND") or "找不到" in msg or "locator" in lower:
         return "SELECTOR_NOT_FOUND"
     if msg.startswith("UNSUPPORTED_ACTION:"):
         return "UNSUPPORTED_ACTION"
@@ -168,19 +246,12 @@ def _run_steps(case_data: dict) -> dict:
     url = (case_data.get("url") or "").strip()
     steps = case_data.get("steps") or []
     temp_dir = os.environ.get("TEMP", "")
-
-    if not url:
-        emit({"type": "error", "code": "INTERNAL", "message": "未提供起始 URL"})
-        return {"success": False, "summary": {"passed": 0, "failed": 1, "total": 1}}
-
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
-
     shots_dir = os.path.join(temp_dir, "screenshots")
     os.makedirs(shots_dir, exist_ok=True)
 
     passed = 0
     failed = 0
+    frame_holder = {"scope": None}
 
     try:
         with sync_playwright() as p:
@@ -202,19 +273,24 @@ def _run_steps(case_data: dict) -> dict:
                 )
                 try:
                     page = context.new_page()
+                    frame_holder["scope"] = page
 
-                    emit({"type": "step_start", "index": -1, "action": "goto", "desc": f"导航到 {url}"})
-                    page.goto(url, wait_until="networkidle", timeout=30000)
-                    emit({"type": "step_log", "index": -1, "message": "页面加载完成"})
+                    if url:
+                        emit({"type": "step_start", "index": -1, "action": "goto", "desc": f"导航到 {url}"})
+                        page.goto(url, wait_until="networkidle", timeout=30000)
+                        emit({"type": "step_log", "index": -1, "message": "页面加载完成"})
 
                     for i, step in enumerate(steps):
-                        emit({"type": "step_start", "index": i,
-                              "action": step.get("action"),
-                              "desc": f"步骤{i+1}",
-                              "selector": step.get("selector", ""),
-                              "value": step.get("value", "")})
+                        emit({
+                            "type": "step_start",
+                            "index": i,
+                            "action": step.get("action"),
+                            "desc": f"步骤{i+1}",
+                            "selector": step.get("selector", ""),
+                            "value": step.get("value", ""),
+                        })
                         try:
-                            _execute_single_step(page, step, emit)
+                            _execute_single_step(page, step, emit, frame_holder)
                             page.wait_for_timeout(500)
                             try:
                                 page.wait_for_load_state("networkidle", timeout=5000)
@@ -235,29 +311,52 @@ def _run_steps(case_data: dict) -> dict:
                                 emit({"type": "step_screenshot", "index": i, "path": shot_path})
                             except Exception:
                                 pass
-                            emit({"type": "step_done", "index": i, "success": False,
-                                  "code": code, "message": str(e), "traceback": tb})
-                            return {"success": False, "summary": {"passed": passed, "failed": failed, "total": len(steps)}}
+                            emit({
+                                "type": "step_done",
+                                "index": i,
+                                "success": False,
+                                "code": code,
+                                "message": str(e),
+                                "traceback": tb,
+                            })
+                            return {
+                                "success": False,
+                                "summary": {"passed": passed, "failed": failed, "total": len(steps)},
+                            }
 
-                    page.wait_for_timeout(1500)
+                    page.wait_for_timeout(500)
                     final_path = os.path.join(shots_dir, "final.png")
                     page.screenshot(path=final_path, full_page=True)
                     emit({"type": "step_screenshot", "index": len(steps), "path": final_path})
 
-                    return {"success": True, "summary": {"passed": passed, "failed": 0, "total": len(steps)}}
+                    return {
+                        "success": True,
+                        "summary": {"passed": passed, "failed": 0, "total": len(steps)},
+                    }
                 finally:
-                    try: context.close()
-                    except Exception: pass
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
             finally:
-                try: browser.close()
-                except Exception: pass
+                try:
+                    browser.close()
+                except Exception:
+                    pass
 
     except Exception as e:
         code = _classify_error(e)
         tb = traceback.format_exc()
-        emit({"type": "error", "code": code if code != "INTERNAL" else "LAUNCH_FAILED",
-              "message": str(e), "traceback": tb})
-        return {"success": False, "summary": {"passed": passed, "failed": failed + 1, "total": len(steps)}}
+        emit({
+            "type": "error",
+            "code": code if code != "INTERNAL" else "LAUNCH_FAILED",
+            "message": str(e),
+            "traceback": tb,
+        })
+        return {
+            "success": False,
+            "summary": {"passed": passed, "failed": failed + 1, "total": len(steps)},
+        }
 
 
 def main():
@@ -270,12 +369,19 @@ def main():
         result = _run_steps(inp)
         emit({"type": "finished", **result})
     except Exception as e:
-        emit({"type": "error", "code": "INTERNAL", "message": str(e), "traceback": traceback.format_exc()})
-        emit({"type": "finished", "success": False, "summary": {"passed": 0, "failed": 1, "total": 1}})
+        emit({
+            "type": "error",
+            "code": "INTERNAL",
+            "message": str(e),
+            "traceback": traceback.format_exc(),
+        })
+        emit({
+            "type": "finished",
+            "success": False,
+            "summary": {"passed": 0, "failed": 1, "total": 1},
+        })
     finally:
-        # 不在这里删除 temp_dir：父进程需要读取截图/视频等产物。
-        # 父进程（runner_supervisor / _save_test_result）会在读完截图后自行清理；
-        # 兜底机制：apps.py ready() 启动的定时任务每天清理 24h 前的 temp_dir。
+        # 不在这里删除 temp_dir：父进程需要读取截图。
         pass
 
 

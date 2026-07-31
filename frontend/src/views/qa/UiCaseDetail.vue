@@ -30,6 +30,10 @@ UI 用例编辑 + 录制面板。
           <el-icon><VideoPlay /></el-icon>
           试运行
         </el-button>
+        <el-button type="success" @click="handleRunAsync" :loading="runningAsync" v-if="isEdit">
+          <el-icon><VideoPlay /></el-icon>
+          后台运行
+        </el-button>
         <el-button type="primary" @click="handleSave" :loading="saving">
           <el-icon><Check /></el-icon>
           保存
@@ -65,11 +69,11 @@ UI 用例编辑 + 录制面板。
             </el-form-item>
 
             <el-form-item label="起始 URL" prop="url">
-              <el-input v-model="form.url" placeholder="https://example.com 或 http://localhost:5173" />
+              <el-input v-model="form.url" placeholder="https://example.com 或使用环境变量拼接路径" />
             </el-form-item>
 
             <el-form-item label="所属项目" prop="project">
-              <el-select v-model="form.project" placeholder="选择项目" style="width: 100%">
+              <el-select v-model="form.project" placeholder="选择项目" style="width: 100%" @change="loadEnvironments">
                 <el-option
                   v-for="project in projects"
                   :key="project.id"
@@ -77,6 +81,18 @@ UI 用例编辑 + 录制面板。
                   :value="project.id"
                 />
               </el-select>
+            </el-form-item>
+
+            <el-form-item label="绑定环境">
+              <el-select v-model="form.environment" placeholder="不绑定（用项目默认环境）" clearable style="width: 100%">
+                <el-option
+                  v-for="env in environments"
+                  :key="env.id"
+                  :label="env.base_url ? (env.name + ' (' + env.base_url + ')') : env.name"
+                  :value="env.id"
+                />
+              </el-select>
+              <div class="form-tip">支持双花括号变量（base_url / 环境变量），与接口测试共用</div>
             </el-form-item>
           </el-form>
         </el-card>
@@ -268,7 +284,7 @@ UI 用例编辑 + 录制面板。
               <el-carousel-item v-for="(step, index) in testResult.step_screenshots" :key="index">
                 <div class="step-screenshot-item">
                   <div class="step-screenshot-label">步骤 {{ step.step }}</div>
-                  <img v-if="step.screenshot" :src="step.screenshot" :alt="`步骤 ${step.step} 截图`" class="step-screenshot-img" />
+                  <img v-if="step.screenshot || step.url" :src="step.screenshot || step.url" :alt="`步骤 ${step.step} 截图`" class="step-screenshot-img" />
                   <div v-else class="step-screenshot-missing">步骤 {{ step.step }} 无截图</div>
                 </div>
               </el-carousel-item>
@@ -361,9 +377,13 @@ const queryProjectId = computed(() => String(route.query.project || ''));
 const form = ref({
   name: '',
   project: routeProjectId.value || queryProjectId.value,
+  environment: null as number | null,
   url: '',
   steps: [] as any[]
 });
+const environments = ref<any[]>([]);
+const runningAsync = ref(false);
+const asyncTaskId = ref('');
 
 const effectiveProjectId = computed(() => routeProjectId.value || String(form.value.project || queryProjectId.value || ''));
 
@@ -418,6 +438,77 @@ const loadProjects = async () => {
     projects.value = res.results || res;
   } catch (error) {
     console.error('加载项目失败', error);
+  }
+};
+
+const loadEnvironments = async () => {
+  const projectId = effectiveProjectId.value;
+  if (!projectId) {
+    environments.value = [];
+    return;
+  }
+  try {
+    const res = await service.get('/qa/environments/', {
+      params: { project: projectId, page_size: 100 },
+    });
+    environments.value = res.results || res || [];
+  } catch (error) {
+    console.error('加载环境失败', error);
+    environments.value = [];
+  }
+};
+
+const handleRunAsync = async () => {
+  if (!isEdit.value) {
+    ElMessage.warning('请先保存用例');
+    return;
+  }
+  runningAsync.value = true;
+  testResult.value = { success: null, logs: ['后台运行中...'], step_screenshots: [] };
+  try {
+    const res = await service.post(`/qa/ui-cases/${caseId.value}/run_async/`, {
+      environment_id: form.value.environment,
+    });
+    asyncTaskId.value = res.task_id || '';
+    ElMessage.success(`已开始后台执行 task=${res.task_id}`);
+    // 简单轮询 events 直到 finished
+    const taskId = res.task_id;
+    let tries = 0;
+    while (tries < 120) {
+      await new Promise((r) => setTimeout(r, 1500));
+      tries += 1;
+      try {
+        const ev = await service.get(`/qa/ui-cases/runs/${taskId}/events/`);
+        const events = ev.events || [];
+        const logs = events.filter((e: any) => e.type === 'step_log').map((e: any) => e.message || '');
+        const screenshots = events
+          .filter((e: any) => e.type === 'step_screenshot')
+          .map((e: any) => ({
+            step: (e.index ?? 0) + 1,
+            screenshot: e.path ? undefined : undefined,
+            url: `/api/qa/ui-run/${taskId}/screenshot/${e.index ?? 0}/`,
+          }));
+        testResult.value = {
+          success: ev.finished ? events.some((e: any) => e.type === 'finished' && e.success) : null,
+          logs: logs.length ? logs : [`task ${taskId} 运行中... (events=${events.length})`],
+          step_screenshots: screenshots,
+          task_id: taskId,
+        };
+        if (ev.finished || !ev.alive) {
+          const finished = events.find((e: any) => e.type === 'finished');
+          testResult.value.success = !!(finished && finished.success);
+          if (testResult.value.success) ElMessage.success('后台执行成功');
+          else ElMessage.error(finished?.message || '后台执行失败/结束');
+          break;
+        }
+      } catch (e) {
+        // keep polling
+      }
+    }
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.error || '后台运行失败');
+  } finally {
+    runningAsync.value = false;
   }
 };
 
@@ -501,9 +592,11 @@ const loadCaseDetail = async () => {
     form.value = {
       name: res.name,
       project: res.project,
+      environment: res.environment ?? null,
       url: res.url,
       steps: res.steps || []
     };
+    await loadEnvironments();
     loadLinkedTasks();
   } catch (error) {
     ElMessage.error('加载测试用例失败');
@@ -593,7 +686,9 @@ const handleRun = async () => {
   testResult.value = null;
 
   try {
-    const res = await service.post(`/qa/ui-cases/${caseId.value}/run/`, {}, {
+    const res = await service.post(`/qa/ui-cases/${caseId.value}/run/`, {
+      environment_id: form.value.environment,
+    }, {
       timeout: 300000
     });
     testResult.value = res;
@@ -627,7 +722,8 @@ const handleRunTemp = async () => {
     const res = await service.post('/qa/ui-cases/run_temp/', {
       project: form.value.project,
       url: form.value.url,
-      steps: form.value.steps
+      steps: form.value.steps,
+      environment_id: form.value.environment,
     }, {
       timeout: 300000
     });
@@ -660,7 +756,8 @@ const goBack = () => {
 };
 
 onMounted(async () => {
-  loadProjects();
+  await loadProjects();
+  await loadEnvironments();
   await loadCaseDetail();
   if (route.query.autorun === '1' && isEdit.value) {
     handleRun();
@@ -1043,5 +1140,10 @@ const onReplaceAllSteps = (evs: any[]) => {
   .result-section {
     width: 100%;
   }
+}
+.form-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 </style>

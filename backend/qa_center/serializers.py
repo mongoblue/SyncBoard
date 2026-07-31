@@ -89,27 +89,58 @@ class UiTestCaseSerializer(serializers.ModelSerializer):
     """UI 测试用例序列化器"""
 
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    environment_name = serializers.CharField(source='environment.name', read_only=True, allow_null=True, default=None)
 
     class Meta:
         model = UiTestCase
         fields = [
             'id', 'project', 'name', 'url', 'steps',
+            'environment', 'environment_name',
             'created_by', 'created_by_name',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['created_by', 'created_at', 'updated_at']
 
+    def validate_steps(self, value):
+        from .ui_execution import validate_ui_steps
+        errors = validate_ui_steps(value)
+        if errors:
+            raise serializers.ValidationError(errors)
+        return value
+
+    def validate_environment(self, value):
+        if value is None:
+            return value
+        project = None
+        if self.instance is not None:
+            project = self.instance.project
+        project_data = self.initial_data.get('project') if hasattr(self, 'initial_data') else None
+        if project_data is not None:
+            from room.models import Project
+            try:
+                project = Project.objects.get(pk=project_data)
+            except Exception:
+                pass
+        if project is not None and value.project_id != project.id:
+            raise serializers.ValidationError('环境必须属于所选项目')
+        return value
+
 
 class UiTestCaseListSerializer(serializers.ModelSerializer):
     """UI 测试用例列表序列化器（简化版）"""
-    
+
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    environment_name = serializers.CharField(source='environment.name', read_only=True, allow_null=True, default=None)
     step_count = serializers.SerializerMethodField()
-    
+
     class Meta:
         model = UiTestCase
-        fields = ['id', 'name', 'url', 'steps', 'step_count', 'created_by_name', 'created_at']
-    
+        fields = [
+            'id', 'name', 'url', 'steps', 'step_count',
+            'environment', 'environment_name',
+            'created_by_name', 'created_at',
+        ]
+
     def get_step_count(self, obj):
         """获取步骤数"""
         if isinstance(obj.steps, list):
@@ -124,6 +155,8 @@ class UiTestCaseRunSerializer(serializers.Serializer):
     screenshot = serializers.CharField(allow_blank=True, allow_null=True, required=False)
     logs = serializers.ListField(child=serializers.CharField(), required=False, default=list)
     error = serializers.CharField(allow_blank=True, allow_null=True, required=False)
+    task_id = serializers.CharField(required=False, allow_blank=True)
+    result_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 # ==================== 测试结果序列化器 ====================

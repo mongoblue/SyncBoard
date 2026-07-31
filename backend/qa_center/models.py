@@ -39,6 +39,15 @@ class UiTestCase(models.Model):
         related_name='ui_test_cases',
         verbose_name='所属项目',
     )
+    environment = models.ForeignKey(
+        'TestEnvironment',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ui_test_cases',
+        verbose_name='绑定环境',
+        help_text='用例级环境覆盖；为空时回退到项目默认环境',
+    )
     related_tasks = models.ManyToManyField(
         Task,
         blank=True,

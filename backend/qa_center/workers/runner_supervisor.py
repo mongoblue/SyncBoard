@@ -1,20 +1,25 @@
-"""
+﻿"""
 Runner Supervisor — 在 Django 进程中启动 runner_worker 子进程并流式读事件。
 
 全局注册表 _RUNNERS（task_id → subprocess.Popen），用于 abort 端点终结子进程。
 _EVENTS 注册表用于前端 WS 连上时回放历史事件（保留 60 秒）。
-
-开发者注意：shlex.join 在 Python 3.8+ 可用；3.11 之后 shlex.quote 行为有变。
-协议定义见 protocols.py。
+_ABORTED 标记用于区分用户中止与真实 WORKER_CRASHED。
 """
+from __future__ import annotations
+
+import json
+import logging
+import os
 import subprocess
 import sys
-import os
-import json
 import threading
-import logging
+import time
 import uuid as _uuid
-from typing import Optional
+from typing import Callable, Optional
+
+from django.conf import settings
+
+logger = logging.getLogger("qa_center.runner")
 
 # task_id → subprocess.Popen 的注册表，用于 abort 端点
 _RUNNERS: dict[str, "subprocess.Popen"] = {}
@@ -24,8 +29,51 @@ _RUNNERS_LOCK = threading.Lock()
 _EVENTS: dict[str, list[dict]] = {}
 _EVENTS_LOCK = threading.Lock()
 
-# 历史事件保留时间（秒）：超过这个时间没被读取就清理
+# task_id → 是否被用户 abort
+_ABORTED: dict[str, bool] = {}
+_ABORTED_LOCK = threading.Lock()
+
+# 历史事件保留时间（秒）
 _EVENTS_TTL = 60.0
+
+# 并发限流（进程内）
+_CONCURRENCY_LOCK = threading.Lock()
+_ACTIVE_RUNNERS = 0
+
+
+def _max_concurrent() -> int:
+    try:
+        value = int(getattr(settings, "UI_TEST_MAX_CONCURRENT_RUNNERS", 3) or 3)
+    except (TypeError, ValueError):
+        value = 3
+    return max(1, value)
+
+
+def _acquire_runner_slot() -> int:
+    """占用一个并发槽位；失败抛 UiConcurrencyLimitError。"""
+    global _ACTIVE_RUNNERS
+    from qa_center.ui_execution import UiConcurrencyLimitError
+
+    with _CONCURRENCY_LOCK:
+        limit = _max_concurrent()
+        if _ACTIVE_RUNNERS >= limit:
+            raise UiConcurrencyLimitError(
+                f"UI 测试并发已达上限 ({limit})，请稍后重试",
+                max_concurrent=limit,
+            )
+        _ACTIVE_RUNNERS += 1
+        return _ACTIVE_RUNNERS
+
+
+def _release_runner_slot() -> None:
+    global _ACTIVE_RUNNERS
+    with _CONCURRENCY_LOCK:
+        _ACTIVE_RUNNERS = max(0, _ACTIVE_RUNNERS - 1)
+
+
+def active_runner_count() -> int:
+    with _CONCURRENCY_LOCK:
+        return _ACTIVE_RUNNERS
 
 
 def register_runner(task_id: str, proc: "subprocess.Popen") -> None:
@@ -38,12 +86,28 @@ def unregister_runner(task_id: str) -> None:
         _RUNNERS.pop(task_id, None)
 
 
+def mark_aborted(task_id: str) -> None:
+    with _ABORTED_LOCK:
+        _ABORTED[task_id] = True
+
+
+def is_aborted(task_id: str) -> bool:
+    with _ABORTED_LOCK:
+        return bool(_ABORTED.get(task_id))
+
+
+def clear_aborted(task_id: str) -> None:
+    with _ABORTED_LOCK:
+        _ABORTED.pop(task_id, None)
+
+
 def abort_runner(task_id: str) -> bool:
     """终止指定 task_id 的 worker 子进程。返回是否成功找到并发送了 terminate。"""
     with _RUNNERS_LOCK:
         proc: Optional[subprocess.Popen] = _RUNNERS.get(task_id)
     if proc is None:
         return False
+    mark_aborted(task_id)
     try:
         if proc.poll() is None:
             proc.terminate()
@@ -63,9 +127,11 @@ def is_runner_alive(task_id: str) -> bool:
 
 def record_event(task_id: str, event: dict) -> None:
     """记录一条事件到缓存，供前端 WS 连上后回放。"""
+    stamped = dict(event)
+    stamped.setdefault("_ts", time.time())
     with _EVENTS_LOCK:
         bucket = _EVENTS.setdefault(task_id, [])
-        bucket.append(event)
+        bucket.append(stamped)
 
 
 def get_events(task_id: str) -> list[dict]:
@@ -75,25 +141,23 @@ def get_events(task_id: str) -> list[dict]:
 
 
 def peek_events(task_id: str) -> list[dict]:
-    """只读不消费。用于调试/扩展。"""
+    """只读不消费。用于调试/扩展与晚连接 WS 回放。"""
     with _EVENTS_LOCK:
         return list(_EVENTS.get(task_id, []))
 
 
 def cleanup_expired_events(now: float | None = None) -> int:
     """清理超过 TTL 的历史事件缓存。返回清理条数。"""
-    import time as _time
-    now = now if now is not None else _time.time()
+    now = now if now is not None else time.time()
     with _EVENTS_LOCK:
-        expired = [tid for tid, evs in _EVENTS.items() if not evs or (now - evs[-1].get("_ts", now)) > _EVENTS_TTL]
+        expired = [
+            tid
+            for tid, evs in _EVENTS.items()
+            if not evs or (now - evs[-1].get("_ts", now)) > _EVENTS_TTL
+        ]
         for tid in expired:
             _EVENTS.pop(tid, None)
         return len(expired)
-from typing import Callable
-
-from django.conf import settings
-
-logger = logging.getLogger("qa_center.runner")
 
 
 def _worker_entry() -> list:
@@ -101,10 +165,30 @@ def _worker_entry() -> list:
     return [sys.executable, "-m", "qa_center.workers.runner_worker"]
 
 
-def execute_ui_case(case_data: dict,
-                    on_event: Callable[[dict], None],
-                    timeout_seconds: int = 300,
-                    task_id: str | None = None) -> dict:
+def _publish_run_event(task_id: str, event: dict) -> None:
+    """双写：事件缓存 + Channels 组推送。"""
+    record_event(task_id, event)
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+
+        layer = get_channel_layer()
+        if layer is None:
+            return
+        async_to_sync(layer.group_send)(
+            f"ui_run_{task_id}",
+            {"type": "run_event", "data": {"type": "run_event", "data": event}},
+        )
+    except Exception:
+        logger.exception("推送 UI run 事件失败: %s", task_id)
+
+
+def execute_ui_case(
+    case_data: dict,
+    on_event: Callable[[dict], None],
+    timeout_seconds: int = 300,
+    task_id: str | None = None,
+) -> dict:
     """
     阻塞执行单个 UI 用例。
     case_data: {"case_id": int|None, "url": "...", "steps": [...]}
@@ -112,26 +196,31 @@ def execute_ui_case(case_data: dict,
     task_id: 可选；如传入则使用调用方提供的 id（用于 abort 端点路由），否则内部生成。
     返回最终 finished 事件 dict。
     """
-    backend_dir = os.path.abspath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", ".."
-    ))
-    proc = subprocess.Popen(
-        _worker_entry(),
-        cwd=backend_dir,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-    )
-
     if task_id is None:
         task_id = _uuid.uuid4().hex
 
+    _acquire_runner_slot()
+    clear_aborted(task_id)
+
+    backend_dir = str(settings.BASE_DIR)
+    try:
+        proc = subprocess.Popen(
+            _worker_entry(),
+            cwd=backend_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+    except Exception:
+        _release_runner_slot()
+        clear_aborted(task_id)
+        raise
+
     register_runner(task_id, proc)
 
-    # DEBUG 模式：把所有事件额外落盘到 .playwright-temp/io_<task_id>.log
     DEBUG = os.environ.get("UI_TEST_DEBUG", "").lower() in ("1", "true", "yes")
     io_log = None
     if DEBUG:
@@ -141,16 +230,37 @@ def execute_ui_case(case_data: dict,
         io_log = open(log_path, "w", encoding="utf-8")
         logger.info("UI_TEST_DEBUG 开启，事件流写入 %s", log_path)
 
-    final_result = {"type": "finished", "success": False,
-                    "summary": {"passed": 0, "failed": 0, "total": 0}}
+    final_result = {
+        "type": "finished",
+        "success": False,
+        "summary": {"passed": 0, "failed": 0, "total": 0},
+        "task_id": task_id,
+        "aborted": False,
+    }
+
+    def _emit(event: dict) -> None:
+        payload = dict(event)
+        payload.setdefault("task_id", task_id)
+        try:
+            on_event(payload)
+        except Exception:
+            logger.exception("on_event 回调异常")
+        try:
+            _publish_run_event(task_id, payload)
+        except Exception:
+            logger.exception("record/publish 事件失败")
+        if io_log is not None:
+            try:
+                io_log.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+                io_log.flush()
+            except Exception:
+                logger.exception("写入 io_log 失败")
 
     try:
-        try:
-            on_event({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
-        except Exception:
-            logger.exception("emit supervisor_meta 失败")
+        _emit({"type": "supervisor_meta", "task_id": task_id, "worker_pid": proc.pid})
 
         try:
+            assert proc.stdin is not None
             proc.stdin.write(json.dumps(case_data, ensure_ascii=False, default=str) + "\n")
             proc.stdin.flush()
             proc.stdin.close()
@@ -160,6 +270,8 @@ def execute_ui_case(case_data: dict,
         stderr_buf: list = []
 
         def _drain_stderr():
+            if proc.stderr is None:
+                return
             for line in proc.stderr:
                 stderr_buf.append(line)
                 logger.info("[worker:%s] %s", proc.pid, line.rstrip())
@@ -183,27 +295,20 @@ def execute_ui_case(case_data: dict,
 
         try:
             try:
-                for line in proc.stdout:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        logger.warning("非 JSON 输出: %s", line)
-                        continue
-                    try:
-                        on_event(event)
-                    except Exception:
-                        logger.exception("on_event 回调异常")
-                    if io_log is not None:
+                if proc.stdout is not None:
+                    for line in proc.stdout:
+                        line = line.strip()
+                        if not line:
+                            continue
                         try:
-                            io_log.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
-                            io_log.flush()
-                        except Exception:
-                            logger.exception("写入 io_log 失败")
-                    if event.get("type") == "finished":
-                        final_result = event
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            logger.warning("非 JSON 输出: %s", line)
+                            continue
+                        _emit(event)
+                        if event.get("type") == "finished":
+                            final_result = dict(event)
+                            final_result["task_id"] = task_id
             except Exception:
                 logger.exception("读 worker stdout 异常")
         finally:
@@ -235,24 +340,58 @@ def execute_ui_case(case_data: dict,
 
         t.join(timeout=5)
 
+        aborted = is_aborted(task_id)
         if timed_out["flag"]:
-            on_event({
+            _emit({
                 "type": "error",
                 "code": "STEP_TIMEOUT",
                 "message": f"运行超时 ({timeout_seconds}s)，已强制终止 worker",
             })
-
-        if (proc.returncode not in (0, None)
-                and final_result.get("type") != "finished"
-                and not timed_out["flag"]):
+            final_result = {
+                "type": "finished",
+                "success": False,
+                "summary": final_result.get("summary") or {"passed": 0, "failed": 0, "total": 0},
+                "task_id": task_id,
+                "aborted": False,
+                "timed_out": True,
+            }
+        elif aborted:
+            _emit({
+                "type": "error",
+                "code": "ABORTED",
+                "message": "用户中止执行",
+            })
+            final_result = {
+                "type": "finished",
+                "success": False,
+                "summary": final_result.get("summary") or {"passed": 0, "failed": 0, "total": 0},
+                "task_id": task_id,
+                "aborted": True,
+            }
+            _emit(final_result)
+        elif (
+            proc.returncode not in (0, None)
+            and final_result.get("type") != "finished"
+        ):
             crash_msg = "".join(stderr_buf[-20:])
-            on_event({
+            _emit({
                 "type": "error",
                 "code": "WORKER_CRASHED",
                 "message": f"worker 退出码 {proc.returncode}",
                 "traceback": crash_msg,
             })
+            final_result = {
+                "type": "finished",
+                "success": False,
+                "summary": {"passed": 0, "failed": 1, "total": 1},
+                "task_id": task_id,
+                "aborted": False,
+            }
+            _emit(final_result)
     finally:
         unregister_runner(task_id)
+        clear_aborted(task_id)
+        _release_runner_slot()
 
+    final_result.setdefault("task_id", task_id)
     return final_result
