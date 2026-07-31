@@ -67,6 +67,14 @@ class DataFactoryView(APIView):
 
 
 # === 2. RunTestView (修复了 Locust 逻辑) ===
+_TYPE_TO_RESULT_TYPE = {
+    'api': 'api',
+    'e2e': 'ui',
+    'regression': 'regression',
+    'performance': 'performance',
+}
+
+
 class RunTestView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -78,6 +86,20 @@ class RunTestView(APIView):
         project = ensure_project_id_access(request.user, project_id)
         scoped_project_id = str(project.id)
         python_exec = sys.executable
+
+        # 落库：创建 TestResult（冒烟执行记录，结果中心可见）
+        from django.utils import timezone
+        from .models import TestResult
+        tr = TestResult.objects.create(
+            test_type=_TYPE_TO_RESULT_TYPE.get(test_type, 'api'),
+            name=f"冒烟测试 - {test_type} - {timezone.now().strftime('%m-%d %H:%M:%S')}",
+            project=project,
+            status='running',
+            executed_by=request.user,
+            started_at=timezone.now(),
+            source='manual',
+            test_params={'run_test_type': test_type},
+        )
 
         # ✨ 最终逻辑：统一使用 python -m 启动，确保环境一致
         if test_type == 'performance':
@@ -110,13 +132,19 @@ class RunTestView(APIView):
             cmd = base_cmd + args
 
         # 启动流式线程
-        thread = threading.Thread(target=self.stream_command_output, args=(cmd, test_type, scoped_project_id))
+        thread = threading.Thread(
+            target=self.stream_command_output,
+            args=(cmd, test_type, scoped_project_id, tr.id),
+        )
         thread.daemon = True
         thread.start()
 
-        return Response({"msg": f"测试已启动: {test_type}"}, status=200)
+        return Response({
+            "msg": f"测试已启动: {test_type}",
+            "result_id": tr.id,
+        }, status=200)
 
-    def stream_command_output(self, cmd, test_type='default', project_id=None):
+    def stream_command_output(self, cmd, test_type='default', project_id=None, test_result_id=None):
         if not project_id:
             raise ValueError('project_id is required')
 
@@ -186,6 +214,9 @@ class RunTestView(APIView):
                 "status": status_msg
             })
 
+            # 落库：写入冒烟执行结果（结果中心可见）
+            self._persist_smoke_result(test_result_id, return_code, cmd)
+
         except Exception as e:
             logger.error(f"Stream Error: {e}")
             error_msg = str(e)
@@ -196,6 +227,44 @@ class RunTestView(APIView):
                 "code": -1,
                 "status": f"💥 异常中断: {error_msg}"
             })
+            self._persist_smoke_result(test_result_id, -1, cmd, error=str(e)[:500])
+
+    def _persist_smoke_result(self, test_result_id, return_code, cmd, error=''):
+        """冒烟执行结束后更新 TestResult（通过/失败 + 日志摘要）。"""
+        if not test_result_id:
+            return
+        try:
+            from django.utils import timezone
+            from .models import TestResult
+            tr = TestResult.objects.get(id=test_result_id)
+            tr.status = 'passed' if return_code == 0 else 'failed'
+            tr.completed_at = timezone.now()
+            if tr.started_at:
+                tr.duration_ms = int(
+                    (tr.completed_at - tr.started_at).total_seconds() * 1000
+                )
+            tr.error_message = error or ('' if return_code == 0 else f'退出码 {return_code}')
+            tr.test_log = __import__('json').dumps({
+                'summary': {
+                    'total': 1,
+                    'passed': 1 if return_code == 0 else 0,
+                    'failed': 0 if return_code == 0 else 1,
+                    'pass_rate': 100 if return_code == 0 else 0,
+                },
+                'results': [{
+                    'case_id': None,
+                    'case_name': '冒烟执行',
+                    'type': tr.test_type,
+                    'passed': return_code == 0,
+                    'error_message': tr.error_message,
+                    'command': ' '.join(cmd[:8]) + (' ...' if len(cmd) > 8 else ''),
+                }],
+            }, ensure_ascii=False)
+            tr.save(update_fields=[
+                'status', 'completed_at', 'duration_ms', 'error_message', 'test_log',
+            ])
+        except Exception:
+            logger.exception('冒烟执行结果落库失败: %s', test_result_id)
 
     def send_ws(self, channel_layer, group, msg_type, data):
         async_to_sync(channel_layer.group_send)(

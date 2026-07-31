@@ -454,9 +454,12 @@ class TestRunTestViewProjectScope:
             }, content_type='application/json')
 
         assert response.status_code == 200
+        assert response.data['result_id'] is not None
         kwargs = thread_cls.call_args.kwargs
         assert kwargs['target'].__name__ == 'stream_command_output'
-        assert kwargs['args'][1:] == ('api', str(test_project.id))
+        # args: (cmd, test_type, project_id, test_result_id)
+        assert kwargs['args'][1:3] == ('api', str(test_project.id))
+        assert isinstance(kwargs['args'][3], int)
         thread_cls.return_value.start.assert_called_once()
 
     def test_run_test_accepts_project_member(self, client, test_project):
