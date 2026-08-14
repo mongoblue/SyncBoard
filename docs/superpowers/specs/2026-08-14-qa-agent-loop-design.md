@@ -109,9 +109,9 @@ SyncBoard（FlowSpace）已有：看板协作（Django + Vue 3 + WebSocket 实�
 
 **失败聚类**：按 root_cause + 归一化错误信息聚合，同根因只建一张单。
 
-**自动建单规则**（防噪音）：
+**自动建单规则**（防噪音，通过 `bug_tracker.Bug` 模型建单，非看板任务卡）：
 
-- `bug_in_app` + `deterministic` → 在看板自动建 bug 任务（标题 `[AI-QA] <源任务> 失败用例`，负责人取源任务负责人，关联 AgentRun，内容附失败详情与复现路径；放入项目第一列，同现有 `create_task` 工具的列 fallback 逻辑）
+- `bug_in_app` + `deterministic` → 创建 `Bug`（标题 `[AI-QA] <源任务> 失败用例`，`source_test_type` 取 `api_auto`/`ui_auto`，`source_result_id` 指向失败 TestResult，`linked_task` 关联源任务，reporter 取 run 创建者，assignee 取源任务负责人；优先级/严重度用默认值 `p2`/`major`）
 - `flaky` / `test_case_issue` → 不建单，进入"待修复用例"清单，写进报告
 - `unknown` → 不建单，报告列出
 
