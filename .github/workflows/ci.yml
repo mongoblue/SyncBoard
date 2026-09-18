@@ -126,7 +126,16 @@ jobs:
 
       - name: Read coverage floor
         id: cov
-        run: echo "min=$(tr -d '[:space:]' < .github/coverage-baseline.txt)" >> "$GITHUB_OUTPUT"
+        run: |
+          min="$(grep -m1 -Eo '^[0-9]+' .github/coverage-baseline.txt || true)"
+          if [ -z "$min" ]; then
+            # 用 ::error:: 而非 print：红跑时它会出现在 Annotations 面板，
+            # 那里未登录也能读，而 step 日志和 Job Summary 都需要授权。
+            echo "::error::.github/coverage-baseline.txt 需要一行以整数开头（如 20），当前解析不到"
+            exit 1
+          fi
+          echo "min=$min" >> "$GITHUB_OUTPUT"
+          echo "coverage floor = $min%"
 
       - name: Verify no model/migration drift
         working-directory: backend
@@ -156,11 +165,18 @@ jobs:
               None,
           )
           if path is None:
-              print("coverage.xml 未生成（测试在产出覆盖率前就失败了）")
+              msg = "未生成 coverage.xml：测试套件在产出覆盖率之前就失败了，见 Run backend test suite 步骤。"
+              print(msg)
+              print("::notice::后端覆盖率无数据（测试未跑到产出 coverage.xml）")
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write(f"## 后端行覆盖率：无数据\n\n{msg}\n")
               raise SystemExit(0)
           rate = float(ET.parse(path).getroot().get("line-rate", "0"))
           pct = round(rate * 100, 2)
           floor = os.environ.get("COV_FLOOR", "?")
+          # 注解是未登录也能读的通道（check-runs/{id}/annotations 匿名 200），
+          # 而 step 日志与 Job Summary 都要授权 —— 数字写这里才不必人工代看。
+          print(f"::notice::后端行覆盖率 {pct}%（门禁 {floor}%）")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
               fh.write(
                   f"## 后端行覆盖率：**{pct}%**（门禁 {floor}%）\n\n"
