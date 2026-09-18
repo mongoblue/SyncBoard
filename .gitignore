@@ -59,3 +59,21 @@ api_test_examples*.json
 # 本地测试数据库与代码生成脚本（不提交）
 backend/test_ui_prod.sqlite3
 _build_views_part1.ps1
+
+# 第三方 Agent 技能包（本地工具资产，非项目源码）
+.agents/skills/
+.claude/skills/
+
+# 一次性补丁脚本（按绝对路径行级改源码，用完即废）
+__patch_*.py
+
+# Locust 执行产物（每次运行按 execution_id 重新生成）
+backend/perf_runs/
+
+# 覆盖率数据文件（.coveragerc 是配置，仍需版本控制）
+backend/.coverage
+
+# 计划文档的生成脚本与草稿
+docs/superpowers/plans/_gen_plan.py
+docs/superpowers/plans/_write_plan.py
+docs/superpowers/plans/tmp_plan.md
