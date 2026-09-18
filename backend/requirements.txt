@@ -50,5 +50,3 @@ locust
 # 代码质量
 coverage
 flake8
-
-django-fernet-fields>=0.7
