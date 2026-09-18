@@ -83,8 +83,6 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
-          --innodb-flush-log-at-trx-commit=0
-          --skip-log-bin
       redis:
         image: redis:7-alpine
         ports:
@@ -126,6 +124,34 @@ jobs:
         working-directory: backend
         run: python -m pip install --upgrade pip && pip install -r requirements.txt
 
+      # services.<id>.options 只喂给 `docker create`（镜像名之前），放 mysqld 参数会被
+      # docker 当成未知 flag 直接 exit 125，容器起不来。这两个变量都是动态 global，
+      # 所以放在装完依赖后连上去 SET GLOBAL；binlog 无法运行时关掉，靠 sync_binlog=0 免掉 fsync。
+      - name: Disable per-commit fsync in CI MySQL
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          import MySQLdb
+
+          conn = MySQLdb.connect(
+              host=os.environ["DB_HOST"],
+              user=os.environ["DB_USER"],
+              password=os.environ["DB_PASSWORD"],
+              port=3306,
+          )
+          try:
+              cur = conn.cursor()
+              cur.execute("SET GLOBAL innodb_flush_log_at_trx_commit = 0")
+              cur.execute("SET GLOBAL sync_binlog = 0")
+              cur.execute("SELECT @@innodb_flush_log_at_trx_commit, @@sync_binlog, @@log_bin")
+              row = cur.fetchone()
+              print(f"::notice::CI MySQL trx_commit={row[0]} sync_binlog={row[1]} log_bin={row[2]}")
+          except Exception as exc:
+              # 调优失败只是慢，不该红掉 job，但必须留注解，否则下一轮又要靠猜。
+              print(f"::warning::未能调整 CI MySQL 持久化设置：{type(exc).__name__}: {exc}")
+          PY
+
       - name: Read coverage floor
         id: cov
         run: |
@@ -163,8 +189,8 @@ jobs:
 
       - name: Write coverage to job summary
         if: always()
-        working-directory: backend
         run: |
+          cd backend 2>/dev/null || { echo "::error::backend/ 不存在：服务容器或 checkout 失败"; exit 0; }
           python - <<'PY'
           import os, xml.etree.ElementTree as ET
           path = next(
@@ -201,8 +227,8 @@ jobs:
       # 单个 check run 的 workflow-command 注解有上限，这里总共不超过 9 条。
       - name: Publish failure digest
         if: always()
-        working-directory: backend
         run: |
+          cd backend 2>/dev/null || exit 0
           python - <<'PY'
           import os, xml.etree.ElementTree as ET
           path = os.path.join("reports", "pytest.xml")
