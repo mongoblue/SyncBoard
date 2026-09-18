@@ -43,6 +43,7 @@ pytest
 pytest-django
 pytest-cov
 pytest-timeout
+pytest-xdist
 playwright
 
 # 性能测试

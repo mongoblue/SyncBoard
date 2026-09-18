@@ -67,7 +67,7 @@ jobs:
   backend-tests:
     name: Backend tests (pytest + coverage gate)
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
     needs: lint
 
     services:
@@ -83,6 +83,8 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+          --innodb-flush-log-at-trx-commit=0
+          --skip-log-bin
       redis:
         image: redis:7-alpine
         ports:
@@ -143,6 +145,9 @@ jobs:
 
       - name: Run backend test suite
         working-directory: backend
+        # 串行跑了 45min 和 90min 两轮，都在写出 junit 之前被取消，所以必须并行才可能拿到数字。
+        # timeout-method 用 signal 而不是 thread：thread 法超时是整进程 os._exit，
+        # 会连 junit/coverage.xml 一起丢掉，把"有诊断的红跑"变成"瞎跑"。
         run: |
           mkdir -p reports
           python -m pytest \
@@ -151,7 +156,8 @@ jobs:
             --cov-report=xml:reports/coverage.xml \
             --cov-fail-under=${{ steps.cov.outputs.min }} \
             --junitxml=reports/pytest.xml \
-            --timeout=60 --timeout-method=thread \
+            -n 4 --dist loadfile \
+            --timeout=60 --timeout-method=signal \
             --durations=10 --durations-min=5 \
             -q
 
