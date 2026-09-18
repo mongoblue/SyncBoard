@@ -440,7 +440,7 @@ class ApiAutoTestExecutor:
             except SSRFError as e:
                 return ApiAutoTestCaseResult(
                     test_case=case,
-                    test_result=test_result,
+                    test_result=self.test_result,
                     status_code=None,
                     response_body=str(e),
                     response_headers={},

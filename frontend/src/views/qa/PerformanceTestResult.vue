@@ -1192,7 +1192,7 @@ const submitForm = async (runAfter: boolean = false) => {
       auth_config.password = form.auth_password;
     }
 
-    const data = {
+    const data: Record<string, unknown> = {
       ...form,
       headers,
       query_params,

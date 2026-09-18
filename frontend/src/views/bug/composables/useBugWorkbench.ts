@@ -259,9 +259,9 @@ export function useBugWorkbench(options: { defaultView: string; projectId: strin
     try {
       const updated = await assignBug(bugId, userId, comment)
       // Find and update the row
-      const idx = bugs.value.findIndex((b) => b.id === bugId)
-      if (idx !== -1) {
-        applyBugUpdate(bugs.value[idx], updated)
+      const row = bugs.value.find((b) => b.id === bugId)
+      if (row) {
+        applyBugUpdate(row, updated)
       }
       ElMessage.success('已指派')
       await loadStats()
@@ -274,9 +274,9 @@ export function useBugWorkbench(options: { defaultView: string; projectId: strin
   const handleTransition = async (bugId: number, toStatus: string, comment: string) => {
     try {
       const updated = await transitionBug(bugId, toStatus as BugStatus, comment)
-      const idx = bugs.value.findIndex((b) => b.id === bugId)
-      if (idx !== -1) {
-        applyBugUpdate(bugs.value[idx], updated)
+      const row = bugs.value.find((b) => b.id === bugId)
+      if (row) {
+        applyBugUpdate(row, updated)
       }
       ElMessage.success('状态已更新')
       await loadStats()

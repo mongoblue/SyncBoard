@@ -23,7 +23,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from .semaphore import get_available_port
 from .execution.runner import BaseRunner
@@ -37,6 +37,9 @@ from .execution.constants import (
     LOCUST_RUNNING_WITH_REQUESTS,
     METRICS_FILE_CREATION_TIMEOUT,
 )
+
+if TYPE_CHECKING:
+    from .execution.process_manager import HardTimeoutWatchdog
 
 logger = logging.getLogger(__name__)
 
@@ -816,7 +819,6 @@ class PerformanceTestUser(HttpUser):
 {steps_code}
     _write_metrics_atomic()
 '''
-        return locust_code
 
     def _render_auth_on_start(self, auth_code: str) -> str:
         """生成 on_start 中的认证初始化代码。"""

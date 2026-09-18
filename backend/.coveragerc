@@ -10,8 +10,12 @@ omit =
     manage.py
     */asgi.py
     */wsgi.py
-    */settings/*
+    */settings.py
     conftest.py
+    */staticfiles/*
+    */perf_runs/*
+    */.playwright-temp/*
+    */whoosh_index/*
 
 [report]
 exclude_lines =

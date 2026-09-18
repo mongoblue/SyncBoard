@@ -1,0 +1,221 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "22"
+
+jobs:
+  # ============================================================
+  # Lint — flake8 硬门禁只卡"会导致运行期崩溃"的错误码：
+  #   E9 语法错误 / F63 无效比较 / F7 结构错误 / F82 未定义名称
+  # 风格与复杂度只报告不阻断（存量代码 30k+ 行，一次性整改不现实）。
+  # perf_runs/ 与 staticfiles/ 是生成产物或第三方静态资源，排除。
+  # ============================================================
+  lint:
+    name: Lint (backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install flake8
+        run: python -m pip install --upgrade pip "flake8>=7"
+
+      - name: Blocking — syntax errors and undefined names
+        working-directory: backend
+        run: >
+          flake8 . --count --show-source --statistics
+          --select=E9,F63,F7,F82
+          --exclude=migrations,__pycache__,staticfiles,templates,whoosh_index,perf_runs,.playwright-temp
+
+      - name: Advisory — style and complexity report
+        working-directory: backend
+        run: >
+          flake8 . --count --exit-zero --max-line-length=127 --max-complexity=10
+          --exclude=migrations,__pycache__,staticfiles,templates,whoosh_index,perf_runs,.playwright-temp
+
+  # ============================================================
+  # 后端测试 — 跑整个 backend/ 目录（915 个用例，含 qa_center/tests
+  # 那 230 个），不再只跑 tests/。带覆盖率门禁。
+  #
+  # 环境变量刻意与 backend/.env 的开发配置保持一致：限流率不放宽，
+  # 因为有用例断言 429。USE_CELERY_TASKS=False 是与代码实际执行路径
+  # 一致（生产线程路径），True 的 Celery 分支目前能力不对等。
+  #
+  # pytest.ini 用 --nomigrations 建表，所以测试永远不会执行迁移文件。
+  # makemigrations --check 只比对模型与迁移状态（不连库、不改库），
+  # 用来挡住"改了 model 忘了生成迁移"——qa_center 曾这样漏掉过 0030。
+  # 它挡住漏写的迁移，挡不住写错、跑不起来的迁移；后者需要额外在
+  # CI 里对独立库执行一次 `manage.py migrate`（qa_center/migrations/0022
+  # 含 MySQL 专用 SQL，只能跑在 MySQL 上）。
+  # ============================================================
+  backend-tests:
+    name: Backend tests (pytest + coverage gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: lint
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: syncboard
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pci-root-password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DJANGO_SETTINGS_MODULE: backend.settings
+      DEBUG: "True"
+      DJANGO_SECRET_KEY: ci-only-not-a-secret
+      ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      DB_HOST: 127.0.0.1
+      DB_NAME: syncboard
+      DB_USER: root
+      DB_PASSWORD: ci-root-password
+      REDIS_HOST: 127.0.0.1
+      USE_CELERY_TASKS: "False"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install system build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config default-libmysqlclient-dev
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Read coverage floor
+        id: cov
+        run: echo "min=$(tr -d '[:space:]' < .github/coverage-baseline.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Verify no model/migration drift
+        working-directory: backend
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: Run backend test suite
+        working-directory: backend
+        run: |
+          mkdir -p reports
+          python -m pytest \
+            --cov=. --cov-config=.coveragerc \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-fail-under=${{ steps.cov.outputs.min }} \
+            --junitxml=reports/pytest.xml \
+            -q
+
+      - name: Write coverage to job summary
+        if: always()
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          path = next(
+              (p for p in (os.path.join("reports", "coverage.xml"), "coverage.xml")
+               if os.path.exists(p)),
+              None,
+          )
+          if path is None:
+              print("coverage.xml 未生成（测试在产出覆盖率前就失败了）")
+              raise SystemExit(0)
+          rate = float(ET.parse(path).getroot().get("line-rate", "0"))
+          pct = round(rate * 100, 2)
+          floor = os.environ.get("COV_FLOOR", "?")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(
+                  f"## 后端行覆盖率：**{pct}%**（门禁 {floor}%）\n\n"
+                  f"若本次通过，把 `.github/coverage-baseline.txt` 更新为 `{int(pct) - 2}`，"
+                  "让门禁贴着实测值，防止覆盖率下滑。\n"
+              )
+          PY
+        env:
+          COV_FLOOR: ${{ steps.cov.outputs.min }}
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/reports/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # ============================================================
+  # 前端 — 类型检查 + 单测 + 构建。
+  # 不跑 eslint：仓库里没有 eslint 配置文件，package.json 的 lint 脚本
+  # 目前无法执行（且带 --fix，不适合做 CI 检查）。
+  # ============================================================
+  frontend-tests:
+    name: Frontend (type-check + vitest + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check (vue-tsc)
+        working-directory: frontend
+        run: npm run type-check
+
+      - name: Unit tests (vitest)
+        working-directory: frontend
+        run: npx vitest run --reporter=basic
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build-only
+
+# 说明：这里刻意不包含 e2e 与压测任务。
+# 根目录 e2e/ 已长期无人维护（硬编码账号凭据、复用第一个 project 作为共享状态、
+# 靠绕过 el-card 交互来"修"用例），把它接进 CI 只会得到长期红灯。
+# 要恢复 e2e，先要让它能独立起服务、自建数据、跑完能清理。
