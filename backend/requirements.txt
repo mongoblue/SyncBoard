@@ -42,6 +42,7 @@ faker
 pytest
 pytest-django
 pytest-cov
+pytest-timeout
 playwright
 
 # 性能测试

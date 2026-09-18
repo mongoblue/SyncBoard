@@ -67,7 +67,7 @@ jobs:
   backend-tests:
     name: Backend tests (pytest + coverage gate)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     needs: lint
 
     services:
@@ -151,6 +151,8 @@ jobs:
             --cov-report=xml:reports/coverage.xml \
             --cov-fail-under=${{ steps.cov.outputs.min }} \
             --junitxml=reports/pytest.xml \
+            --timeout=60 --timeout-method=thread \
+            --durations=10 --durations-min=5 \
             -q
 
       - name: Write coverage to job summary
@@ -186,6 +188,48 @@ jobs:
           PY
         env:
           COV_FLOOR: ${{ steps.cov.outputs.min }}
+
+      # 红跑时把失败用例直接发成注解：pytest 失败在 GitHub 侧只留一句
+      # "Process completed with exit code 1"，正文在日志里、需要授权才能读。
+      # always() 而非 failure()：超时被 cancelled 时也要留下诊断。
+      # 单个 check run 的 workflow-command 注解有上限，这里总共不超过 9 条。
+      - name: Publish failure digest
+        if: always()
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os, xml.etree.ElementTree as ET
+          path = os.path.join("reports", "pytest.xml")
+          if not os.path.exists(path):
+              print("::error::pytest 没有产出 junit XML：在收集/建库阶段就挂了")
+              raise SystemExit(0)
+          root = ET.parse(path).getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          if suite is None:
+              suite = root
+          attrs = " ".join(f"{k}={suite.get(k, '?')}" for k in
+                           ("tests", "failures", "errors", "skipped"))
+          print(f"::notice::pytest {attrs}")
+          cases = list(root.iter("testcase"))
+          def dur(tc):
+              try:
+                  return float(tc.get("time") or 0)
+              except ValueError:
+                  return 0.0
+          bad = [tc for tc in cases
+                 if tc.find("failure") is not None or tc.find("error") is not None]
+          for tc in bad[:5]:
+              node = tc.find("failure")
+              if node is None:
+                  node = tc.find("error")
+              msg = " ".join((node.get("message") or node.text or "").split())
+              print(f'::error::{tc.get("classname") or "?"}::{tc.get("name")} :: {msg[:200]}')
+          if len(bad) > 5:
+              print(f"::notice::另有 {len(bad) - 5} 个失败/错误用例未列出")
+          slow = sorted(cases, key=dur, reverse=True)[:5]
+          top = ", ".join(f'{tc.get("name")}={dur(tc):.0f}s' for tc in slow if dur(tc) >= 1)
+          print(f"::notice::最慢用例 {top or '全部 <1s'} / 用例累计 {sum(dur(tc) for tc in cases):.0f}s")
+          PY
 
       - name: Upload test artifacts
         if: always()
